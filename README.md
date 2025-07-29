@@ -13,6 +13,7 @@
 
 # Usage
 ```shell
+# model_name must be in vla and task_name must be in configuration.constants.TASK_CONFIGS
 python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
 ```
 
