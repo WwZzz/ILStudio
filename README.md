@@ -11,6 +11,11 @@
 - add deploy module 
 - ...
 
+# Usage
+```shell
+python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
+```
+
 # Model
 important APIs from each `vla.algo_name.__init__`
 - `def load_model(args: transformers.HfArgumentParser) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
