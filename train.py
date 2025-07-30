@@ -2,6 +2,7 @@ import pickle
 import os
 import time
 import transformers
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
@@ -10,7 +11,7 @@ import IPython
 import torch
 import vla.utils as ml_utils
 from configuration.utils import *
-from data_utils.utils import load_data, set_seed 
+from data_utils.utils import load_data, set_seed
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
@@ -18,12 +19,13 @@ from configuration.constants import TASK_CONFIGS
 e = IPython.embed
 local_rank = None
 
+
 @dataclass
 class HyperArguments(transformers.TrainingArguments):
     # ############## model  ################
     model_name: str = 'qwen2vl_dp'
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    is_pretrained: bool=field(default=False)
+    is_pretrained: bool = field(default=False)
     # ############# policy #################
     state_dim: int = 7
     action_dim: int = 7
@@ -35,15 +37,15 @@ class HyperArguments(transformers.TrainingArguments):
     use_prev_subtask: bool = False
     is_multimodal: bool = False
     image_aspect_ratio: str = 'square'
-    task_name: str = field(default="stack_cube_2024_6_2") # task name corresponding to configuration/constants.py
+    task_name: str = field(default="stack_cube_2024_6_2")  # task name corresponding to configuration/constants.py
     skip_mirrored_data: bool = field(default=False)
     chunk_size: int = field(default=16)
     delta_control: bool = field(default=False)
     image_size_stable: str = "480"  # image size of non-wrist camera
-    image_size_wrist: str = "56" # image size of wrist camera
-    history_images_length: int = 1 # length of history images
+    image_size_wrist: str = "56"  # image size of wrist camera
+    history_images_length: int = 1  # length of history images
     #  ########### training ################
-    using_ema: bool = field(default=False) # whether to use ema update whole module, default to false
+    using_ema: bool = field(default=False)  # whether to use ema update whole module, default to false
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     adam_beta1: float = field(default=0.9)
@@ -69,11 +71,12 @@ class HyperArguments(transformers.TrainingArguments):
     evaluation_strategy: str = field(default="no")
     eval_steps: int = field(default=200)
     per_device_eval_batch_size: int = field(default=32)
-    load_pretrain: bool = False # loading pretrained VLA (For stage 3 training)
+    load_pretrain: bool = False  # loading pretrained VLA (For stage 3 training)
     dataloader_pin_memory: bool = False
     # lora, used when lora_enable is True
-    lora_enable: bool = False # using lora or not
-    lora_module: str = "vit" # which part to lora finetune, used when lora_enable is True
+    use_quantization: bool = False
+    lora_enable: bool = False  # using lora or not
+    lora_module: str = "vit"  # which part to lora finetune, used when lora_enable is True
     lora_task_type: str = 'CAUSAL_LM'
     lora_r: int = 64
     lora_alpha: int = 256
@@ -101,12 +104,15 @@ class HyperArguments(transformers.TrainingArguments):
         default=16,
         metadata={"help": "How many bits to use."}
     )
+
+
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 
 def rank0_print(*args):
     if local_rank == 0:
         print(*args)
+
 
 def parse_param():
     """
@@ -129,6 +135,7 @@ def parse_param():
     local_rank = args.local_rank
     return args
 
+
 def main(args):
     """
     Main training function for the VLA (Vision-Language-Action) model.
@@ -150,28 +157,33 @@ def main(args):
     task_config = TASK_CONFIGS[args.task_name]
     args.camera_names = task_config['camera_names']
     # 加载模型
-    try:
-        model_module = importlib.import_module(f"vla.{args.model_name}") 
-    except Exception as e:
-        print(f"{RED}Failed to load model {args.model_name} due to {e}{RESET}")  
-        exit(0)
-    assert hasattr(model_module, 'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
-    model_components = model_module.load_model(args) # load_model是模型模块必须实现的接口
+    model_module = importlib.import_module(f"vla.{args.model_name}")
+    # try:
+
+    # except Exception as e:
+    #     print(f"{RED}Failed to load model {args.model_name} due to {e}{RESET}")
+    #     exit(0)
+    assert hasattr(model_module,
+                   'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
+    model_components = model_module.load_model(args)  # load_model是模型模块必须实现的接口
     model = model_components['model']
     ml_utils.print_model_trainable_information(model, rank0_print=rank0_print)
     # 加载数据集
     train_dataset, val_dataset, stats, sampler_params = load_data(
-        args, 
+        args,
         task_config,
         rank0_print=rank0_print,
     )
     # 包装数据集
     data_module = dict(
-        train_dataset=model_module.wrap_data(train_dataset, args, model_components) if hasattr(model_module, 'wrap_data') else train_dataset,
-        eval_dataset=model_module.wrap_data(val_dataset, args, model_components) if hasattr(model_module, 'wrap_data') and val_dataset is not None else val_dataset,
-        data_collator=model_module.get_data_collator(args, model_components) if hasattr(model_module, 'get_data_collator') else None,
-    ) 
-    
+        train_dataset=model_module.wrap_data(train_dataset, args, model_components) if hasattr(model_module,
+                                                                                               'wrap_data') else train_dataset,
+        eval_dataset=model_module.wrap_data(val_dataset, args, model_components) if hasattr(model_module,
+                                                                                            'wrap_data') and val_dataset is not None else val_dataset,
+        data_collator=model_module.get_data_collator(args, model_components) if hasattr(model_module,
+                                                                                        'get_data_collator') else None,
+    )
+
     # 获取 Trainer
     train_class = model_module.Trainer if hasattr(model_module, 'Trainer') else transformers.trainer.Trainer
     trainer = train_class(
@@ -197,7 +209,7 @@ def main(args):
                        os.path.join(args.output_dir, 'non_lora_trainables.bin'))
     else:
         ml_utils.safe_save_model_for_hf_trainer(trainer=trainer, output_dir=args.output_dir)
-    
+
 
 if __name__ == '__main__':
     args = parse_param()
