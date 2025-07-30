@@ -1,9 +1,6 @@
 # TODO
 - rewrite evaluation pipeline
 - add octo
-- add pi0
-- add dexvla
-- add openvla
 - add roboflamingo
 - add CALVIN benchmark
 - add Installation Description
@@ -32,6 +29,8 @@ The model returned by `load_model` should implement several APIs:
 - ACT
 - Diffusion Policy
 - Qwen2VL+DP
+- OpenVLA
+- Pi0
 
 # Dataset
 Each dataset refers to a dictionary containing 
