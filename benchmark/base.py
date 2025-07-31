@@ -3,17 +3,16 @@ from dataclasses import dataclass, field, fields, asdict
 
 @dataclass
 class MetaAction:
-    atype: str = 'ee' # or 'joint'
+    space_name: str = 'ee' # or 'joint'
     is_delta: bool = True # absolute position control or relative
     action: np.ndarray = None # action[-1] is gripper control signal, i.e., 1 is open and 0 is close
     gripper_continuous: bool = False # is gripper controlled by continuous action, where action[-1] is position ratio to the gripper width
 
 @dataclass
 class MetaObs:
-    ee_state : np.ndarray = None
-    joint_state: np.ndarray = None
-    gripper_state: np.ndarray = None
-    obj_state: np.ndarray = None
+    state_ee : np.ndarray = None
+    state_joint: np.ndarray = None
+    state_obj: np.ndarray = None
     image: np.ndarray = None # (K, C, H, W)
     depth: np.ndarray = None # (K, H, W)
     pc: np.array = None # (n, 3)

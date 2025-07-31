@@ -89,10 +89,10 @@ def absolute_action_to_relative(maction: MetaAction, mobs: MetaObs) -> MetaActio
     if maction.is_delta: return maction
     if maction.atype=='ee':
         maction.is_delta = False
-        assert mobs is not None and mobs.ee_state is not None, "failed to load ee_state from MetaObs"
-        maction.action = maction.action - mobs.ee_state
+        assert mobs is not None and mobs.state_ee is not None, "failed to load state_ee from MetaObs"
+        maction.action = maction.action - mobs.state_ee
     elif maction.atype=='joint':
         maction.is_delta = False
-        assert mobs is not None and mobs.joint_state is not None, "failed to load ee_state from MetaObs"
+        assert mobs is not None and mobs.joint_state is not None, "failed to load state_ee from MetaObs"
         maction.action = maction.action - mobs.joint_state
     return maction

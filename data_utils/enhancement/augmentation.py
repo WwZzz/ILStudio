@@ -22,6 +22,11 @@ backgrounds. This technique is often employed to make the policy invariant to ir
 environmental features, ensuring robust object detection or manipulation regardless of sur-
 rounding visual clutter.
 
+• Semantic Augmentation Semantic augmentation refers to altering the higher-level fea-
+tures or labels of the data while keeping its core properties consistent. For example, chang-
+ing object colors or textures while maintaining their shape or augmenting annotation labels
+in a way that exposes the robotic model to diverse categories. This approach reinforces
+adaptability to subtle changes in object identity or purpose while preserving task relevance.
 """
 import torch
 import numpy as np

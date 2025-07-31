@@ -1,4 +1,5 @@
 import h5py
+import argparse
 
 def print_h5_structure(file_path):
     """
@@ -21,5 +22,8 @@ def print_h5_structure(file_path):
     with h5py.File(file_path, 'r') as h5_file:
         print(f"File: {file_path}")
         print_group(h5_file)
-    
-print_h5_structure("/inspire/hdd/project/robot-action/public/data/openx_h5py/fmb/episode_0.hdf5.hdf5")
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--file', help='Target directory name', type=str, default="/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_10/h5/episode_00335.hdf5")
+args = parser.parse_args()
+print_h5_structure(args.file)

@@ -22,7 +22,7 @@ TASK_CONFIGS = {
     },
     'libero_object':{
         'dataset_dir': [
-            "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5"
+            "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2"
         ],
         'episode_len': 400,
         'camera_names': ['primary']

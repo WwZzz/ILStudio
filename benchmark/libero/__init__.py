@@ -65,15 +65,15 @@ class LiberoEnv(MetaEnv):
         return actions
         
     def process_obs(self, obs):
-        # ee state
-        xyz = obs['robot0_eef_pos'] # (3,)
-        euler = quat2axisangle(obs['robot0_eef_quat']) # (3,)
-        ee_state = np.concatenate([xyz, euler], axis=0)
-        # joint state
-        joint_state = obs["robot0_joint_pos"]
         # gripper state
         gpos = obs['robot0_gripper_qpos']
         gripper_state = np.array([(gpos[0]-gpos[1])/0.08]) # (1,)
+        # ee state
+        xyz = obs['robot0_eef_pos'] # (3,)
+        euler = quat2axisangle(obs['robot0_eef_quat']) # (3,)
+        state_ee = np.concatenate([xyz, euler, gripper_state], axis=0)
+        # joint state
+        state_joint = np.concatenate([obs["robot0_joint_pos"], gripper_state], axis=0)
         # image
         img_primary = obs["agentview_image"][::-1, ::-1]
         img_second = obs['robot0_eye_in_hand_image']
@@ -82,6 +82,6 @@ class LiberoEnv(MetaEnv):
         depth_primary = obs["agentview_depth"][::-1, ::-1]
         depth_second = obs['robot0_eye_in_hand_depth']
         depth = np.stack([depth_primary, depth_second])
-        return MetaObs(ee_state=ee_state, joint_state=joint_state, gripper_state=gripper_state, image=image, depth=depth, raw_lang=self.raw_lang)
+        return MetaObs(state_ee=state_ee, state_joint=state_joint, image=image, depth=depth, raw_lang=self.raw_lang)
     
     
