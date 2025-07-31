@@ -22,8 +22,8 @@ important APIs from each `vla.algo_name.__init__`
 - (OPTIONAL) `class Trainer(transformers.trainer.Trainer)`
 
 The model returned by `load_model` should implement several APIs:
-`def evaluate(self, obs) -> dict(output_text=str, action=numpy.ndarray((batch_size, chunk_size, action_dim))`
-`def process_env_observation(self, obs:dict) -> dict` # convert the obvervation into the same format for each algorithm
+- `def evaluate(self, obs) -> dict(output_text=str, action=numpy.ndarray((batch_size, chunk_size, action_dim))`
+- `def process_env_observation(self, obs:dict) -> dict` # convert the obvervation into the same format for each algorithm
 
 ## Currently available algorithms:
 - ACT
