@@ -1,6 +1,5 @@
-# EasyIL
-
-This is a repo for quick start with imitation learning on several popular robotic tasks. We carefully design the whole pipeline and each module to provide supports for different policies, simulation environments. Users can easily intergrate their own policy and test it on this platform. 
+# IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
 
 # TODO
