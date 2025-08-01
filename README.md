@@ -1,7 +1,7 @@
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
-
+![framework](assets/fig_il.png)
 # TODO
 - rewrite evaluation pipeline
 - add octo
@@ -16,6 +16,9 @@ IL-Studio is an open-source repository that lets researchers and engineers jump-
 # model_name must be in vla and task_name must be in configuration.constants.TASK_CONFIGS
 python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
 ```
+
+# Overview
+We show the architecture as below:
 
 # Model
 important APIs from each `vla.algo_name.__init__`
