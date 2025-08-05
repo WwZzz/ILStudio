@@ -190,7 +190,6 @@ tensorboard-data-server==0.7.2
 tensorboardX==2.6
 termcolor==2.4.0
 threadpoolctl==3.4.0
-tianshou==0.4.10
 timm==0.9.10
 tokenizers==0.20.1
 toolz==0.12.1
@@ -213,3 +212,4 @@ Werkzeug==3.0.2
 yarl==1.11.1
 zarr==2.16.1
 zipp==3.20.1
+tianshou==0.2.0
