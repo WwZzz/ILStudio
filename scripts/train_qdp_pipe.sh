@@ -1,7 +1,7 @@
 #!/bin/bash
 
 TASKNAME=libero_object
-OUTPUT=./qdp_zscore_pipe # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
+OUTPUT=./ckpt/qdp_zscore_pipe2 # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
 
 deepspeed --master_port 29604 --num_gpus=1 --num_nodes=1 ./train.py \
     --model_name qwen2vl_dp \
@@ -31,11 +31,11 @@ deepspeed --master_port 29604 --num_gpus=1 --num_nodes=1 ./train.py \
     --image_aspect_ratio pad \
     --bf16 True \
     --output_dir $OUTPUT \
-    --max_steps 60 \
+    --max_steps 20 \
     --per_device_train_batch_size 12 \
     --gradient_accumulation_steps 1 \
     --save_strategy steps \
-    --save_steps 20 \
+    --save_steps 5 \
     --save_total_limit 50 \
     --learning_rate 2e-5 \
     --non_lora_lr 2e-4 \
@@ -52,9 +52,9 @@ deepspeed --master_port 29604 --num_gpus=1 --num_nodes=1 ./train.py \
     --policy_class unet_diffusion_policy \
     --concat token_cat \
     --report_to tensorboard \
-    --resume_from_checkpoint True \
     --logging_dir $OUTPUT/log | tee $OUTPUT/log.log
     # 
+    # --resume_from_checkpoint True \
 
 for dir in "$OUTPUT"/*/ ; do
     if [[ "$(basename "$dir")" == *"checkpoint"* ]]; then
