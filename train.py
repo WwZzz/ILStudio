@@ -10,7 +10,7 @@ import IPython
 import torch
 import vla.utils as ml_utils
 from configuration.utils import *
-from data_utils.utils import load_data, set_seed 
+from data_utils.utils import load_data, set_seed, WrappedDataset
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
@@ -79,7 +79,7 @@ class HyperArguments(transformers.TrainingArguments):
     # lora, used when lora_enable is True
     use_quantization: bool=False
     lora_enable: bool = False # using lora or not
-    lora_module: str = "vit" # which part to lora finetune, used when lora_enable is True
+    lora_module: str = "llm,merger" # which part to lora finetune, used when lora_enable is True
     lora_task_type: str = 'CAUSAL_LM'
     lora_r: int = 64
     lora_alpha: int = 256
@@ -162,15 +162,16 @@ def main(args):
     model = model_components['model']
     ml_utils.print_model_trainable_information(model, rank0_print=rank0_print)
     # 加载数据集
-    train_dataset, val_dataset, _ = load_data(
+    train_dataset, val_dataset = load_data(
         args, 
         task_config,
         rank0_print=rank0_print,
     )
     # 包装数据集
+    get_data_processor = getattr(model_module, 'get_data_processor', None)
     data_module = dict(
-        train_dataset=model_module.wrap_data(train_dataset, args, model_components) if hasattr(model_module, 'wrap_data') else train_dataset,
-        eval_dataset=model_module.wrap_data(val_dataset, args, model_components) if hasattr(model_module, 'wrap_data') and val_dataset is not None else val_dataset,
+        train_dataset=WrappedDataset(train_dataset, get_data_processor(train_dataset, args, model_components)) if get_data_processor is not None else train_dataset,
+        eval_dataset=WrappedDataset(val_dataset, get_data_processor(val_dataset, args, model_components)) if get_data_processor is not None and val_dataset is not None else val_dataset,
         data_collator=model_module.get_data_collator(args, model_components) if hasattr(model_module, 'get_data_collator') else None,
     ) 
     # 获取 Trainer
@@ -193,7 +194,7 @@ def main(args):
         )
         if args.local_rank == 0 or args.local_rank == -1:
             model.config.save_pretrained(args.output_dir)
-            model.save_pretrained(args, state_dict=state_dict)
+            model.save_pretrained(args.output_dir, state_dict=state_dict)
             torch.save(non_lora_state_dict,
                        os.path.join(args.output_dir, 'non_lora_trainables.bin'))
     else:

@@ -165,6 +165,12 @@ class BaseNormalizer:
             pickle.dump(all_stats, file)
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
     
+    def save_stats(self, path: str):
+        assert os.path.isdir(path), f"{path} must be directionary"
+        with open(os.path.join(self.dataset_dir, self.stats_filename), 'wb') as file:  # 使用二进制写模式 ('wb')
+            pickle.dump(all_stats, file)
+        
+    
     def load_stats(self):
         with open(os.path.join(self.dataset_dir, self.stats_filename), 'rb') as file:  
             all_stats = pickle.load(file)
@@ -184,15 +190,15 @@ class BaseNormalizer:
         if key not in self.all_stats: raise KeyError(f"Cannot find {key} in stats.")
         return self.all_stats[key]
     
-    def normalize_metaobs(mobs: MetaObs, space_name='ee'):
-        if space_name=='ee' or space_name=='all':
-            mobs.state_ee = self.normalize(mobs.state_ee, space_name='ee', dataytpe='state')
-        if space_name=='joint' or space_name=='all':
+    def normalize_metaobs(self, mobs: MetaObs, space_name='ee'):
+        if mobs.state_ee is not None and (space_name=='ee' or space_name=='all'):
+            mobs.state_ee = self.normalize(mobs.state_ee, space_name='ee', datatype='state')
+        if mobs.state_joint is not None and (space_name=='joint' or space_name=='all'):
             mobs.state_joint = self.normalize(mobs.state_joint, space_name='joint', dataytpe='state')
         return mobs
     
-    def denormalize_metaact(mact: MetaAction):
-        mact.action = self.normalize(mact.action, space_name=mact.atype, datatype='action', is_delta=mact.is_delta)
+    def denormalize_metaact(self, mact: MetaAction):
+        mact.action = self.denormalize(mact.action, space_name=mact.space_name, datatype='action', is_delta=mact.is_delta)
         return mact
     
     def normalize(self, *args, **kwargs):
@@ -201,7 +207,6 @@ class BaseNormalizer:
     def denormalize(self, *args, **kwargs):
         raise NotImplementedError
     
-
     
 class MinMaxNormalizer(BaseNormalizer):
     def __init__(self, dataset_dir, dataset_name=None, low:float=-1, high:float=1):
@@ -210,16 +215,21 @@ class MinMaxNormalizer(BaseNormalizer):
         self.low = low
         self.high = high
         self.delta = self.high-self.low
+        
+    def __str__(self):
+        return "minmax"
     
     def normalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
-        return data
+        return data.astype(dtype)
     
     def denormalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
-        return data
+        return data.astype(dtype)
 
 class PercentileNormalizer(BaseNormalizer):
     def __init__(self, dataset_dir, dataset_name=None, low:float=-1, high:float=1):
@@ -229,27 +239,37 @@ class PercentileNormalizer(BaseNormalizer):
         self.high = high
         self.delta = self.high-self.low
     
+    def __str__(self):
+        return "percentile"
+    
     def normalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
-        return np.clip(data, self.low, self.high)
+        return np.clip(data, self.low, self.high).astype(dtype)
     
     def denormalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
-        return np.clip(data, stats['q01'], stats['q99'])
+        return np.clip(data, stats['q01'], stats['q99']).astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
     def __init__(self, dataset_dir, dataset_name=None, *args, **kwargs):
         super().__init__(dataset_dir, dataset_name)
+        
+    def __str__(self):
+        return "zscore"
     
     def normalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = (data-stats['mean'])/stats['std'] 
-        return data
+        return data.astype(dtype)
     
     def denormalize(self, data, space_name='ee', datatype='action', is_delta=True):
+        dtype = data.dtype
         stats = self.get_stat_by_key(space_name=space_name, datatype=datatype, is_delta=is_delta)
         data = data*stats['std'] + stats['mean']
-        return data
+        return data.astype(dtype)
     

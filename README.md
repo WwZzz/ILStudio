@@ -80,7 +80,7 @@ The dataset's item should be a dict like
 {
     'image': torch.Tensor((K, C, H, W), dtype=torch.uint8), # K is the number of images (i.e., primary, wrist, ) and C is the number of channels 
     'action': torch.Tensor((chunk_size, action_dim), dtype=torch.float32),
-    'qpos': torch.Tensor((chunk_size, state_dim), dtype=torch.float32),
+    'state': torch.Tensor((chunk_size, state_dim), dtype=torch.float32),
     'raw_lang': str,
     'is_pad': torch.Tensor((chunk_size, action_dim), dtype=torch.bool),
     'reasoning': str,

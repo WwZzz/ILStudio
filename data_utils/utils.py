@@ -5,6 +5,7 @@ import h5py
 import pickle
 import fnmatch
 import cv2
+import json
 from time import time
 from torch.utils.data import TensorDataset, DataLoader
 import torchvision.transforms as transforms
@@ -15,6 +16,12 @@ e = IPython.embed
 from configuration.utils import *
 import gc
 from .statistic import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer
+
+NORMTYPE2CLASS = {
+    'minmax': MinMaxNormalizer,
+    'percentile': PercentileNormalizer, 
+    'zscore': ZScoreNormalizer,
+}
 
 def flatten_list(l):
     return [item for sublist in l for item in sublist]
@@ -76,7 +83,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     gpos = root['/reasoning/gripper_position'][start_ts]
                     tpos = root['/reasoning/target_position'][start_ts]
                     subtask = root['/reasoning/subtask'][start_ts].decode('utf-8')
-                    prev_task = 'Init' if start_ts==0 else root['subtask'][start_ts-1].decode('utf-8')
+                    prev_task = 'Init' if start_ts==0 else root['/reasoning/subtask'][start_ts-1].decode('utf-8')
                     drct = root['/reasoning/direction'][start_ts].decode('utf-8')
                     reasoning = f"Step: {subtask}\nGripper Pos: ({gpos[0]:.2f},{gpos[1]:.2f})\nTarget Pos: ({tpos[0]:.2f},{tpos[1]:.2f})\nDirection: {drct}"
                     if self.data_args.use_prev_subtask: raw_lang = raw_lang + f". The previous step is: {prev_task}"
@@ -145,7 +152,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
         torch.cuda.empty_cache()
         return sample
 
+class WrappedDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset, processor=None):
+        self.dataset = dataset
+        self.processor = processor
 
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, index):
+        sample = self.dataset[index]
+        return sample if self.processor is None else self.processor(sample)
 
 def get_episode_len(dataset_path_list, rank0_print=print):
     all_episode_len = []
@@ -182,6 +199,42 @@ def BatchSampler(batch_size, episode_len_l, sample_weights):
             batch.append(step_idx)
         yield batch
 
+def save_norm_meta_to_json(file_path: str, data: dict):
+    """
+    把 归一化加载信息 追加写入 json
+    """
+    # 如果文件不存在，先写一个空列表占位
+    if not os.path.exists(file_path):
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump({'state':{}, 'action':{}}, f)
+
+    # 以 r+ 打开，先读后写
+    with open(file_path, 'r+', encoding='utf-8') as f:
+        # 读取已有内容
+        try:
+            old = json.load(f)
+        except json.JSONDecodeError:
+            # 文件为空或格式损坏，重新初始化
+            old = {'state':{}, 'action':{}}
+
+        # 移动指针到文件开头
+        f.seek(0)
+        # 追加新 dict
+        old['state'].update(data.get('state', {}))
+        old['action'].update(data.get('action', {}))
+        # 写回
+        json.dump(old, f, ensure_ascii=False, indent=2)
+        # 截断多余内容（当新内容比旧内容短时）
+        f.truncate()
+
+def load_normalizer_from_meta(dataset_dir:str, norm_meta):
+    if isinstance(norm_meta, str):
+        with open(norm_meta, 'r') as f:
+            norm_meta = json.load(f)
+    state_normalizer = NORMTYPE2CLASS[norm_meta['state'][dataset_dir]](dataset_dir)
+    action_normalizer = NORMTYPE2CLASS[norm_meta['action'][dataset_dir]](dataset_dir)
+    return {'state': state_normalizer, 'action': action_normalizer}
+    
 def load_data(args, task_config, rank0_print=print):
     set_seed(0)
     dataset_dir_l = task_config['dataset_dir']
@@ -191,17 +244,13 @@ def load_data(args, task_config, rank0_print=print):
     sample_weights = task_config.get('sample_weights', None)
     train_ratio = task_config.get('train_ratio', 1.0)
     name_filter = task_config.get('name_filter', lambda n: n.endswith('hdf5'))
-    action_normtype = task_config.get('action_normtype', 'minmax')
-    state_normtype = task_config.get('state_normtype', 'minmax')
+    action_normtype = args.action_normalize
+    state_normtype = args.state_normalize
     batch_size_train, batch_size_val = args.per_device_train_batch_size, args.per_device_eval_batch_size
     skip_mirrored_data=args.skip_mirrored_data
     if type(dataset_dir_l) == str: dataset_dir_l = [dataset_dir_l]
     # 获取normalizer class
-    NORMTYPE2CLASS = {
-        'minmax': MinMaxNormalizer,
-        'percentile': PercentileNormalizer, 
-        'zscore': ZScoreNormalizer,
-    }
+
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
     # 计算数据集的统计量, 数据集内部可以根据h5文件所在dataset_dir来选择normalizer
@@ -227,7 +276,10 @@ def load_data(args, task_config, rank0_print=print):
         'train': {"batch_size": batch_size_train, 'episode_len_l': train_dataset.episode_len, 'sample_weights':sample_weights, 'episode_first': args.episode_first},
         'eval': {"batch_size": batch_size_val, 'episode_len_l': [0], 'sample_weights': None, 'episode_first': args.episode_first} # unused
     }
-    return train_dataset, val_dataset, sampler_params
+    norm_meta = {'state': {k:str(v) for k,v in state_normalizers.items()}, 'action': {k:str(v) for k,v in action_normalizers.items()}}
+    # save norm_meta 
+    save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
+    return train_dataset, val_dataset
 
 
 def calibrate_linear_vel(base_action, c=None):
@@ -272,3 +324,5 @@ def detach_dict(d):
 def set_seed(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
+    
+
