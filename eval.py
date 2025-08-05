@@ -39,8 +39,9 @@ local_rank = None
 class HyperArguments:
     # ############## model  ################
     model_name: str = 'qwen2vl_dp'
-    model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/qdp_zscore_pipe/checkpoint-40"
+    model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/qdp_zscore_pipe2"
     is_pretrained: bool=field(default=True)
+    device: str = 'cuda'
     ################ simulator #############
     env_name: str = field(default='libero')
     task: str = field(default="libero_object_0")
@@ -51,7 +52,7 @@ class HyperArguments:
     image_size: str = '(256, 256)'
     norm_path: str = ''
     dataset_dir: str = '/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2'
-    save_dir: str = 'tmp_dp-zscore50000'
+    save_dir: str = 'results/tmp_dp-zscore50000'
     space_name: str = 'ee'
     abs_control: bool = False
     camera_ids: str = '[0]'

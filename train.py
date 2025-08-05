@@ -185,21 +185,7 @@ def main(args):
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     # 保存模型
     trainer.save_state()
-    if args.lora_enable:
-        state_dict = ml_utils.get_peft_state_maybe_zero_3(
-            model.named_parameters(), args.lora_bias
-        )
-        non_lora_state_dict = ml_utils.get_peft_state_non_lora_maybe_zero_3(
-            model.named_parameters(), require_grad_only=False
-        )
-        if args.local_rank == 0 or args.local_rank == -1:
-            model.config.save_pretrained(args.output_dir)
-            model.save_pretrained(args.output_dir, state_dict=state_dict)
-            torch.save(non_lora_state_dict,
-                       os.path.join(args.output_dir, 'non_lora_trainables.bin'))
-    else:
-        ml_utils.safe_save_model_for_hf_trainer(trainer=trainer, output_dir=args.output_dir)
-    
+    trainer.save_model(args.output_dir)
 
 if __name__ == '__main__':
     args = parse_param()
