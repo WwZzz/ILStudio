@@ -38,27 +38,31 @@ local_rank = None
 @dataclass
 class HyperArguments:
     # ############## model  ################
-    model_name: str = 'qwen2vl_dp'
-    model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/qdp_zscore_pipe2"
+    # model_name: str = 'qwen2vl_dp'
+    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/qdp_zscore"
+    model_name: str='replay'
+    model_name_or_path: str='/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2/episode_00327.hdf5'
     is_pretrained: bool=field(default=True)
     device: str = 'cuda'
     ################ simulator #############
     env_name: str = field(default='libero')
-    task: str = field(default="libero_object_0")
-    num_rollout: int = 10
-    num_envs: int = 5
+    task: str = field(default="libero_object_1")
+    num_rollout: int = 1
+    num_envs: int = 1
     max_timesteps: int = 400
-    freq: int = 10
+    freq: int = 16
     image_size: str = '(256, 256)'
-    norm_path: str = ''
+    norm_path: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/qdp_zscore/normalize.json'
+    # norm_path: str = ''
     dataset_dir: str = '/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2'
-    save_dir: str = 'results/tmp_dp-zscore50000'
+    save_dir: str = '../../../Users/zzz51/Desktop/ilsv3/results/qdp_final3'
+    # save_dir: str = ''
     space_name: str = 'ee'
     abs_control: bool = False
     camera_ids: str = '[0]'
     
     #  ############ data ###################
-    chunk_size: int = field(default=16)
+    chunk_size: int = field(default=1)
     image_size_primary: str = "(256,256)"  # image size of non-wrist camera
     image_size_wrist: str = "(256,256)" # image size of wrist camera
     use_reasoning: bool = False # whether to load reasoning data
@@ -149,6 +153,7 @@ if __name__=='__main__':
         env_res_dir = os.path.join(args.save_dir, args.env_name)
         os.makedirs(env_res_dir, exist_ok=True)
         env_res_file = os.path.join(env_res_dir, f'{args.task}.json')
+        # eval_result = {k:v.astype(np.float32) if isinstance(v, np.ndarray) else v for k,v in eval_result.items()}
         with open(env_res_file, 'w') as f:
             json.dump(eval_result, f)
 

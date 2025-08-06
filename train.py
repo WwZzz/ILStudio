@@ -165,7 +165,6 @@ def main(args):
     train_dataset, val_dataset = load_data(
         args, 
         task_config,
-        rank0_print=rank0_print,
     )
     # 包装数据集
     get_data_processor = getattr(model_module, 'get_data_processor', None)

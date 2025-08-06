@@ -1,6 +1,11 @@
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
+# Installation
+```shell
+pip install -r requirements.txt
+```
+
 ![framework](assets/fig_il.png)
 # TODO
 - rewrite evaluation pipeline
@@ -100,4 +105,20 @@ TASK_CONFIGS = {
 }
 ```
 
+## Data Preparation
 
+| Name   | Download | Remark|
+|----------|-----------|-------------|
+| Aloha   | [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O)  |   |
+| VLA-OS | [link](https://huggingface.co/datasets/Linslab/VLA-OS-Dataset)  |   |
+| Open-X | [link](https://github.com/google-deepmind/open_x_embodiment)  |    |
+
+
+# TroubleShooting
+
+- aloha env raises error 'mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called'. 
+
+if the platform is headless, please use the command below to solve this issue:
+```shell
+export MUJOCO_GL=egl
+```
