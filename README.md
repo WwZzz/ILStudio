@@ -28,7 +28,7 @@ We show the architecture as below:
 # Model
 important APIs from each `vla.algo_name.__init__`
 - `def load_model(args: transformers.HfArgumentParser) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
-- (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> torch.utils.data.Dataset` # sample-level data processing
+- (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> function` # sample-level data processing
 - (OPTIONAL) `def get_data_collator(args: transformers.HfArgumentParser, model_components:dict) -> function` # batch-level data processing
 - (OPTIONAL) `class Trainer(transformers.trainer.Trainer)`
 
