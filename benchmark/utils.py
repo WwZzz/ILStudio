@@ -10,7 +10,7 @@ import copy
 import json
 from data_utils.utils import set_seed
 import tensorflow as tf
-from transformers.deepspeed import deepspeed_load_checkpoint
+# from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
 from typing import List
 from pathlib import Path

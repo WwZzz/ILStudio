@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from qwen_vl_utils import process_vision_info
 from vla.qwen2vl_dp.policy import ConditionalUnet1D
 from .data_utils import Qwen2VLAProcess, Qwen2VLADataCollatorForSupervisedDataset
+from .fusion import ActionProjector, FiLM
 # =============================================================================
 # 步骤 1: 创建自定义的 Config 类
 # =============================================================================
@@ -91,6 +92,12 @@ class QwenVLForPolicy(PreTrainedModel):
         # 2. 定义 Policy Head
         policy_config_dict = {k[7:]:v for k,v in self.config.to_dict().items() if 'policy_' in k}
         self.policy_head = ConditionalUnet1D(**policy_config_dict)
+        
+        # 3. 定义融合模块
+        config.hidden_size = config.policy_cond_dim
+        self.action_proj = ActionProjector(config.hidden_size, config.hidden_size)
+        self.reasoning_proj = ActionProjector(config.hidden_size, config.hidden_size)
+        self.reasoning_film = FiLM(feature_dim=config.hidden_size, condition_dim=config.hidden_size)
     
     def set_requires_grad(self, training_args):
         if not training_args.lora_enable:
@@ -107,6 +114,35 @@ class QwenVLForPolicy(PreTrainedModel):
                     print(e)
         # 设置policy_head要梯度
         self.policy_head.requires_grad_(True)
+        self.action_proj.requires_grad_(True)
+        self.reasoning_proj.requires_grad_(True)
+        self.reasoning_film.requires_grad_(True)
+    
+    def film_forward(self, labels, input_ids, hidden_states):
+        """
+        Perform the forward pass for the film module.
+        """
+        inputs_index = labels[:, :] == -100
+        inputs_index = inputs_index.int()
+
+        xor_array = torch.bitwise_xor(inputs_index[:, :-1], inputs_index[:, 1:])
+        indexs = torch.argmax((xor_array != 0).float(), dim=1)
+        input_embeddings = []
+        reasoning_embeddings = []
+        identity = []
+        for i in range(indexs.shape[0]):
+            end = indexs[i] + 1
+            temp = input_ids[i] == 151643  # pad token id for qwen2_vl，因为qwen2_vl是左padding
+            start = sum(temp.int()) # 去掉padding
+            input_embeddings.append(self.action_proj(hidden_states[i, start:end, :]))
+            identity.append(torch.mean(hidden_states[i, start:end, :], dim=0))
+            reasoning_embeddings.append(self.reasoning_proj(hidden_states[i, end:, :]))
+        input_embeddings = torch.cat(input_embeddings, dim=0)
+        reasoning_embeddings = torch.cat(reasoning_embeddings, dim=0)
+        identity = torch.stack(identity)
+        action_conds = self.reasoning_film(input_embeddings, reasoning_embeddings).unsqueeze(1)
+        action_conds = action_conds + identity.unsqueeze(1)
+        return action_conds
     
     def forward(
         self,
@@ -144,9 +180,10 @@ class QwenVLForPolicy(PreTrainedModel):
             # return_dict=True,
         )
         # 提取最后一层的 hidden states
-        last_hidden_state = outputs.hidden_states[-1]
-        pooled_output = last_hidden_state.mean(dim=1).unsqueeze(1)
-        policy_outputs = self.policy_head(actions, pooled_output, states, is_pad)
+        hidden_states = outputs.hidden_states[-1]
+        # 用film提取子任务相关的信息
+        action_conds = self.film_forward(labels=labels, input_ids=input_ids, hidden_states=hidden_states)
+        policy_outputs = self.policy_head(actions, action_conds, states, is_pad)
         # 计算action loss
         return {
             'llm_loss': outputs['loss'],
@@ -171,10 +208,32 @@ class QwenVLForPolicy(PreTrainedModel):
         is_pad: bool = False,
         **kwargs,
     ):
-        outputs = self.vlm.generate(input_ids=input_ids, output_hidden_states=True, max_length=512, return_dict_in_generate=True)
+        outputs = self.vlm.generate(
+            input_ids=input_ids, 
+            pixel_values=pixel_values,
+            attention_mask=attention_mask,
+            image_grid_thw=image_grid_thw,
+            num_beams=1,
+            do_sample=False,
+            temperature=0.2,
+            max_new_tokens=256,
+            eos_token_id=self.tokenizer.eos_token_id,  # End of sequence token
+            pad_token_id=self.tokenizer.pad_token_id,  # Pad token
+            use_cache=True,
+            output_hidden_states=True,
+            return_dict_in_generate=True,
+        )
+        # get hidden states
         last_hidden_states = torch.cat([step[-1] for step in outputs.hidden_states], dim=1)
-        pooled_output = last_hidden_states.mean(dim=1).unsqueeze(1)
-        policy_outputs = self.policy_head(actions, pooled_output, states, is_pad)
+        # get token ids 
+        output_ids = outputs.sequences
+        # constuct labels
+        bs = states.shape[0]
+        labels_input = torch.ones((bs, input_ids.shape[1])) * (-100)
+        labels_output = torch.ones((bs, output_ids.shape[1] - input_ids.shape[1]))
+        labels = torch.cat([labels_input, labels_output], dim=1)
+        action_conds = self.film_forward(labels=labels, input_ids=output_ids, hidden_states=last_hidden_states)
+        policy_outputs = self.policy_head(actions, action_conds, states, is_pad)
         return policy_outputs    
         
     

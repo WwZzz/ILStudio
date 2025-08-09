@@ -3,6 +3,7 @@ from .modeling import QwenVLForPolicy
 from .trainer import Trainer
 from .data_utils import Qwen2VLAProcess, Qwen2VLADataCollatorForSupervisedDataset
 import transformers
+from safetensors.torch import save_file, load_file
 import torch
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer, AutoModel
 from peft import LoraConfig, get_peft_model, PeftModel, PeftConfig
@@ -13,9 +14,10 @@ def find_all_linear_names(model, lora_module=None):
     lora_module_names = set()
     no_lora_keywords = ['multi_modal_projector', 'lm_head', 'policy_head']
     if 'vit' not in lora_module:
-        no_lora_keywords.append("vision_tower")
+        no_lora_keywords.append("vlm.visual.blocks")
+        no_lora_keywords.append("vlm.visual.patch")
     if 'llm' not in lora_module:
-        no_lora_keywords.append("language_model")
+        no_lora_keywords.append("vlm.model")
     if 'merger' not in lora_module:
         no_lora_keywords.append('merger')
     for name, module in model.named_modules():
@@ -34,9 +36,13 @@ def load_model(args):
         peft_path = os.path.join(args.model_name_or_path, 'adapter_config.json')
         # 检测是否是peft
         if os.path.exists(peft_path):  
-            model = QwenVLForPolicy(config=config).to(torch.bfloat16)
-            model_for_merging = PeftModel.from_pretrained(model,args.model_name_or_path)
-            model = model_for_merging.merge_and_unload()
+            model = QwenVLForPolicy(config=config)
+            model = PeftModel.from_pretrained(model,args.model_name_or_path)
+            extra_path = os.path.join(args.model_name_or_path, 'extra_trainable.safetensors')
+            if os.path.exists(extra_path):
+                extra_state = load_file(extra_path, device="cpu")
+                missing, unexpected = model.load_state_dict(extra_state, strict=False)
+            model = model.merge_and_unload().to(torch.bfloat16)
         else:
             model = QwenVLForPolicy.from_pretrained(args.model_name_or_path, config=config).to(torch.bfloat16)
     else: # 训练时加载
@@ -84,7 +90,7 @@ def load_model(args):
         compute_dtype = (torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
         
         # 设置config里头的自定义参数
-        model.config.non_lora_lr = args.non_lora_lr
+        model.config.lora_lr = args.lora_lr
         model.config.use_cache = True
         model.config.save_pretrained(args.output_dir)
     else:

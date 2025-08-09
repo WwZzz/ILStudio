@@ -6,7 +6,6 @@ IL-Studio is an open-source repository that lets researchers and engineers jump-
 pip install -r requirements.txt
 ```
 
-![framework](assets/fig_il.png)
 # TODO
 - rewrite evaluation pipeline
 - add octo
@@ -24,6 +23,7 @@ python train.py --model_name act --task_name example_tasks --output_dir output_d
 
 # Overview
 We show the architecture as below:
+![framework](assets/fig_il.png)
 
 # Model
 important APIs from each `vla.algo_name.__init__`

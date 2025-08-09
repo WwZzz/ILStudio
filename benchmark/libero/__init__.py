@@ -12,7 +12,6 @@ import time
 import copy
 import json
 import tensorflow as tf
-from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
 from typing import List
 from pathlib import Path

@@ -17,6 +17,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from transformers.modeling_utils import PreTrainedModel
 from transformers import AutoModel, AutoModelForCausalLM
 import copy
+import warnings
 # =================== UNet for Diffusion ==============
 
 class SinusoidalPosEmb(nn.Module):
@@ -304,6 +305,7 @@ class ConditionalUnet1D(nn.Module):
                     sample=naction
                 ).prev_sample
                 if nac.isnan().any():
+                    warnings.warn("NaN during denoising step")
                     break
                 else:
                     naction = nac
