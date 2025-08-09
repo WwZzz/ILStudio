@@ -54,8 +54,8 @@ Each dataset refers to a dictionary containing
 The architecture of each .hdf5 file should be like
 ```shell
 # T is the length of the episode
-# for gripper state, 1=close and -1=open, the same with openvla 
-# for gripper action, 0=close and 1=open, the same with openvla 
+# we denote the gripper state by the openning degree of the gripper (e.g., x m),
+# and we denote the gripper action by 0=close and 1=open, which is the same as openvla 
 # the minimal setting of the data configuration is labeled by * (e.g., 'ee' can be replaced by 'joint' and 'primary' can be replaced by 'wrist')
 
 Dataset: dataset_dir (Shape: (1,), Dtype: object)           # the dataset directionary of the episode, str
