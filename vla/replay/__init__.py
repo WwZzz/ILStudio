@@ -1,6 +1,7 @@
 from data_utils.utils import EpisodicDataset, load_normalizer_from_meta
 from configuration.constants import TASK_CONFIGS
 from dataclasses import dataclass
+import importlib
 import torch.nn as nn
 import json
 import torch
@@ -13,14 +14,14 @@ class DataArgs:
     use_reasoning: bool = False
     image_size_wrist: str = "(256, 256)"
     image_size_primary: str= "(256, 256)"
-    abs_control: bool = False
+    ctrl_type: str = 'delta'
 
 class Replay(nn.Module):
-    def __init__(self, actions, abs_control=False, space_name='ee'):
+    def __init__(self, actions, ctrl_type='delta', ctrl_space='ee'):
         super().__init__()
         self.actions = torch.stack(actions).numpy()
-        self.abs_control = abs_control
-        self.space_name = space_name
+        self.ctrl_type = ctrl_type
+        self.ctrl_space = ctrl_space
         self.count = 0
         
     def reset(self):
@@ -39,13 +40,17 @@ def load_model(args):
     with open(args.norm_path, 'r') as f:
         norm_meta = json.load(f)
     normalizers = load_normalizer_from_meta(task_config['dataset_dir'][0], norm_meta)
-    data = EpisodicDataset(
+    data_class = task_config.get('dataset_class', 'EpisodicDataset')
+    data_class = eval(data_class) if data_class=='EpisodicDataset' else getattr(importlib.import_module('data_utils.dataset'), data_class)
+    data = data_class(
         [args.model_name_or_path], 
         camera_names=args.camera_names, 
         action_normalizers={task_config['dataset_dir'][0]:normalizers['action']}, 
         state_normalizers={task_config['dataset_dir'][0]:normalizers['state']}, 
-        data_args=DataArgs(chunk_size=args.chunk_size, abs_control=args.abs_control), 
-        control_space=args.space_name
-        )
+        data_args=DataArgs(chunk_size=args.chunk_size, ctrl_type=args.ctrl_type), 
+        chunk_size = args.chunk_size,
+        ctrl_space=args.ctrl_space,
+        ctrl_type=args.ctrl_type,
+    )
     all_actions = [data[i]['action'] for i in range(len(data))]
-    return {'model': Replay(all_actions, abs_control=args.abs_control, space_name=args.space_name)}
+    return {'model': Replay(all_actions, ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space)}

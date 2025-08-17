@@ -23,7 +23,7 @@ def get_images_from_metaobs(mobs: MetaObs):
     images = mobs.image
     return [Image.fromarray(img.transpose(1,2,0)) for img in img_array]
 
-def organize_obs(obs: np.ndarray, space_name='ee', camera_ids=[0]):
+def organize_obs(obs: np.ndarray, ctrl_space='ee', camera_ids=[0]):
     """Organize obs returned by SubprocVectorEnv into a dict"""
     if isinstance(obs, dict): return obs
     if isinstance(obs[0], dict):
@@ -38,9 +38,9 @@ def organize_obs(obs: np.ndarray, space_name='ee', camera_ids=[0]):
             res[k] = np.stack(res[k])
         elif res[k][0] is None:
             res[k] = None
-    res['state'] = res['state_ee'] if space_name=='ee' else res['state_joint']
+    res['state'] = res['state']
     if isinstance(camera_ids, str): camera_ids = eval(camera_ids)
-    res['image'] = res['image'][:,camera_ids]
+    res['image'] = res['image'][:,camera_ids] # (B, NUM_CAM, C, H, W)
     return dict2meta(res)
 
 def evaluate(args, policy, env, video_writer=None):
@@ -51,7 +51,7 @@ def evaluate(args, policy, env, video_writer=None):
         time_start_eval = time.time()
         success =  np.zeros(len(env)).astype(np.bool8)
         obs = env.reset()
-        obs = organize_obs(obs, args.space_name, args.camera_ids)
+        obs = organize_obs(obs, args.ctrl_space, args.camera_ids)
         for t in range(args.max_timesteps):
             if video_writer is not None:
                 frames = obs['image']
@@ -61,7 +61,7 @@ def evaluate(args, policy, env, video_writer=None):
                     video_frames[env_i].append(frames[env_i])
             act = policy.select_action(obs, t)
             obs, reward, done, info = env.step(act)
-            obs = organize_obs(obs, args.space_name, args.camera_ids)
+            obs = organize_obs(obs, args.ctrl_space, args.camera_ids)
             # 判断是否成功
             success = success | done
             if success.all(): 
@@ -82,21 +82,23 @@ def evaluate(args, policy, env, video_writer=None):
             for frame in video_frames[env_i]:
                 video_writer.append_data(frame)
     return {
-        'success': total_successes,
+        'success': success.tolist(),
+        'total_success': total_successes,
         'total': total,
         'success_rate': success_rate,
         'horizon': horizons.tolist(),
+        'horizon_success': (success*horizons).sum()/(total_successes),
     }
 
-def absolute_action_to_relative(maction: MetaAction, mobs: MetaObs) -> MetaAction:
+def absolute_action_to_delta(maction: MetaAction, mobs: MetaObs) -> MetaAction:
     # Convert absolute action into relative action
-    if maction.is_delta: return maction
-    if maction.space_name=='ee':
-        maction.is_delta = False
+    if maction.ctrl_type=='delta': return maction
+    if maction.ctrl_space=='ee':
+        maction.ctrl_type = 'delta'
         assert mobs is not None and mobs.state_ee is not None, "failed to load state_ee from MetaObs"
         maction.action = maction.action - mobs.state_ee
-    elif maction.space_name=='joint':
-        maction.is_delta = False
+    elif maction.ctrl_space=='joint':
+        maction.ctrl_type = 'delta'
         assert mobs is not None and mobs.joint_state is not None, "failed to load state_ee from MetaObs"
         maction.action = maction.action - mobs.joint_state
     return maction

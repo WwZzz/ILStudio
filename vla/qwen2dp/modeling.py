@@ -10,7 +10,7 @@ from PIL import Image
 import requests
 from typing import Any, Dict, List, Optional, Tuple, Union
 from qwen_vl_utils import process_vision_info
-from vla.qwen2vl_dp.policy import ConditionalUnet1D
+from .policy import ConditionalUnet1D
 from .data_utils import Qwen2VLAProcess, Qwen2VLADataCollatorForSupervisedDataset
 # =============================================================================
 # 步骤 1: 创建自定义的 Config 类

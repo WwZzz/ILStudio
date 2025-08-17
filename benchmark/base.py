@@ -5,8 +5,8 @@ import torch
 
 @dataclass
 class MetaAction:
-    space_name: str = 'ee' # or 'joint'
-    is_delta: bool = True # absolute position control or relative
+    ctrl_space: str = 'ee' # or 'joint'
+    ctrl_type: str = 'delta' # absolute, relative, or delta control
     action: np.ndarray = None # action[-1] is gripper control signal, i.e., 1 is open and 0 is close
     gripper_continuous: bool = False # is gripper controlled by continuous action, where action[-1] is position ratio to the gripper width
 
@@ -57,11 +57,11 @@ class MetaEnv:
         return tuple(results)
     
     def obs2meta(self, raw_obs):
-        # convert raw_obs into MetaObs
+        # convert raw_obs into MetaObs WITHOUT normalizing data
         raise NotImplementedError
     
     def meta2act(self, action, *args):
-        # convert MetaAction into env-specific action
+        # convert MetaAction into env-specific action WITHOUT normalizing data
         
         raise NotImplementedError
     
@@ -74,11 +74,11 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, freq:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', abs_ctrl=False):
+    def __init__(self, policy, freq:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
         self.policy = policy
         self.freq = freq
         self.ctrl_space = ctrl_space
-        self.abs_ctrl = abs_ctrl
+        self.ctrl_type = ctrl_type
         self.action_queue = deque(maxlen=freq)
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
@@ -88,29 +88,29 @@ class MetaPolicy:
         if hasattr(self.policy, 'meta2obs'):
             obs = self.policy.meta2obs(mobs)
         else:
-            mobs.state = mobs['state_ee'] if self.ctrl_space=='ee' else self.ctrl_space=='joint'
             obs = asdict(mobs)
         return obs
     
-    def act2meta(self, action, space_name:str='ee', is_delta:bool=True):
+    def act2meta(self, action, ctrl_space:str='ee', ctrl_type:str=True):
         # convert action into MetaAction, np.ndarray((chunk_size, action_dim), dtype=np.float32) as default
         if hasattr(self.policy, 'act2meta'):
-            mact = self.policy.act2meta(action, space_name=space_name, is_delta=is_delta)
+            mact = self.policy.act2meta(action, ctrl_space=ctrl_space, ctrl_type=ctrl_type)
         else:
             if isinstance(action, torch.Tensor): action = action.float().cpu().numpy()
-            mact = MetaAction(action=action, space_name=space_name, is_delta=is_delta) # (B, chunk_size, dim) or (chunk_size, dim)
+            mact = MetaAction(action=action, ctrl_space=ctrl_space, ctrl_type=ctrl_type) # (B, chunk_size, dim) or (chunk_size, dim)
         return mact 
     
     def select_action(self, mobs: MetaObs, t:int):
+        # Normalzing Obs and Actions
         if t % self.freq == 0 or len(self.action_queue)==0:
-            # 归一化观测
+            # 归一化观测的state
             normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
             # 转换MetaObs
             policy_obs = self.meta2obs(normed_mobs)
             # 推理动作
             action_chunk = self.policy.select_action(policy_obs)
             # 动作转为MetaAction  (B, chunk_size, action_dim)
-            macts = self.act2meta(action_chunk, space_name=self.ctrl_space, is_delta=not self.abs_ctrl)
+            macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
             action_chunk = macts.action
             is_chunked = (len(action_chunk.shape)==3)
             bs = action_chunk.shape[0]
@@ -125,7 +125,8 @@ class MetaPolicy:
                 macts.action = macts.action[np.newaxis, :]
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
-            mact_list = [np.array([asdict(MetaAction(action=aii, is_delta=macts.is_delta, space_name=macts.space_name)) for aii in ai], dtype=object) for ai in macts.action]
+            mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
+            mact_list = mact_list[:self.freq]
             self.action_queue.extend(mact_list)
         # 从队列里拿动作
         mact = self.action_queue.popleft()

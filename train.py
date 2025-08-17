@@ -10,7 +10,7 @@ import IPython
 import torch
 import vla.utils as ml_utils
 from configuration.utils import *
-from data_utils.utils import load_data, set_seed, WrappedDataset
+from data_utils.utils import set_seed, WrappedDataset, load_data
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
@@ -24,6 +24,7 @@ class HyperArguments(transformers.TrainingArguments):
     model_name: str = 'qwen2vl_dp'
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
     is_pretrained: bool=field(default=False)
+    output_dir:str = 'visualization/tmp'
     # ############# policy #################
     state_dim: int = 7
     action_dim: int = 7
@@ -35,7 +36,6 @@ class HyperArguments(transformers.TrainingArguments):
     image_size_wrist: str = "(256,256)" # image size of wrist camera
     use_reasoning: bool = False # whether to load reasoning data
     use_prev_subtask: bool = False # whether to add previous task into input
-    abs_control: bool = False
     
     lazy_preprocess: bool = False
     episode_first: bool = False  # batchsampler will samples episode index first and then samples timesteps
@@ -44,16 +44,16 @@ class HyperArguments(transformers.TrainingArguments):
     image_aspect_ratio: str = 'square'
     task_name: str = field(default="stack_cube_2024_6_2") # task name corresponding to configuration/constants.py
     skip_mirrored_data: bool = field(default=False)
-    delta_control: bool = field(default=False)
+    preload_data: bool = field(default=False)
 
     history_images_length: int = 1 # length of history images
     #  ########### training ################
     using_ema: bool = field(default=False) # whether to use ema update whole module, default to false
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
-    adam_beta1: float = field(default=0.9)
-    adam_beta2: float = field(default=0.98)
-    adam_epsilon: float = field(default=1e-7)
+    adam_beta1: float = field(default=0.95)
+    adam_beta2: float = field(default=0.999)
+    adam_epsilon: float = field(default=1e-8)
     remove_unused_columns: bool = field(default=False)
     flash_attn: bool = field(default=False)
     freeze_vision_tower: bool = field(default=False)
@@ -79,14 +79,14 @@ class HyperArguments(transformers.TrainingArguments):
     # lora, used when lora_enable is True
     use_quantization: bool=False
     lora_enable: bool = False # using lora or not
-    lora_module: str = "llm,merger" # which part to lora finetune, used when lora_enable is True
+    lora_module: str = "vit,llm,merger" # which part to lora finetune, used when lora_enable is True
     lora_task_type: str = 'CAUSAL_LM'
     lora_r: int = 64
     lora_alpha: int = 256
     lora_dropout: float = 0.05
     lora_weight_path: str = ""
     lora_bias: str = "none"
-    non_lora_lr: Optional[float] = None
+    lora_lr: Optional[float] = None
     group_by_modality_length: bool = field(default=False)
     model_max_length: int = field(
         default=2048,
@@ -109,10 +109,24 @@ class HyperArguments(transformers.TrainingArguments):
     )
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-
-def rank0_print(*args):
-    if local_rank == 0:
-        print(*args)
+def _convert_to_type(value):
+    """
+    根据值的形式推断类型。支持 int, float 和 bool。
+    """
+    if not isinstance(value, str): return value
+    # 尝试推断布尔值
+    if value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    # 尝试推断整型
+    if value.isdigit():
+        return int(value)
+    # 尝试推断浮点数
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    # 否则，返回原始字符串
+    return value
 
 def parse_param():
     """
@@ -133,6 +147,27 @@ def parse_param():
     parser = transformers.HfArgumentParser((HyperArguments,))
     args, unknown_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
     local_rank = args.local_rank
+    
+    # 将unknown_args解析为字典
+    extra_args = {}
+    for arg in unknown_args:
+        if arg.startswith("--"):
+            key = arg[2:]  # 去掉 '--' 前缀
+            if "=" in key:  key, value = key.split('=', 1)
+            else: value = True  # 如果没有指定值（如 --flag），默认设置为 True
+            extra_args[key] = value
+    model_args = {}
+    # 动态将 `extra_args` 注入到 args 对象中
+    for key, value in extra_args.items():
+        try:
+            value = _convert_to_type(value)
+            if key.startswith('model.'): 
+                model_args[key[6:]] = value # 动态获取自定义的model_args, i.e.，以model.为起始的字符串
+            else:
+                setattr(args, key, value) # 设置非模型相关的参数为args的属性
+        except ValueError as e:
+            print(f"Warning: {e}")
+    args.model_args = model_args
     return args
 
 def main(args):
@@ -155,12 +190,13 @@ def main(args):
     set_seed(1)
     task_config = TASK_CONFIGS[args.task_name]
     args.camera_names = task_config['camera_names']
+    args.image_sizes = [args.image_size_primary if 'primary' in cam else args.image_size_wrist for cam in args.camera_names]
     # 加载模型
     model_module = importlib.import_module(f"vla.{args.model_name}") 
     assert hasattr(model_module, 'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
     model_components = model_module.load_model(args) # load_model是模型模块必须实现的接口
     model = model_components['model']
-    ml_utils.print_model_trainable_information(model, rank0_print=rank0_print)
+    ml_utils.print_model_trainable_information(model)
     # 加载数据集
     train_dataset, val_dataset = load_data(
         args, 
@@ -183,11 +219,13 @@ def main(args):
     )
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     # 保存模型
-    trainer.save_state()
-    trainer.save_model(args.output_dir)
+    if trainer.is_world_process_zero():
+        trainer.save_state()
+        trainer.save_model(args.output_dir)
 
 if __name__ == '__main__':
     args = parse_param()
     os.makedirs(args.output_dir, exist_ok=True)
-    ckpt = os.path.join(args.output_dir, f"checkpoint-{args.save_steps}")
+    all_ckpts = [os.path.join(args.output_dir, ckpt_name) for ckpt_name in os.listdir(args.output_dir) if ckpt_name.startswith('checkpoint-') and os.path.isdir(os.path.join(args.output_dir, ckpt_name))]
+    if len(all_ckpts)==0: args.resume_from_checkpoint = False
     main(args)

@@ -23,14 +23,14 @@ from robosuite.controllers import load_controller_config
 benchmark_dict = libero_bench.get_benchmark_dict()
 
 def create_env(config):
-    return LiberoEnv(config, action_space=config.space_name)
+    return LiberoEnv(config, ctrl_space=config.ctrl_space)
 
 class LiberoEnv(MetaEnv):
-    def __init__(self, config, action_space='ee', *args):
+    def __init__(self, config, ctrl_space='ee', *args):
         # 初始化env
         self.config = config
-        self.action_space=action_space
-        self.abs_control = False
+        self.ctrl_space=ctrl_space
+        self.ctrl_type = 'delta'
         env = self.create_env()
         super().__init__(env)
         
@@ -38,7 +38,7 @@ class LiberoEnv(MetaEnv):
         task_info = self.config.task.split('_')
         task_name = task_info[0] + '_' + task_info[1] # libero_{object, goal, spatial, 10, 90}
         task_id = int(task_info[-1])
-        action_space = "OSC_POSE" if self.action_space=='ee' else "JOINT_POSITION"  # ee or joint
+        ctrl_space = "OSC_POSE" if self.ctrl_space=='ee' else "JOINT_POSITION"  # ee or joint
         task_suite = benchmark_dict[task_name]()
         init_states = task_suite.get_task_init_states(task_id)
         task = task_suite.get_task(task_id)
@@ -67,10 +67,10 @@ class LiberoEnv(MetaEnv):
     def meta2act(self, maction: MetaAction):
         # MetaAct to action of libero
         # 先看MetaAct是什么类型的，再转成libero需要的类型: LIBERO 用的相对动作控制
-        assert maction['space_name']==self.action_space, f"The space_name of MetaAction {maction['space_name']} doesn't match the action space of environment {self.action_space}"
+        assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
         # TODO: 如何MetaAct不是相对的，先转成相对的
         # 先假定action都是相对的
-        assert maction['is_delta'], "Action must be relative action for LIBERO"
+        assert maction['ctrl_type']==self.ctrl_type, "Action must be delta action for LIBERO"
         actions = maction['action'] # (action_dim, )
         actions[:6] = actions[:6]/np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5]) # LIBERO内部会乘上该缩放值实现控制，所以提前抵消该缩放值保证能够正确执行
         actions[6] = 1.-2.*actions[6] # LIBERO使用01二元控制信号，实现
@@ -79,7 +79,8 @@ class LiberoEnv(MetaEnv):
     def obs2meta(self, obs):
         # gripper state
         gpos = obs['robot0_gripper_qpos']
-        gripper_state = np.array([(gpos[0]-gpos[1])/0.08]) # (1,)
+        # gripper_state = np.array([(gpos[0]-gpos[1])/0.08]) # (1,) with normalization
+        gripper_state = np.array([gpos[0]-gpos[1]]) # (1,) without normalization
         # ee state
         xyz = obs['robot0_eef_pos'] # (3,)
         euler = quat2axisangle(obs['robot0_eef_quat']) # (3,)

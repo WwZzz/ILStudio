@@ -102,26 +102,29 @@ def euler_angles_to_matrix(euler_angles: torch.Tensor, convention: str) -> torch
     return torch.matmul(torch.matmul(matrices[0], matrices[1]), matrices[2])
 
 
+
 def quat2axisangle(quat):
     """
     Converts quaternion to axis-angle format.
     Returns a unit vector direction scaled by its angle in radians.
-
     Args:
-        quat (np.array): (x,y,z,w) vec4 float angles
-
+        quat (np.array): shape (4,) or (n,4), representing (x, y, z, w)
     Returns:
-        np.array: (ax,ay,az) axis-angle exponential coordinates
+        np.array: shape (3,) or (n,3), representing axis-angle exponential coordinates
     """
-    # clip quaternion
-    if quat[3] > 1.0:
-        quat[3] = 1.0
-    elif quat[3] < -1.0:
-        quat[3] = -1.0
-
-    den = np.sqrt(1.0 - quat[3] * quat[3])
-    if math.isclose(den, 0.0):
-        # This is (close to) a zero degree rotation, immediately return
-        return np.zeros(3)
-    return (quat[:3] * 2.0 * math.acos(quat[3])) / den
-
+    quat = np.asarray(quat)  # 确保输入是 NumPy 数组
+    is_single = quat.ndim == 1  # 检测输入形状是否为 (4,)
+    if is_single:
+        quat = quat[np.newaxis, :]  # 如果是单一样本，调整形状为 (1, 4)
+    # Clip the w component to the valid range [-1, 1]
+    quat[:, 3] = np.clip(quat[:, 3], -1.0, 1.0)
+    # Compute the denominator (sin of half angle)
+    den = np.sqrt(1.0 - quat[:, 3] ** 2)
+    # Avoid numerical issues by handling near-zero sine values
+    axis_angle = np.zeros_like(quat[:, :3])  # Preallocate axis-angle array
+    nonzero_mask = ~np.isclose(den, 0.0)
+    axis_angle[nonzero_mask] = (
+        quat[nonzero_mask, :3] * 2.0 * np.arccos(quat[nonzero_mask, 3:4]) / den[nonzero_mask, np.newaxis]
+    )
+    # Return the result with the same dimensionality as the input
+    return axis_angle[0] if is_single else axis_angle

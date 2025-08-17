@@ -289,20 +289,6 @@ class TransformerDecoderLayer(nn.Module):
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
-def build_transformer_encoder(args):
-    encoder_layer = TransformerEncoderLayer(
-        args.hidden_dim, 
-        args.nheads, 
-        args.dim_feedforward,
-        args.dropout,
-        normalize_before=args.pre_norm
-    )
-    encoder_norm = nn.LayerNorm(args.hidden_dim) if args.pre_norm else None
-    return TransformerEncoder(
-        encoder_layer=encoder_layer,
-        num_layers=args.enc_layers,
-        norm=encoder_norm
-    )
 
 def build_transformer(args):
     return Transformer(
@@ -313,7 +299,7 @@ def build_transformer(args):
         num_encoder_layers=args.enc_layers,
         num_decoder_layers=args.dec_layers,
         normalize_before=args.pre_norm,
-        return_intermediate_dec=False,
+        return_intermediate_dec=True,
     )
 
 
