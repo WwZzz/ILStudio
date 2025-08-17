@@ -1,6 +1,6 @@
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 
-| ACT - Insertion                              | Diffusion - Transfer Cube                        | ACT - Transfer Cube                        |
+| ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Transfer Cube                        |
 |----------------------------------------------|--------------------------------------------------|--------------------------------------------|
 | ![ACT-Aloha](assets/act_aloha_insertion.gif) | ![DP-Aloha](assets/diffusion_aloha_transfer.gif) | ![ACT-Aloha](assets/act_transfer_cube.gif) |
 
