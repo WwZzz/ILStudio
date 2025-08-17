@@ -1,8 +1,8 @@
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 
-| ACT - Insertion                              | ACT - Transfer Cube                        | ACT - Transfer Cube                        |
-|----------------------------------------------|--------------------------------------------|--------------------------------------------|
-| ![ACT-Aloha](assets/act_aloha_insertion.gif) | ![ACT-Aloha](assets/act_transfer_cube.gif) | ![ACT-Aloha](assets/act_transfer_cube.gif) |
+| ACT - Insertion                              | Diffusion - Transfer Cube                        | ACT - Transfer Cube                        |
+|----------------------------------------------|--------------------------------------------------|--------------------------------------------|
+| ![ACT-Aloha](assets/act_aloha_insertion.gif) | ![DP-Aloha](assets/diffusion_aloha_transfer.gif) | ![ACT-Aloha](assets/act_transfer_cube.gif) |
 
 
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
