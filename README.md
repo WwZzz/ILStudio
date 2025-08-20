@@ -2,8 +2,7 @@
 
 | ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Square                                      |
 |----------------------------------------------|--------------------------------------------------|---------------------------------------------------|
-| ![ACT-Aloha](assets/act_aloha_insertion.gif) | ![DP-Aloha](assets/diffusion_aloha_transfer.gif) | ![ACT-Robomimic](assets/act_robomimic_square.gif) |
-
+| <img src="assets/act_aloha_insertion.gif" height="200"> | <img src="assets/diffusion_aloha_transfer.gif" height="200"> | <img src="assets/act_robomimic_square.gif" height="200"> |
 
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
