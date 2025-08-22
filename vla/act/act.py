@@ -33,8 +33,8 @@ class ACTPolicyConfig(PretrainedConfig):
         pre_norm=False,
         masks=False,
         # Policy-specific arguments
-        state_dim=7,
-        action_dim=7,
+        state_dim=14,
+        action_dim=14,
         **kwargs,  # Allow for future extensions
     ):
         super().__init__(**kwargs)

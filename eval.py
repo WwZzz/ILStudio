@@ -8,7 +8,6 @@ from data_utils.utils import set_seed, load_normalizer_from_meta, load_data, Wra
 import tensorflow as tf
 # from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
-from typing import List
 from pathlib import Path
 import argparse
 from tqdm import tqdm
@@ -24,7 +23,6 @@ os.environ["WANDB_DISABLED"] = "true"
 import importlib
 import IPython
 import torch
-import vla.utils as ml_utils
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
@@ -53,36 +51,6 @@ class HyperArguments:
     # freq: int = 16
     # save_dir: str = 'results/dp_test'
 
-    # model_name: str='replay'
-    # model_name_or_path: str='/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2/episode_00327.hdf5'
-    # norm_path: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/dp_test/normalize.json'
-    # chunk_size: int = field(default=1)
-    # freq: int = 1
-    # save_dir: str = 'results/replay_tmp'
-    
-    # model_name: str='replay'
-    # model_name_or_path: str='/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_scripted/episode_44.hdf5'
-    # norm_path: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_aloha_transfer-3rd/normalize.json'
-    # chunk_size: int = field(default=1)
-    # freq: int = 1
-    # save_dir: str = 'results/replay_aloha_scripted-2'
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_scripted'
-    
-    # model_name: str = 'diffusion_policy'
-    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/aloha_transfer_diffusion/checkpoint-50000"
-    # norm_path: str = ''
-    # chunk_size: int = field(default=16)
-    # freq: int = 16
-    # save_dir: str = 'results/dp_aloha_transer-checkpoint-50000-no-ema-random'
-    
-    # model_name: str = 'act'
-    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_transfer_cube_top_zscore"
-    # norm_path: str = ''
-    # chunk_size: int = field(default=100)
-    # freq: int = 100
-    # save_dir: str = 'results/act_aloha_transer-freq100-final'
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
-    
     model_name: str = 'diffusion_policy'
     model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/diffusion_policy_transfer_cube_top_zscore_official_aug"
     norm_path: str = ''
@@ -90,14 +58,6 @@ class HyperArguments:
     freq: int = 50
     save_dir: str = 'results/dp_aloha_transer-official-ema-freq50-dnoise10-aug'
     dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
-    
-    # model_name: str = 'act'
-    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_aloha_transfer_new2/checkpoint-320000"
-    # norm_path: str = ''
-    # chunk_size: int = field(default=50)
-    # freq: int = 50
-    # save_dir: str = 'results/act_aloha_transer-cam-320000-freq50'
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
     
     ################ simulator #############
     # env_name: str = field(default='libero')
@@ -113,10 +73,8 @@ class HyperArguments:
     max_timesteps: int = 400
     image_size: str = '(640, 480)' # (width, height)
     
-    # save_dir: str = ''
     ctrl_space: str = 'joint'
     ctrl_type: str = 'abs'
-    # abs_control: bool = False
     camera_ids: str = '[0]'
     
     #  ############ data ###################
@@ -177,7 +135,6 @@ def load_normalizers(args):
     # load normalizers
     if args.norm_path=='':
         res = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
-        print(res)
         if not os.path.exists(res):
             res = os.path.join(args.model_name_or_path, 'normalize.json')
             if not os.path.exists(res):

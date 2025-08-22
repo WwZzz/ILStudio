@@ -1,4 +1,0 @@
-defaults:
-  - cameras@static: static
-  - cameras@gripper: gripper
-  - cameras@tactile: tactile

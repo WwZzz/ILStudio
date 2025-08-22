@@ -222,7 +222,7 @@ class RobomimicDataset(EpisodicDataset):
             'pad_seq_length': True,
             'get_pad_mask': False,
             'goal_mode': None,
-            'hdf5_cache_mode': 'all' if self.data_args.preload_data else 'low_dim',
+            'hdf5_cache_mode': 'all' if getattr(self.data_args, 'preload_data else', True) else 'low_dim',
             'hdf5_use_swmr': True,
             'hdf5_normalize_obs': False,
             'filter_by_attribute': filter_by_attribute,
@@ -324,3 +324,56 @@ class RobomimicDataset(EpisodicDataset):
             )
             data_dict['image'] = image_dict
         return data_dict
+    
+    def __getitem__(self, index):
+        episode_id, start_ts = self._locate_transition(index)
+        dataset_path = self.dataset_path_list[episode_id] 
+        episode_len = self.episode_len[episode_id] 
+        data_dict = self.load_onestep_from_episode(dataset_path, start_ts) 
+        action, image_dict, state, raw_lang = data_dict['action'], data_dict['image'], data_dict['state'], data_dict['language_instruction']
+        reasoning = data_dict.get('reasoning', '')
+        padded_action = np.zeros((self.data_args.chunk_size, action.shape[1]), dtype=np.float32) 
+        padded_action[:action.shape[0]] = action
+        is_pad = np.zeros(self.data_args.chunk_size) 
+        is_pad[action.shape[0]:] = 1
+        all_cam_images = []
+        for cam_name in self.camera_names:
+            all_cam_images.append(image_dict[cam_name])
+        all_cam_images = np.stack(all_cam_images, axis=0) #把img叠成一个array
+        # normalize data
+        action_normalizer = self.action_normalizers.get(self.get_dataset_dir(), None)
+        if action_normalizer is not None:
+            action_data = action_normalizer.normalize(padded_action, datatype='action')
+        else:
+            action_data = padded_action
+            warnings.warn("No Normalization being applied to actions during training")
+        state_normalizer = self.state_normalizers.get(self.get_dataset_dir(), None)
+        if state_normalizer is not None:
+            state_data = state_normalizer.normalize(state, datatype='state')
+        else:
+            state_data = state
+            warnings.warn("No Normalization being applied to states during training")
+        # construct observations， 把array转成tensor
+        image_data = torch.from_numpy(all_cam_images)
+        state_data = torch.from_numpy(state_data).float()
+        action_data = torch.from_numpy(action_data).float()
+        is_pad = torch.from_numpy(is_pad).bool()
+        image_data = torch.einsum('k h w c -> k c h w', image_data) # 把图像交换通道
+        sample = {
+            'image': image_data,
+            'state': state_data,
+            'action': action_data,
+            'is_pad': is_pad,
+            'raw_lang': raw_lang,
+            'reasoning': reasoning
+        } # 构造样本dict
+        assert raw_lang is not None, ""
+        del image_data
+        del state_data
+        del action_data
+        del is_pad
+        del raw_lang
+        del reasoning
+        # gc.collect()
+        # torch.cuda.empty_cache()
+        return sample

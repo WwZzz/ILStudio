@@ -1,6 +1,7 @@
 import robomimic.utils.env_utils as EnvUtils
 import sys
 from tqdm import tqdm
+import time
 import torch
 # from eval.utils import run_rollout, setup_seed
 # from eval.config import ALL_ENV_CONFIGS
@@ -13,6 +14,8 @@ from benchmark.robomimic.constant import ALL_ENV_CONFIGS, ALL_ENV_LANGUAGES
 from data_utils.rotate import quat2axisangle
 from ..base import *
 from .constant import ALL_ENV_CONFIGS
+from multiprocessing import current_process
+import robomimic.utils.tensor_utils as TensorUtils
 
 ALL_TASKS = ['Lift_Panda', "PickPlaceCan_Panda", "NutAssemblySquare_Panda", "ToolHang_Panda", "TwoArmTransport_Panda"]
 
@@ -78,3 +81,13 @@ class RobomimicEnv(MetaEnv):
         image = (image*255.0).astype(np.uint8)
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
 
+    def step(self, *args, **kwargs):
+        obs, r, done, info = super().step(*args, **kwargs)
+        done = self.env.is_success().get('task', False)
+        return obs, r, done, info
+    
+    def reset(self):
+        pid = current_process().pid  # 获取当前进程 ID
+        seed = (pid * 1000 + time.time_ns()) % (2**32)  # 基于时间戳生成种子
+        np.random.seed(seed)
+        return super().reset()

@@ -151,7 +151,16 @@ TASK_CONFIGS = {
     'robomimic_square_ph':{
         'dataset_dir': [
             '/inspire/hdd/project/robot-action/public/data/robomimic/square/ph',
-            '/inspire/hdd/project/robot-action/public/data/robomimic/square/mh',
+        ],
+        'episode_len': 400,
+        'camera_names': ['primary', ],
+        'dataset_class': 'RobomimicDataset',
+        'ctrl_type': 'delta',
+        'ctrl_space': 'ee',
+    },
+    'NutAssemblySquare_Panda':{
+        'dataset_dir': [
+            '/inspire/hdd/project/robot-action/public/data/robomimic/square/ph',
         ],
         'episode_len': 400,
         'camera_names': ['primary', ],

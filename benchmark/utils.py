@@ -65,6 +65,8 @@ def evaluate(args, policy, env, video_writer=None):
             # 判断是否成功
             success = success | done
             if success.all(): 
+                for sidx in range(success.shape[0]):
+                    if horizons[sidx]>t: horizons[sidx] = t
                 break
             elif success.any():
                 success_idx = np.where(success==True)[0]

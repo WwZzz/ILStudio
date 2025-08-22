@@ -396,7 +396,7 @@ def load_normalizer_from_meta(dataset_dir:str, norm_meta):
     action_normalizer = NORMTYPE2CLASS[norm_meta['action'][dataset_dir]](dataset_dir, **kwargs)
     return {'state': state_normalizer, 'action': action_normalizer}
     
-def load_data(args, task_config):
+def load_data(args, task_config, save_norm=True):
     set_seed(0)
     dataset_dir_l = task_config['dataset_dir']
     episode_len = task_config['episode_len']
@@ -410,29 +410,28 @@ def load_data(args, task_config):
     data_class = task_config.get('dataset_class', 'EpisodicDataset')
     action_normtype = args.action_normalize
     state_normtype = args.state_normalize
-    batch_size_train, batch_size_val = args.per_device_train_batch_size, args.per_device_eval_batch_size
-    skip_mirrored_data=args.skip_mirrored_data
     if type(dataset_dir_l) == str: dataset_dir_l = [dataset_dir_l]
     if data_class=='EpisodicDataset': data_class = eval(data_class)
     else:
         data_class = getattr(importlib.import_module('data_utils.dataset'), data_class)
     # 以数据集为维度，计算统计量
-    datasets = [data_class(find_all_hdf5(dataset_dir, skip_mirrored_data), camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
-    
-    # 获取normalizer class
+    datasets = [data_class(find_all_hdf5(dataset_dir, True), camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
+        # 获取normalizer class
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
     # 计算数据集的统计量, 数据集内部可以根据h5文件所在dataset_dir来选择normalizer
     action_normalizers = {dataset.get_dataset_dir(): action_normalizer_class(dataset) for dataset in datasets}
     state_normalizers = {dataset.get_dataset_dir(): state_normalizer_class(dataset) for dataset in datasets}
+    if save_norm:
+        norm_meta = {'state': {k:str(v) for k,v in state_normalizers.items()}, 'action': {k:str(v) for k,v in action_normalizers.items()}, 'kwargs':{'ctrl_space':ctrl_space, 'ctrl_type':ctrl_type}}
+        save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
+            
     for dataset in datasets:
         dataset.set_action_normalizers(action_normalizers)
         dataset.set_state_normalizers(state_normalizers)
+        
     train_dataset = ConcatDataset(datasets)
-    x = train_dataset[0]
+    x = train_dataset[0] # test __getitem__
     val_dataset = None
 
-    norm_meta = {'state': {k:str(v) for k,v in state_normalizers.items()}, 'action': {k:str(v) for k,v in action_normalizers.items()}, 'kwargs':{'ctrl_space':ctrl_space, 'ctrl_type':ctrl_type}}
-    # save norm_meta 
-    save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
     return train_dataset, val_dataset

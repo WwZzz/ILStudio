@@ -18,6 +18,11 @@ class MetaAction:
         if len(self.action.shape)==1: return 1
         return self.action.shape[0]
     
+    def to_batch(self):
+        if self.action is not None: 
+            self.action = self.action[np.newaxis, :]
+
+    
 @dataclass
 class MetaObs:
     state: np.ndarray = None
@@ -28,10 +33,15 @@ class MetaObs:
     depth: np.ndarray = None # (K, H, W)
     pc: np.array = None # (n, 3)
     raw_lang: str = ''
-    depth: np.ndarray = None
     
     def __getitem__(self, key):
         return getattr(self, key)
+
+    def to_batch(self):
+        all_keys = ['state', 'state_ee', 'state_joint', 'state_obj', 'image', 'depth', 'pc' ]
+        for k in all_keys:
+            if self[k] is not None:
+                setattr(self, k, self[k][np.newaxis, :])
     
 META_OBS_KEYS = [f.name for f in fields(MetaObs)]
 META_ACT_KEYS = [f.name for f in fields(MetaAction)]
@@ -62,7 +72,6 @@ class MetaEnv:
     
     def meta2act(self, action, *args):
         # convert MetaAction into env-specific action WITHOUT normalizing data
-        
         raise NotImplementedError
     
     def reset(self):

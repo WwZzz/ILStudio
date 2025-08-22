@@ -1,0 +1,25 @@
+target: deploy.robot.dummy_robot.DummyRobot
+params:
+  config:
+    observation:
+      image:
+        primary:
+          shape: (640,480, 3)
+          dtype: uint8
+        wrist_left:
+          shape: (640, 480, 3)
+          dtype: uint8
+        wrist_right:
+          shape: (640, 480, 3)
+          dtype: uint8
+      qpos:
+        shape: (14,)
+        dtype: float32
+      qvel:
+        shape: (14,)
+        dtype: float32  
+    action:
+      shape: (14,)
+      dtype: float32
+    ctrl_type: abs
+    ctrl_space: joint
