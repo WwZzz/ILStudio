@@ -2,7 +2,6 @@
 
 import abc
 from typing import Dict, Optional, Sequence, List, Any
-import gymnasium as gym
 import numpy as np
 from benchmark.base import MetaAction, MetaObs
 
