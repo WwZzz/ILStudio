@@ -128,7 +128,7 @@ def load_normalizers(args):
     elif args.norm_path=='identity':
         from data_utils.normalize import Identity
         normalizers = dict(state=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space), action=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space))
-        return normalizers, args.ctrl_space, acts.ctrl_type
+        return normalizers, args.ctrl_space, args.ctrl_type
     else:
         res = args.norm_path
     with open(res, 'r') as f:
