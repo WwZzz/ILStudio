@@ -168,6 +168,15 @@ TASK_CONFIGS = {
         'ctrl_type': 'delta',
         'ctrl_space': 'ee',
     },
+    'agilex_transfer_cube': {
+        'dataset_dir': [
+            '/home/agilex/wz/data/sim_transfer_cube_scripted',
+        ],
+        'camera_names': ['primary',],
+        'dataset_class': 'AlohaSimDataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    }
 }
 
 ### ALOHA fixed constants
