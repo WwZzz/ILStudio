@@ -35,8 +35,8 @@ local_rank = None
 @dataclass
 class HyperArguments:
     robot_config: str = "configuration/robots/dummy.yaml"
-    publish_rate: int = 20
-    sensing_rate: int = 50
+    publish_rate: int = 5
+    sensing_rate: int = 10
     # ############## model  ################
     is_pretrained: bool = field(default=True)
     device: str = 'cuda'
@@ -159,9 +159,12 @@ def make_robot(robot_cfg: Dict, args):
     robot = RobotCls(config=robot_config, extra_args=args)
     # connect to robot
     retry_counts = 1
+    MAX_RETRY = 5
     while not robot.connect():
         print(f"Retrying for {retry_counts} time...")
         retry_counts += 1
+        if retry_counts>MAX_RETRY:
+            exit(0)
         time.sleep(1)
     return robot
 
@@ -173,20 +176,23 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
         while robot.is_running():
             # Blocking: Call interface to get synchronous data
             obs = robot.get_observation()
-            obs = robot.obs2meta(obs)
             if obs:
-                # Non-blocking: Put data into the queue
-                if not observation_queue.full():
-                    observation_queue.put(obs)
-                else:
-                    try:
-                        observation_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                    observation_queue.put(obs)
+                obs = robot.obs2meta(obs)
+                if obs:
+                    # Non-blocking: Put data into the queue
+                    if not observation_queue.full():
+                        observation_queue.put(obs)
+                    else:
+                        try:
+                            observation_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        observation_queue.put(obs)
             robot.rate_sleep(args.sensing_rate)
     except Exception as e:
         print(f"[Sensing Thread] An exception occurred: {e}")
+        traceback.print_exc()
+        robot.shutdown()
 
 
 def inference_producer(policy, normalizers, observation_queue: queue.Queue, action_queue: queue.Queue, args):
@@ -215,6 +221,7 @@ def inference_producer(policy, normalizers, observation_queue: queue.Queue, acti
         except Exception as e:
             print(f"[Inference Thread] An exception occurred: {e}")
             traceback.print_exc()
+            robot.shutdown()
 
 
 def action_consumer(robot: AbstractRobotInterface, args, action_queue: queue.Queue):
@@ -226,11 +233,13 @@ def action_consumer(robot: AbstractRobotInterface, args, action_queue: queue.Que
                 print("[Main Control Loop] New action found, updating...")
                 action = action_queue.get()
                 action = robot.meta2act(action)
+                input(f"The current action is {action}. Enter to execute action...")
                 robot.publish_action(action)
             robot.rate_sleep(args.publish_rate)
     except Exception as e:
         print(f"[Main Control Loop] An exception occurred: {e}")
         traceback.print_exc()
+        robot.shutdown()
 
 
 if __name__ == '__main__':
@@ -243,7 +252,7 @@ if __name__ == '__main__':
     assert hasattr(model_module,
                    'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
     model_components = model_module.load_model(args)  # load_model is an interface that the model module must implement
-    model = model_components['model']
+    model = model_components['model'].to('cuda')
     policy = MetaPolicy(policy=model, freq=args.freq, action_normalizer=normalizers['action'],
                         state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
 
@@ -254,7 +263,8 @@ if __name__ == '__main__':
         robot_cfg = yaml.safe_load(f)
 
     robot = make_robot(robot_cfg, args)
-
+    
+    print("Robot successfully loaded.")
     input("=" * 10 + "Press Enter to start evaluation..." + "=" * 10)
 
     # Create thread-safe queues

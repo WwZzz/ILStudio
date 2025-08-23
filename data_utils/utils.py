@@ -399,7 +399,7 @@ def load_normalizer_from_meta(dataset_dir:str, norm_meta):
 def load_data(args, task_config, save_norm=True):
     set_seed(0)
     dataset_dir_l = task_config['dataset_dir']
-    episode_len = task_config['episode_len']
+    # episode_len = task_config['episode_len']
     camera_names = task_config['camera_names']
     stats_dir_l = task_config.get('stats_dir', None)
     sample_weights = task_config.get('sample_weights', None)
