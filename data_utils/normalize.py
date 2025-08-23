@@ -251,6 +251,11 @@ class ZScoreNormalizer(BaseNormalizer):
         return data.astype(dtype)
     
 class Identity(BaseNormalizer):
+    def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):
+        print("Perform no normalization on actions and state")
+        self.ctrl_type = ctrl_type
+        self.ctrl_space = ctrl_space
+
     def __str__(self):
         return 'identity'
     

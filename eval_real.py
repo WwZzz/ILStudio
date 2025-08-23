@@ -117,7 +117,6 @@ def parse_param():
     args.model_args = model_args
     return args
 
-
 def load_normalizers(args):
     # load normalizers
     if args.norm_path == '':
@@ -126,6 +125,10 @@ def load_normalizers(args):
             res = os.path.join(args.model_name_or_path, 'normalize.json')
             if not os.path.exists(res):
                 raise FileNotFoundError("No normalize.json found")
+    elif args.norm_path=='identity':
+        from data_utils.normalize import Identity
+        normalizers = dict(state=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space), action=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space))
+        return normalizers, args.ctrl_space, acts.ctrl_type
     else:
         res = args.norm_path
     with open(res, 'r') as f:
