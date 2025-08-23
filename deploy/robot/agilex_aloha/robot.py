@@ -1,4 +1,4 @@
-from deploy.base import BaseRobot
+from deploy.robot.base import BaseRobot
 from .rosoperator import RosOperator
 from dataclasses import dataclass
 from types import SimpleNamespace
