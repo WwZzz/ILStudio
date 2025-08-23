@@ -1,3 +1,5 @@
+from configuration import TASK_CONFIGS
+
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 
 | ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Square                                      |
@@ -132,9 +134,36 @@ export MUJOCO_GL=egl
 
 # Quick Start Step by Step
 ## Simulation Data Preparation
+There are three ways to download the generated datasets.
+- 1) Download from the official repo [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O?usp=share_link)
+- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir /path/to/sim_transfer_cube_scripted`
+- 3) Generate the data by following the guidence in [link](https://github.com/tonyzhaozh/act)
 
-## Add Configuration
+## Add the dataset to configuration
+```python
+# configuration/constants.py
+TASK_CONFIGS = {
+    ...,
+    'sim_transfer_cube_scripted': {
+        'dataset_dir': [
+            '/path/to/sim_transfer_cube_scripted',
+        ],
+        'episode_len': 400,          
+        'camera_names': ['primary'], # using the front camera as vision input
+        'dataset_class': 'AlohaSimDataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    },
+    ...
+}
 
+```
 ## Train
+```shell
+bash scripts/example_train.sh
+```
 
 ## Eval
+```shell
+bash scripts/example_eval.sh
+```
