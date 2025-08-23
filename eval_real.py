@@ -1,18 +1,13 @@
 # eval_real.py (argparse version)
 import yaml
 import os
-import sys
 import traceback
 import time
-import copy
 import json
-import argparse
-import imageio
 import transformers
 import importlib
 import IPython
 import threading
-import math
 import queue
 import torch
 import numpy as np
@@ -35,7 +30,7 @@ local_rank = None
 @dataclass
 class HyperArguments:
     robot_config: str = "configuration/robots/dummy.yaml"
-    publish_rate: int = 5
+    publish_rate: int = 10
     sensing_rate: int = 10
     # ############## model  ################
     is_pretrained: bool = field(default=True)
@@ -177,6 +172,7 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
             # Blocking: Call interface to get synchronous data
             obs = robot.get_observation()
             if obs:
+                print(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
                 obs = robot.obs2meta(obs)
                 if obs:
                     # Non-blocking: Put data into the queue
@@ -188,6 +184,8 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
                         except queue.Empty:
                             pass
                         observation_queue.put(obs)
+            else:
+                print("[Sensing Thread] No Observation Found...")
             robot.rate_sleep(args.sensing_rate)
     except Exception as e:
         print(f"[Sensing Thread] An exception occurred: {e}")
@@ -230,10 +228,9 @@ def action_consumer(robot: AbstractRobotInterface, args, action_queue: queue.Que
     try:
         while robot.is_running():
             if not action_queue.empty():
-                print("[Main Control Loop] New action found, updating...")
                 action = action_queue.get()
                 action = robot.meta2act(action)
-                input(f"The current action is {action}. Enter to execute action...")
+                print(f"[Main Control Loop] New action {action} found, updating...")
                 robot.publish_action(action)
             robot.rate_sleep(args.publish_rate)
     except Exception as e:

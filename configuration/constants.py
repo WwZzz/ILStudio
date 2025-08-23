@@ -176,7 +176,17 @@ TASK_CONFIGS = {
         'dataset_class': 'AlohaSimDataset',
         'ctrl_type': 'abs',
         'ctrl_space': 'joint',
-    }
+    },
+    'sii_cut_steak':{
+        'dataset_dir': [
+            '/home/agilex/zxc/cobot_magic/collect_data/cut_steak/cut_steak',
+        ],
+        'episode_len': 400,
+        'camera_names': ['primary', 'wrist_left', 'wrist_right'],
+        'dataset_class': 'AlohaSIIDataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    },
 }
 
 ### ALOHA fixed constants

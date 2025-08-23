@@ -8,19 +8,14 @@ os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
 import importlib
 import IPython
-import matplotlib.pyplot as plt
-from sklearn.cluster import DBSCAN
-from sklearn.manifold import TSNE
-from sklearn.preprocessing import StandardScaler
 import torch
-import vla.utils as ml_utils
 import numpy as np
 from configuration.utils import *
 from data_utils.utils import set_seed, WrappedDataset, load_data
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
-from data_utils.cooker.episode_tools import extract_traj_feature_of_episode
+# from data_utils.cooker.episode_tools import extract_traj_feature_of_episode
 e = IPython.embed
 local_rank = None
 

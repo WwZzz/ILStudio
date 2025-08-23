@@ -1,11 +1,11 @@
 #!/bin/bash
 
-TASKNAME=agilex_transfer_cube
+TASKNAME=sii_cut_steak
 MODELNAME=act
 NORM=zscore
-OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${NORM}_long # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
+OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${NORM} # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
 
-python ./train.py \
+python ./visualize_episode.py \
     --task_name $TASKNAME \
     --output_dir $OUTPUT  \
     --model_name $MODELNAME \
@@ -17,11 +17,11 @@ python ./train.py \
     --action_dim 14 \
     --chunk_size 100 \
     --image_size_primary "(640,480)" \
-    --image_size_wrist "(256,256)" \
-    --max_steps 1000 \
-    --per_device_train_batch_size 8 \
+    --image_size_wrist "(640,480)" \
+    --max_steps 10000 \
+    --per_device_train_batch_size 2 \
     --save_strategy steps \
-    --save_steps 10 \
+    --save_steps 2000 \
     --save_total_limit 50 \
     --learning_rate 1e-4 \
     --lr_scheduler_type="constant" \
@@ -37,4 +37,3 @@ python ./train.py \
     --logging_dir $OUTPUT/log | tee $OUTPUT/log.log
 
 
-#   --resume_from_checkpoint True 
