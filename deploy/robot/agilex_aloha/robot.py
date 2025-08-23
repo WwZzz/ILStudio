@@ -12,7 +12,7 @@ class AgilexAloha(BaseRobot):
         self.ros_operator = RosOperator(SimpleNamespace(**config['ros_operator']))
         self.init_pos = config.get('init_pos', {})
 
-    def connect(self):
+    def reset(self):
         try:
             left = self.init_pos.get('left', None)
             right = self.init_pos.get('right', None)
@@ -20,8 +20,11 @@ class AgilexAloha(BaseRobot):
                 self.ros_operator.puppet_arm_publish_continuous(left0, right0)
             return True
         except Exception as e:
-            print("Failed to connect to robot")
+            print(f"Failed to reset robot to initial pos: \n Left: {left} \n Right: {right}")
             return False
+
+    def connect(self):
+        return self.reset()
 
     def get_observation(self) -> Dict[str, Any]:
         """
@@ -51,7 +54,7 @@ class AgilexAloha(BaseRobot):
         Simulates publishing an action command to the robot and validates the action format.
         """
         left_action, right_action = action[:7], action[7:14]
-        self.ros_operator.puppet_arm_publish(left_action, right_action)  # puppet_arm_publish_continuous_thread
+        self.ros_operator.puppet_arm_publish(left_action, right_action)
         if self.args.use_robot_base:
             vel_action = action[14:16]
             self.ros_operator.robot_base_publish(vel_action)
