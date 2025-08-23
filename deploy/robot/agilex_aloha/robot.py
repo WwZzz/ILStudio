@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Dict, Optional, Sequence, List, Any
 import numpy as np
+import rospy
 
 
 class AgilexAloha(BaseRobot):
@@ -73,5 +74,5 @@ class AgilexAloha(BaseRobot):
         time.sleep(1.0 / hz)
 
     def shutdown(self):
-        exit()
+        rospy.signal_shutdown("Shutdown robot node")
 
