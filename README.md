@@ -44,8 +44,9 @@ The model returned by `load_model` should implement:
 - ACT
 - Diffusion Policy
 - Qwen2VL+DP
+- Qwen2.5VL+DP
+- DiVLA
 - OpenVLA
-- Pi0
 
 # Dataset
 Each dataset refers to a dictionary containing 
@@ -127,3 +128,13 @@ if the platform is headless, please use the command below to solve this issue:
 ```shell
 export MUJOCO_GL=egl
 ```
+
+
+# Quick Start Step by Step
+## Simulation Data Preparation
+
+## Add Configuration
+
+## Train
+
+## Eval
