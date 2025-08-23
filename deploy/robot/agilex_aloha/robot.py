@@ -2,6 +2,7 @@ from deploy.robot.base import BaseRobot
 from .rosoperator import RosOperator
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Dict, Optional, Sequence, List, Any
 import numpy as np
 
 
