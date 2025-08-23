@@ -1,16 +1,13 @@
 torch==2.4.0
-torchvision==0..19.0
+torchvision==0.19.0
 torchaudio==2.4.0
 transformers
 accelerate
-deepsspeed=0.14.4
+deepspeed==0.14.4
 opencv-python==4.9.0.80
 tensorflow==2.19.0
-tensorflow_dataset
+tensorflow_datasets
 rospkg==1.5.0
 imageio==2.37.0
 pillow==11.3.0
-
-
-
 
