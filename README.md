@@ -1,5 +1,3 @@
-from configuration import TASK_CONFIGS
-
 # IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 
 | ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Square                                      |
