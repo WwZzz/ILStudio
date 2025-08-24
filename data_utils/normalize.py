@@ -86,6 +86,10 @@ from collections import defaultdict
 from benchmark.base import MetaAction, MetaObs  
 from typing import List
 import fnmatch
+import hashlib
+
+def str2hash(s: str):
+    return str(hashlib.md5(s.encode()).hexdigest())
 
 def find_all_hdf5(dataset_dir, skip_mirrored_data):
     hdf5_files = []
@@ -110,17 +114,21 @@ class BaseNormalizer:
             self.dataset_dir = dataset.get_dataset_dir() # the directionary path of .hdf5 files
             self.ctrl_type = self.dataset.ctrl_type
             self.ctrl_space = self.dataset.ctrl_space
-        self.dataset_name = dataset_name
+        self.dataset_name = 'd' + str2hash(self.dataset_dir) if dataset_name is None else dataset_name
         self.gripper_indices = gripper_indices
-        self.stats_filename = f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl' if dataset_name is None else f"{dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
+        self.stats_filename = f"{self.dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
         if self.is_stats_exist():
             self.all_stats = self.load_stats()
         else:
             assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
             self.all_stats = self.compute_and_save_stats()
 
+    @classmethod
+    def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):
+        return f"{'d' + str2hash(dataset_dir)}_stats_{ctrl_space}_{ctrl_type}.pkl"
+
     def is_stats_exist(self):
-        return os.path.exists(os.path.join(self.dataset_dir, self.stats_filename))
+        return os.path.exists(os.path.join(self.dataset_dir, self.stats_filename)) or os.path.exists(os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl'))
 
     def compute_stats_for_array(self, data_k):
         return {
@@ -153,9 +161,27 @@ class BaseNormalizer:
     def save_stats(self, all_stats):
         with open(os.path.join(self.dataset_dir, self.stats_filename), 'wb') as file:  # 使用二进制写模式 ('wb')
             pickle.dump(all_stats, file)
-    
+
+    def save_stats_to_(self, target_dir:str):
+        """Save the dataset's stats to `target_dir`"""
+        assert hasattr(self, all_stats) and self.all_stats is not None, "No stats found."
+        stats_to_save = {
+            k: {
+                kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
+            } if isinstance(v, dict) else v for k,v in self.all_stats.items()
+        }
+        save_path = os.path.join(target_dir, self.stats_filename)
+        if os.path.exists(save_path): raise FileExistsError(f"Stats file {save_path} already exists.")
+        with open(save_path, 'wb') as file:  # 使用二进制写模式 ('wb')
+            pickle.dump(stats_to_save, file)
+
     def load_stats(self):
-        with open(os.path.join(self.dataset_dir, self.stats_filename), 'rb') as file:  
+        stats_path = os.path.join(self.dataset_dir, self.stats_filename)
+        if not os.path.exists(stats_path):
+            stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+            if not os.path.exists(stats_path):
+                raise FileExistsError(f"Stats file {os.path.join(self.dataset_dir, self.stats_filename)} does not exist.")
+        with open(os.path.join(self.dataset_dir, self.stats_filename), 'rb') as file:
             all_stats = pickle.load(file)
         all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         return all_stats

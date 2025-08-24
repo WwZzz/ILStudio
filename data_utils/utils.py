@@ -401,10 +401,8 @@ def load_data(args, task_config, save_norm=True):
     dataset_dir_l = task_config['dataset_dir']
     # episode_len = task_config['episode_len']
     camera_names = task_config['camera_names']
-    stats_dir_l = task_config.get('stats_dir', None)
     sample_weights = task_config.get('sample_weights', None)
     train_ratio = task_config.get('train_ratio', 1.0)
-    name_filter = task_config.get('name_filter', lambda n: n.endswith('hdf5'))
     ctrl_space = task_config.get('ctrl_space', 'ee')
     ctrl_type = task_config.get('ctrl_type', 'delta')
     data_class = task_config.get('dataset_class', 'EpisodicDataset')
@@ -425,7 +423,11 @@ def load_data(args, task_config, save_norm=True):
     if save_norm:
         norm_meta = {'state': {k:str(v) for k,v in state_normalizers.items()}, 'action': {k:str(v) for k,v in action_normalizers.items()}, 'kwargs':{'ctrl_space':ctrl_space, 'ctrl_type':ctrl_type}}
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
-            
+        for dataset_dir_l, normalizer_l in state_normalizers.items():
+            try:
+                normalizer_l.save_stats_to_(args.output_dir)
+            except Exception as e:
+                print("Failed to save normalizer stats of {} because {}".format(dataset_dir_l, e))
     for dataset in datasets:
         dataset.set_action_normalizers(action_normalizers)
         dataset.set_state_normalizers(state_normalizers)
