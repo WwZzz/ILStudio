@@ -1,16 +1,13 @@
-import pickle
 import os
-import time
 import transformers
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
 import importlib
 import IPython
-import torch
 import vla.utils as ml_utils
 from configuration.utils import *
-from data_utils.utils import set_seed, WrappedDataset, load_data
+from data_utils.utils import set_seed, WrappedDataset, load_data, _convert_to_type
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
@@ -108,25 +105,6 @@ class HyperArguments(transformers.TrainingArguments):
         metadata={"help": "How many bits to use."}
     )
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-def _convert_to_type(value):
-    """
-    根据值的形式推断类型。支持 int, float 和 bool。
-    """
-    if not isinstance(value, str): return value
-    # 尝试推断布尔值
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    # 尝试推断整型
-    if value.isdigit():
-        return int(value)
-    # 尝试推断浮点数
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    # 否则，返回原始字符串
-    return value
 
 def parse_param():
     """

@@ -125,7 +125,7 @@ class BaseNormalizer:
 
     @classmethod
     def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):
-        return f"{'d' + str2hash(dataset_dir)}_stats_{ctrl_space}_{ctrl_type}.pkl"
+        return f"{'d' + str2hash(dataset_dir)}"
 
     def is_stats_exist(self):
         return os.path.exists(os.path.join(self.dataset_dir, self.stats_filename)) or os.path.exists(os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl'))
@@ -164,7 +164,7 @@ class BaseNormalizer:
 
     def save_stats_to_(self, target_dir:str):
         """Save the dataset's stats to `target_dir`"""
-        assert hasattr(self, all_stats) and self.all_stats is not None, "No stats found."
+        assert hasattr(self, 'all_stats') and self.all_stats is not None, "No stats found."
         stats_to_save = {
             k: {
                 kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
@@ -181,7 +181,7 @@ class BaseNormalizer:
             stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
             if not os.path.exists(stats_path):
                 raise FileExistsError(f"Stats file {os.path.join(self.dataset_dir, self.stats_filename)} does not exist.")
-        with open(os.path.join(self.dataset_dir, self.stats_filename), 'rb') as file:
+        with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
         all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         return all_stats

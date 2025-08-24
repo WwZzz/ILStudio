@@ -15,7 +15,7 @@ import importlib
 from time import time
 from torch.utils.data import TensorDataset, DataLoader, ConcatDataset
 from torchvision.transforms.functional import to_pil_image, to_tensor
-from .normalize import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
+from .normalize import BaseNormalizer, MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 from configuration.utils import *
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
@@ -387,13 +387,15 @@ def save_norm_meta_to_json(file_path: str, data: dict):
         # 截断多余内容（当新内容比旧内容短时）
         f.truncate()
 
-def load_normalizer_from_meta(dataset_dir:str, norm_meta):
+def load_normalizer_from_meta(dataset_dir:str, norm_meta, src_dir=''):
     if isinstance(norm_meta, str):
         with open(norm_meta, 'r') as f:
             norm_meta = json.load(f)
     kwargs = norm_meta.get('kwargs', {})
-    state_normalizer = NORMTYPE2CLASS[norm_meta['state'][dataset_dir]](dataset_dir, **kwargs)
-    action_normalizer = NORMTYPE2CLASS[norm_meta['action'][dataset_dir]](dataset_dir, **kwargs)
+    if src_dir=='': src_dir = dataset_dir
+    dname = BaseNormalizer.meta2name(dataset_dir=dataset_dir, ctrl_space=kwargs.get('ctrl_space', 'ee'), ctrl_type=kwargs.get('ctrl_type', 'delta'))
+    state_normalizer = NORMTYPE2CLASS[norm_meta['state'][dataset_dir]](src_dir, dataset_name=dname, **kwargs)
+    action_normalizer = NORMTYPE2CLASS[norm_meta['action'][dataset_dir]](src_dir, dataset_name=dname, **kwargs)
     return {'state': state_normalizer, 'action': action_normalizer}
     
 def load_data(args, task_config, save_norm=True):
@@ -437,3 +439,38 @@ def load_data(args, task_config, save_norm=True):
     val_dataset = None
 
     return train_dataset, val_dataset
+
+def load_normalizers(args):
+    # load normalizers
+    if args.norm_path=='':
+        res = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
+        if not os.path.exists(res):
+            res = os.path.join(args.model_name_or_path, 'normalize.json')
+            if not os.path.exists(res):
+                raise FileNotFoundError("No normalize.json found")
+    else:
+        res = args.norm_path
+    with open(res, 'r') as f:
+        norm_meta = json.load(f)
+    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(res))
+    kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
+    return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
+
+def _convert_to_type(value):
+    """
+    Infers the type of a value based on its format. Supports int, float, and bool.
+    """
+    if not isinstance(value, str): return value
+    # Attempt to infer boolean value
+    if value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    # Attempt to infer integer type
+    if value.isdigit():
+        return int(value)
+    # Attempt to infer float type
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    # Otherwise, return the original string
+    return value

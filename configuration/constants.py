@@ -170,7 +170,7 @@ TASK_CONFIGS = {
     },
     'agilex_transfer_cube': {
         'dataset_dir': [
-            '/home/agilex/wz/data/sim_transfer_cube_scripted',
+            '/home/agilex/wz/data/aloha_sim/sim_transfer_cube_scripted',
         ],
         'camera_names': ['primary',],
         'dataset_class': 'AlohaSimDataset',

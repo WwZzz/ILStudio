@@ -4,7 +4,7 @@ from tianshou.env import SubprocVectorEnv
 import time
 import copy
 import json
-from data_utils.utils import set_seed, load_normalizer_from_meta, load_data, WrappedDataset
+from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 import tensorflow as tf
 # from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
@@ -86,25 +86,6 @@ class HyperArguments:
   
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-def _convert_to_type(value):
-    """
-    根据值的形式推断类型。支持 int, float 和 bool。
-    """
-    if not isinstance(value, str): return value
-    # 尝试推断布尔值
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    # 尝试推断整型
-    if value.isdigit():
-        return int(value)
-    # 尝试推断浮点数
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    # 否则，返回原始字符串
-    return value
-
 def parse_param():
     global local_rank
     # 用HFParser来传递参数，定义在上边的dataclass里
@@ -132,22 +113,6 @@ def parse_param():
             print(f"Warning: {e}")
     args.model_args = model_args
     return args
-
-def load_normalizers(args):
-    # load normalizers
-    if args.norm_path=='':
-        res = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
-        if not os.path.exists(res):
-            res = os.path.join(args.model_name_or_path, 'normalize.json')
-            if not os.path.exists(res):
-                raise FileNotFoundError("No normalize.json found")
-    else:
-        res = args.norm_path
-    with open(res, 'r') as f:
-        norm_meta = json.load(f)
-    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta)
-    kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
-    return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
 
 if __name__=='__main__':
     set_seed(0)

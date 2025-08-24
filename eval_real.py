@@ -3,17 +3,15 @@ import yaml
 import os
 import traceback
 import time
-import json
 import transformers
 import importlib
-import IPython
 import threading
 import queue
 import torch
 import numpy as np
 from benchmark.base import MetaPolicy
-from data_utils.utils import set_seed, load_normalizer_from_meta
-from deploy.robot.base import AbstractRobotInterface
+from data_utils.utils import set_seed,  _convert_to_type, load_normalizers
+from deploy.robot.base import AbstractRobotInterface, RateLimiter
 from PIL import Image, ImageDraw, ImageFont
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
@@ -23,23 +21,28 @@ from configuration.constants import TASK_CONFIGS
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
-e = IPython.embed
 local_rank = None
 
+action_lock = threading.Lock()
 
 @dataclass
 class HyperArguments:
     robot_config: str = "configuration/robots/dummy.yaml"
-    publish_rate: int = 10
-    sensing_rate: int = 10
+    # publish_rate决定动作消费的频率，如果太慢，会导致动作还没消费就被顶替（缓冲区较小时），造成大的抖动；如果消费太快，动作生产者跟不上消费的速度，会造成很多卡顿；此外，机器执行跟不上消费的速度，也会导致动作被发送却没执行完毕，造成动作被浪费；
+    publish_rate: int = 25
+    # sensing_rate和freq共同决定推理的频率，一方面是需要推理时需要观测，此时没观测会被阻塞，所以观测率不应该太低；另一方面freq决定了多少步推理一次，上回推理结果没用完不会执行推理；
+    sensing_rate: int = 200
+    freq: int = 100 # 对应每次推理往动作缓冲区推送的总动作数量；
+    # chunk_size决定了动作缓冲区的大小，太大则会导致存储了很多过时的动作，若消费不及时，则导致动作跟不上观测，执行慢半拍；太小的话若是消费不及时，容易造成大的跳跃式动作；这个越小，消费应越快；
+    chunk_size: int = field(default=10)
+    action_buffer_size: int = field(default=10)
+
     # ############## model  ################
     is_pretrained: bool = field(default=True)
     device: str = 'cuda'
     model_name: str = 'act'
     model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_sfov1_insertion_top_zscore_tau_0.01"
     norm_path: str = ''
-    chunk_size: int = field(default=50)
-    freq: int = 50
     save_dir: str = 'results/real_debug'
     dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted'
     task: str = field(default="sim_transfer_cube_scripted")
@@ -61,27 +64,6 @@ class HyperArguments:
 
 
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-def _convert_to_type(value):
-    """
-    Infers the type of a value based on its format. Supports int, float, and bool.
-    """
-    if not isinstance(value, str): return value
-    # Attempt to infer boolean value
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    # Attempt to infer integer type
-    if value.isdigit():
-        return int(value)
-    # Attempt to infer float type
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    # Otherwise, return the original string
-    return value
-
-
 def parse_param():
     global local_rank
     # Use HFParser to pass parameters, which are defined in the dataclass above
@@ -111,27 +93,6 @@ def parse_param():
             print(f"Warning: {e}")
     args.model_args = model_args
     return args
-
-def load_normalizers(args):
-    # load normalizers
-    if args.norm_path == '':
-        res = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
-        if not os.path.exists(res):
-            res = os.path.join(args.model_name_or_path, 'normalize.json')
-            if not os.path.exists(res):
-                raise FileNotFoundError("No normalize.json found")
-    elif args.norm_path=='identity':
-        from data_utils.normalize import Identity
-        normalizers = dict(state=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space), action=Identity(ctrl_type=args.ctrl_type, ctrl_space=args.ctrl_space))
-        return normalizers, args.ctrl_space, args.ctrl_type
-    else:
-        res = args.norm_path
-    with open(res, 'r') as f:
-        norm_meta = json.load(f)
-    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta)
-    kwargs = norm_meta.get('kwargs', {'ctrl_type': 'delta', 'ctrl_space': 'ee'})
-    return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type']
-
 
 # from deploy.robots.ros_robot import ROSRobot # Example for a real robot
 
@@ -168,75 +129,60 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
     """Sensing producer thread, uses an abstract interface to get observations."""
     print("[Sensing Thread] Producer started.")
     try:
+        rate_limiter = RateLimiter()
         while robot.is_running():
             # Blocking: Call interface to get synchronous data
             obs = robot.get_observation()
+            t_obs = time.perf_counter()
             if obs:
                 print(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
                 obs = robot.obs2meta(obs)
                 if obs:
                     # Non-blocking: Put data into the queue
                     if not observation_queue.full():
-                        observation_queue.put(obs)
+                        observation_queue.put((obs, t_obs))
                     else:
                         try:
                             observation_queue.get_nowait()
                         except queue.Empty:
                             pass
-                        observation_queue.put(obs)
-            else:
-                print("[Sensing Thread] No Observation Found...")
-            robot.rate_sleep(args.sensing_rate)
+                        observation_queue.put((obs, t_obs))
+            # else:
+            #     print("[Sensing Thread] No Observation Found...")
+            rate_limiter.sleep(args.sensing_rate)
     except Exception as e:
         print(f"[Sensing Thread] An exception occurred: {e}")
         traceback.print_exc()
         robot.shutdown()
 
 
-def inference_producer(policy, normalizers, observation_queue: queue.Queue, action_queue: queue.Queue, args):
+def inference_producer(policy, observation_queue: queue.Queue, action_queue: queue.Queue, args):
     """Inference producer thread, consumes observation data and produces actions."""
     print("[Inference Thread] Producer started.")
+    global action_lock
     with torch.no_grad():
         try:
             t = 0
             while True:
                 # Blocking: Wait for observation data
-                obs = observation_queue.get()
+                obs, t_obs = observation_queue.get()
                 obs.to_batch()
                 # Blocking: Execute model inference
-                act = policy.select_action(obs, t)[0]
+                act = policy.select_action(obs, t, return_all=False)
                 t += 1
-                # Non-blocking: Put action into the queue
-                if not action_queue.full():
-                    action_queue.put(act)
-                else:
-                    try:
-                        action_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                    action_queue.put(act)
-
+                action_lock.acquire()
+                for i in range(len(act)):
+                    if action_queue.full():
+                        try:
+                            action_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    action_queue.put(act[i])
+                action_lock.release()
         except Exception as e:
             print(f"[Inference Thread] An exception occurred: {e}")
             traceback.print_exc()
             robot.shutdown()
-
-
-def action_consumer(robot: AbstractRobotInterface, args, action_queue: queue.Queue):
-    """Main control loop, consumes actions and publishes them."""
-    print("[Main Control Loop] Consumer started.")
-    try:
-        while robot.is_running():
-            if not action_queue.empty():
-                action = action_queue.get()
-                action = robot.meta2act(action)
-                print(f"[Main Control Loop] New action {action} found, updating...")
-                robot.publish_action(action)
-            robot.rate_sleep(args.publish_rate)
-    except Exception as e:
-        print(f"[Main Control Loop] An exception occurred: {e}")
-        traceback.print_exc()
-        robot.shutdown()
 
 
 if __name__ == '__main__':
@@ -266,26 +212,31 @@ if __name__ == '__main__':
 
     # Create thread-safe queues
     observation_queue = queue.Queue(maxsize=1)
-    action_queue = queue.Queue(maxsize=1)
+    action_queue = queue.Queue(maxsize=args.chunk_size)
 
     # Start producer and consumer threads
     sensing_thread = threading.Thread(target=sensing_producer, args=(robot, observation_queue, args))
     inference_thread = threading.Thread(target=inference_producer,
-                                        args=(policy, normalizers, observation_queue, action_queue, args))
-    control_thread = threading.Thread(target=action_consumer, args=(robot, args, action_queue))
+                                        args=(policy, observation_queue, action_queue, args))
 
     sensing_thread.daemon = True
     inference_thread.daemon = True
-    control_thread.daemon = True
 
     sensing_thread.start()
     inference_thread.start()
-    control_thread.start()
 
-    print("\nAll threads started. Press Ctrl+C to exit.")
+    print("[Main Control Loop] Consumer started.")
     try:
+        rate_limiter = RateLimiter()
         while robot.is_running():
-            time.sleep(1)
+            if not action_queue.empty():
+                action_lock.acquire()
+                action = action_queue.get()
+                action_lock.release()
+                action = robot.meta2act(action)
+                print(f"[Main Control Loop] New action {action} found, updating...")
+                robot.publish_action(action)
+            rate_limiter.sleep(args.publish_rate)
     except KeyboardInterrupt:
-        print("\nProgram terminated.")
-        robot.shutdown_event.set()
+        print(f"[Main Control Loop] An exception occurred: {e}")
+        robot.shutdown()

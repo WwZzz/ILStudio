@@ -109,35 +109,46 @@ class MetaPolicy:
             mact = MetaAction(action=action, ctrl_space=ctrl_space, ctrl_type=ctrl_type) # (B, chunk_size, dim) or (chunk_size, dim)
         return mact 
     
-    def select_action(self, mobs: MetaObs, t:int):
+    def is_action_queue_empty(self):
+        return len(self.action_queue)==0
+
+    def inference(self, mobs: MetaObs):
+        normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
+        # 转换MetaObs
+        policy_obs = self.meta2obs(normed_mobs)
+        # 推理动作
+        action_chunk = self.policy.select_action(policy_obs)
+        # 动作转为MetaAction  (B, chunk_size, action_dim)
+        macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
+        action_chunk = macts.action
+        is_chunked = (len(action_chunk.shape)==3)
+        bs = action_chunk.shape[0]
+        ac_dim = action_chunk.shape[-1]
+        if is_chunked:
+            macts.action = action_chunk.reshape(-1, ac_dim)
+        # 反归一化动作
+        macts = self.action_normalizer.denormalize_metaact(macts)
+        if is_chunked:
+            macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
+        else:
+            macts.action = macts.action[np.newaxis, :]
+        mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
+        mact_list = mact_list[:self.freq]
+        return mact_list
+
+    def select_action(self, mobs: MetaObs, t:int, return_all=False):
         # Normalzing Obs and Actions
         if t % self.freq == 0 or len(self.action_queue)==0:
-            # 归一化观测的state
-            normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
-            # 转换MetaObs
-            policy_obs = self.meta2obs(normed_mobs)
-            # 推理动作
-            action_chunk = self.policy.select_action(policy_obs)
-            # 动作转为MetaAction  (B, chunk_size, action_dim)
-            macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
-            action_chunk = macts.action
-            is_chunked = (len(action_chunk.shape)==3)
-            bs = action_chunk.shape[0]
-            ac_dim = action_chunk.shape[-1]
-            if is_chunked:
-                macts.action = action_chunk.reshape(-1, ac_dim)
-            # 反归一化动作
-            macts = self.action_normalizer.denormalize_metaact(macts)
-            if is_chunked:
-                macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
-            else:
-                macts.action = macts.action[np.newaxis, :]
+            mact_list = self.inference(mobs)
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
-            mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
-            mact_list = mact_list[:self.freq]
             self.action_queue.extend(mact_list)
         # 从队列里拿动作
+        if return_all:
+            all_macts = []
+            while len(self.action_queue) > 0:
+                all_macts.append(self.action_queue.popleft())
+            return np.concatenate(all_macts)
         mact = self.action_queue.popleft()
         return mact
     
