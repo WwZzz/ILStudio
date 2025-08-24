@@ -27,7 +27,7 @@ from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
 from configuration.constants import TASK_CONFIGS
-
+import multiprocessing as mp
 e = IPython.embed
 local_rank = None
 
@@ -80,6 +80,8 @@ class HyperArguments:
     #  ############ data ###################
     image_size_primary: str = "(640,480)"  # image size of non-wrist camera
     image_size_wrist: str = "(640,480)" # image size of wrist camera
+
+    use_spawn: bool = False
 
   
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -150,6 +152,8 @@ def load_normalizers(args):
 if __name__=='__main__':
     set_seed(0)
     args = parse_param()
+    if args.use_spawn: mp.set_start_method('spawn', force=True)
+
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
     # load policy
