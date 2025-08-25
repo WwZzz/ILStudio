@@ -95,5 +95,4 @@ class BaseRobot(AbstractRobotInterface):
 
     def obs2meta(self, obs):
         """Convert the observations from the robot to MetaObs"""
-        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'],
-                       image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))
+        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))

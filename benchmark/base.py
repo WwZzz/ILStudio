@@ -118,7 +118,7 @@ class MetaPolicy:
         policy_obs = self.meta2obs(normed_mobs)
         # 推理动作
         action_chunk = self.policy.select_action(policy_obs)
-        # 动作转为MetaAction  (B, chunk_size, action_dim)
+        # (B, chunk_size, action_dim)
         macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
         action_chunk = macts.action
         is_chunked = (len(action_chunk.shape)==3)

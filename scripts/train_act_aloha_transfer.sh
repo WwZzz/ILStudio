@@ -1,9 +1,9 @@
 #!/bin/bash
 
-TASKNAME=agilex_transfer_cube
+TASKNAME=transfer_cube_top
 MODELNAME=act
 NORM=zscore
-OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${NORM}_long # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
+OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${NORM}_long2 # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
 
 python ./train.py \
     --task_name $TASKNAME \
