@@ -1,10 +1,18 @@
 import collections
 import threading
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 import numpy as np
 import time
 import queue
+
+def load_action_manager(manager_name: str, manager_config: Any):
+    try: 
+        MANAGER_CLASS = eval(manager_name)
+    except Exception as e:
+        print(f"Failed to load manager class {manager_name}")
+    manager = MANAGER_CLASS(manager_config)
+    return manager
 
 class AbstractActionManager(ABC):
     @abstractmethod
@@ -16,7 +24,7 @@ class AbstractActionManager(ABC):
     def get(self, timestamp: float=None):
         """Get one-step action from local cache"""
         pass
-    
+
 class BasicActionManager(AbstractActionManager):
     """Drop out the previous chunk directly whenever the new one comes"""
     def __init__(self, config):
@@ -39,11 +47,28 @@ class BasicActionManager(AbstractActionManager):
             self.current_step += 1
             return action
         
+class OlderFirstManager(BasicActionManager):
+    """Refuse newly coming chunks unless the last chunk ends x%"""
+    def __init__(self, config):
+        super().__init__(config)
+        self.coef = getattr(config, 'manager_coef', 1.0)
+    
+    def put(self, chunk, timestamp:float=None):
+        if self._chunk_buffer is None:
+            super().put(chunk, timestamp)
+        else:
+            with self._lock:
+                if self.current_step < int(len(self._chunk_buffer)*self.coef):
+                    return
+            super().put(chunk, timestamp)
+
+
+
 class TemporalAggManager(BasicActionManager):
     """Expotionally average the last and the new chunks for better smoothness"""
     def __init__(self, config):
         super().__init__(config)
-        self.coef = getattr(config, 'temporal_coef', 0.1)
+        self.coef = getattr(config, 'manager_coef', 0.1)
 
     def put(self, chunk, timestamp:float=None):
         if self._chunk_buffer is None: 
@@ -60,11 +85,29 @@ class TemporalAggManager(BasicActionManager):
                 self._chunk_buffer = chunk
                 self.current_step = 0
                     
+
+class TemporalOlderManager(TemporalAggManager):
+    """Refuse newly coming chunks until the last chunk ends x%"""
+    def __init__(self, config):
+        super().__init__(config)
+        self.older_coef = 0.75
+    
+    def put(self, chunk, timestamp:float=None):
+        if self._chunk_buffer is None:
+            with self._lock:
+                self._chunk_buffer = chunk
+                self.current_step = 0
+        else:
+            with self._lock:
+                if self.current_step < int(len(self._chunk_buffer)*self.older_coef):
+                    return
+            super().put(chunk, timestamp)
+
 class DelayFreeManager(BasicActionManager):
     """Remove the outdated ations from each chunk"""
     def __init__(self, config):
         super().__init__(config)
-        self.duration = getattr(config, 'duration', 0.05)
+        self.duration = getattr(config, 'manager_coef', 0.05)
         
     
     def put(self, chunk, timestamp:float=None):

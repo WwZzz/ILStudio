@@ -126,7 +126,7 @@ if __name__=='__main__':
     assert hasattr(model_module, 'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
     model_components = model_module.load_model(args) # load_model是模型模块必须实现的接口
     model = model_components['model']
-    policy = MetaPolicy(policy=model, freq=args.freq, action_normalizer=normalizers['action'], state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
+    policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'], state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
     # load env
     env_module = importlib.import_module(f"benchmark.{args.env_name}") 
     if not hasattr(env_module, 'create_env'): raise AttributeError(f"env {args.env_name} has no 'create_env'")

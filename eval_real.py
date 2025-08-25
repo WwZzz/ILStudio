@@ -17,13 +17,14 @@ from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List, Any
 from configuration.constants import TASK_CONFIGS
+from deploy.action_manager import load_action_manager
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
 local_rank = None
 
-action_lock = threading.Lock()
+# action_lock = threading.Lock()
 
 @dataclass
 class HyperArguments:
@@ -31,11 +32,8 @@ class HyperArguments:
     # publish_rate决定动作消费的频率，如果太慢，会导致动作还没消费就被顶替（缓冲区较小时），造成大的抖动；如果消费太快，动作生产者跟不上消费的速度，会造成很多卡顿；此外，机器执行跟不上消费的速度，也会导致动作被发送却没执行完毕，造成动作被浪费；
     publish_rate: int = 25
     # sensing_rate和freq共同决定推理的频率，一方面是需要推理时需要观测，此时没观测会被阻塞，所以观测率不应该太低；另一方面freq决定了多少步推理一次，上回推理结果没用完不会执行推理；
-    sensing_rate: int = 200
-    freq: int = 100 # 对应每次推理往动作缓冲区推送的总动作数量；
-    # chunk_size决定了动作缓冲区的大小，太大则会导致存储了很多过时的动作，若消费不及时，则导致动作跟不上观测，执行慢半拍；太小的话若是消费不及时，容易造成大的跳跃式动作；这个越小，消费应越快；
-    chunk_size: int = field(default=10)
-    action_buffer_size: int = field(default=10)
+    sensing_rate: int = 50
+    chunk_size: int = 32 # 对应每次推理往动作缓冲区推送的总动作数量；
 
     # ############## model  ################
     is_pretrained: bool = field(default=True)
@@ -61,8 +59,14 @@ class HyperArguments:
         default_factory=lambda: ['primary'],
         metadata={"help": "List of camera names", "nargs": "+"}
     )
+    
+    # ############ action manager ##########
+    action_manager: str = 'OlderFirstManager'
+    manager_coef = 1.0
+    # manager_coef = 0.05 # delayfree
+    # manager_coef = 1.0 # 
 
-
+    
 #  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def parse_param():
     global local_rank
@@ -138,47 +142,37 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
                 print(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
                 obs = robot.obs2meta(obs)
                 if obs:
-                    # Non-blocking: Put data into the queue
-                    if not observation_queue.full():
-                        observation_queue.put((obs, t_obs))
-                    else:
+                    if observation_queue.full():
                         try:
                             observation_queue.get_nowait()
                         except queue.Empty:
                             pass
-                        observation_queue.put((obs, t_obs))
+                    # Non-blocking: Put data into the queue
+                    observation_queue.put((obs, t_obs))
             # else:
             #     print("[Sensing Thread] No Observation Found...")
-            rate_limiter.sleep(args.sensing_rate)
+                rate_limiter.sleep(args.sensing_rate)
     except Exception as e:
         print(f"[Sensing Thread] An exception occurred: {e}")
         traceback.print_exc()
         robot.shutdown()
 
 
-def inference_producer(policy, observation_queue: queue.Queue, action_queue: queue.Queue, args):
+def inference_producer(policy, observation_queue: queue.Queue, action_manager: queue.Queue, args):
     """Inference producer thread, consumes observation data and produces actions."""
     print("[Inference Thread] Producer started.")
-    global action_lock
     with torch.no_grad():
         try:
-            t = 0
+            step_count = 0
             while True:
                 # Blocking: Wait for observation data
                 obs, t_obs = observation_queue.get()
                 obs.to_batch()
                 # Blocking: Execute model inference
-                act = policy.select_action(obs, t, return_all=False)
-                t += 1
-                action_lock.acquire()
-                for i in range(len(act)):
-                    if action_queue.full():
-                        try:
-                            action_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    action_queue.put(act[i])
-                action_lock.release()
+                raw_action_chunk = policy.inference(obs)
+                action_chunk = [aci[0] for aci in raw_action_chunk]
+                step_count += 1
+                action_manager.put(action_chunk, t_obs)
         except Exception as e:
             print(f"[Inference Thread] An exception occurred: {e}")
             traceback.print_exc()
@@ -196,7 +190,7 @@ if __name__ == '__main__':
                    'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
     model_components = model_module.load_model(args)  # load_model is an interface that the model module must implement
     model = model_components['model'].to('cuda')
-    policy = MetaPolicy(policy=model, freq=args.freq, action_normalizer=normalizers['action'],
+    policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'],
                         state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
 
     # --- 2. Create Real-World Environment ---
@@ -212,12 +206,14 @@ if __name__ == '__main__':
 
     # Create thread-safe queues
     observation_queue = queue.Queue(maxsize=1)
-    action_queue = queue.Queue(maxsize=args.chunk_size)
+
+    # init action manager
+    action_manager = load_action_manager(args.action_manager, args)
 
     # Start producer and consumer threads
     sensing_thread = threading.Thread(target=sensing_producer, args=(robot, observation_queue, args))
     inference_thread = threading.Thread(target=inference_producer,
-                                        args=(policy, observation_queue, action_queue, args))
+                                        args=(policy, observation_queue, action_manager, args))
 
     sensing_thread.daemon = True
     inference_thread.daemon = True
@@ -229,14 +225,14 @@ if __name__ == '__main__':
     try:
         rate_limiter = RateLimiter()
         while robot.is_running():
-            if not action_queue.empty():
-                action_lock.acquire()
-                action = action_queue.get()
-                action_lock.release()
+            # if not action_manager.empty():
+            t = time.perf_counter()
+            action = action_manager.get(t)
+            if action is not None:
                 action = robot.meta2act(action)
                 print(f"[Main Control Loop] New action {action} found, updating...")
                 robot.publish_action(action)
             rate_limiter.sleep(args.publish_rate)
     except KeyboardInterrupt:
-        print(f"[Main Control Loop] An exception occurred: {e}")
+        print(f"[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
         robot.shutdown()

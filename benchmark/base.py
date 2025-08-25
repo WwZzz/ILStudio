@@ -83,12 +83,12 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, freq:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
+    def __init__(self, policy, chunk_size:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
         self.policy = policy
-        self.freq = freq
+        self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
-        self.action_queue = deque(maxlen=freq)
+        self.action_queue = deque(maxlen=chunk_size)
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
     
@@ -133,12 +133,12 @@ class MetaPolicy:
         else:
             macts.action = macts.action[np.newaxis, :]
         mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
-        mact_list = mact_list[:self.freq]
+        mact_list = mact_list[:self.chunk_size]
         return mact_list
 
     def select_action(self, mobs: MetaObs, t:int, return_all=False):
         # Normalzing Obs and Actions
-        if t % self.freq == 0 or len(self.action_queue)==0:
+        if t % self.chunk_size == 0 or len(self.action_queue)==0:
             mact_list = self.inference(mobs)
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
