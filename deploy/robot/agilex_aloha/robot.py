@@ -29,7 +29,7 @@ class AgilexAloha(BaseRobot):
     def connect(self):
         res = self.reset()
         time.sleep(3)
-        return True
+        return res
     
     def get_observation(self) -> Dict[str, Any]:
         """
