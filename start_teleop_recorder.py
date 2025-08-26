@@ -122,6 +122,7 @@ class RobotController:
         self.shm_dtype = shm_dtype
         self.shm = None
         self.action_buffer = None
+        self.last_timestamp = 0.0
         self.stop_event = mp.Event()
 
     def connect_to_buffer(self):
@@ -141,8 +142,11 @@ class RobotController:
         self.connect_to_buffer()
         try:
             while not self.stop_event.is_set():
-                action = self.action_buffer.copy()
-                self.robot.publish_action(action)
+                current_timestamp = self.action_buffer[0]['timestamp']
+                if current_timestamp > self.last_timestamp:
+                    self.last_timestamp = current_timestamp
+                    action = self.action_buffer[0]['action'].copy()
+                    self.robot.publish_action(action)
         finally:
             print("\n机器人控制器：正在关闭...")
             if self.shm:

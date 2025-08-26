@@ -42,7 +42,9 @@ class BaseTeleopDevice(ABC):
     def put_action_to_buffer(self, action):
         """Write action to shared memory buffer"""
         if self.action_buffer is not None:
-            self.action_buffer[:] = action
+            t = time.time()
+            self.action_buffer[0]['timestamp'] = t
+            self.action_buffer[0]['action'] = action
 
     def run(self):
         """
@@ -69,3 +71,12 @@ class BaseTeleopDevice(ABC):
     def stop(self):
         """Set stop event"""
         self.stop_event.set()
+        
+def str2dtype(s: str):
+    # 将参数转换为对应的变量
+    if s=='float32' or s=='float': return np.float32
+    elif s=='float64' or s=='double': return np.float64
+    elif s=='int' or s=='int32': return np.int
+    elif s=='long' or s=='int64': return np.int64
+    else:
+        raise ValueError(f'Invalid string {s}')

@@ -7,6 +7,7 @@ from pynput import keyboard
 import importlib
 import argparse
 import yaml
+from deploy.teleoperator.base import str2dtype
 
 def load_teleoperator(teleop_cfg: dict, args):
     full_path = teleop_cfg['target']
@@ -14,7 +15,7 @@ def load_teleoperator(teleop_cfg: dict, args):
     module = importlib.import_module(module_path)
     TeleOpCls = getattr(module, class_name)
     print(f"Creating Teleop Device: {full_path}")
-    teleoperator = TeleOpCls(shm_name=args.shm_name, shm_shape=args.action_dim, shm_dtype=args.action_dtype, frequency=args.freq, **{k:v for k,v in teleop_cfg.items() if k!='target'})
+    teleoperator = TeleOpCls(shm_name=args.shm_name, shm_shape=args.shm_shape, shm_dtype=args.action_dtype, frequency=args.freq, **{k:v for k,v in teleop_cfg.items() if k!='target'})
     return teleoperator
 
 def main():
@@ -32,19 +33,18 @@ def main():
                         help='Teleoperation frequency in Hz')
     args = parser.parse_args()
     
-    # 将参数转换为对应的变量
-    if args.action_dtype=='float32' or args.action_dtype=='float': args.action_dtype = np.float32
-    elif args.action_dtype=='float64':args.action_dtype = np.float64
-    elif args.action_dtype=='int' or args.action_dtype=='int32': args.action_dtype = np.int
-
     # 定义共享内存的规格
-    shm_shape = (args.action_dim,)
-    shm_size = np.prod(shm_shape) * np.dtype(args.action_dtype).itemsize
-
+    args.shm_shape = (1,)
+    args.action_dtype = np.dtype([
+        ('timestamp', np.float64),
+        ('action', str2dtype(args.action_dtype), args.action_dim), 
+    ])
+    args.shm_size = args.action_dtype.itemsize
+    
     # 创建共享内存块
     try:
-        shm = shared_memory.SharedMemory(name=args.shm_name, create=True, size=shm_size)
-        print(f"主程序：成功创建共享内存 '{args.shm_name}'，大小 {shm_size} 字节。")
+        shm = shared_memory.SharedMemory(name=args.shm_name, create=True, size=args.shm_size)
+        print(f"主程序：成功创建共享内存 '{args.shm_name}'，大小 {args.shm_size} 字节。")
     except FileExistsError:
         print(f"主程序：共享内存 '{args.shm_name}' 已存在，将连接到它。")
         shm = shared_memory.SharedMemory(name=args.shm_name)
