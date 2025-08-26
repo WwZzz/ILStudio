@@ -32,8 +32,8 @@ class HyperArguments:
     # publish_rate决定动作消费的频率，如果太慢，会导致动作还没消费就被顶替（缓冲区较小时），造成大的抖动；如果消费太快，动作生产者跟不上消费的速度，会造成很多卡顿；此外，机器执行跟不上消费的速度，也会导致动作被发送却没执行完毕，造成动作被浪费；
     publish_rate: int = 25
     # sensing_rate和freq共同决定推理的频率，一方面是需要推理时需要观测，此时没观测会被阻塞，所以观测率不应该太低；另一方面freq决定了多少步推理一次，上回推理结果没用完不会执行推理；
-    sensing_rate: int = 50
-    chunk_size: int = 32 # 对应每次推理往动作缓冲区推送的总动作数量；
+    sensing_rate: int = 20
+    chunk_size: int = 100 # 对应每次推理往动作缓冲区推送的总动作数量；
 
     # ############## model  ################
     is_pretrained: bool = field(default=True)
