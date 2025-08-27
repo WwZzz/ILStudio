@@ -12,6 +12,7 @@ import numpy as np
 from benchmark.base import MetaPolicy
 from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 from deploy.robot.base import AbstractRobotInterface, RateLimiter
+from deploy.teleoperator.base import str2dtype
 from PIL import Image, ImageDraw, ImageFont
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
@@ -167,12 +168,23 @@ if __name__ == '__main__':
     robot = make_robot(robot_cfg, args)
     print("Robot successfully loaded.")
 
+
     # --- 2. Connect to shm
+    args.action_dtype = str2dtype(args.action_dtype)
+    shm_info = {
+        'name': args.shm_name, 
+        'dtype': np.dtype([
+            ('timestamp', np.float64),
+            ('action', args.action_dtype, args.action_dim), 
+        ]),
+        'shape': (1,),
+    }
+    shm_info['size'] = shm_info['dtype'].itemsize
     robot_controller = RobotController(
         robot = robot,
-        shm_name=args.shm_name,
-        shm_shape=args.action_dim,
-        shm_dtype=np.float64,
+        shm_name=shm_info['name'],
+        shm_shape=shm_info['shape'],
+        shm_dtype=shm_info['dtype'],
     )
 
     input("=" * 10 + "Press Enter to collect data..." + "=" * 10)

@@ -21,3 +21,4 @@ matplotlib
 robosuite==1.4.0
 imageio-ffmpeg==0.6.0
 mujoco==2.3.7
+pynput

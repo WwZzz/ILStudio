@@ -10,10 +10,12 @@ class BaseTeleopDevice(ABC):
     """
     Abstract base class for teleoperation devices
     """
-    def __init__(self, shm_name, shm_shape, shm_dtype, frequency=100):
+    def __init__(self, shm_name, shm_shape, shm_dtype,  action_dim: int, action_dtype = np.float64, frequency=100):
         self.shm_name = shm_name
         self.shm_shape = shm_shape
         self.shm_dtype = shm_dtype
+        self.action_dtype = action_dtype
+        self.action_dim = action_dim
         self.frequency = frequency
         self.shm = None
         self.action_buffer = None
@@ -45,6 +47,12 @@ class BaseTeleopDevice(ABC):
             t = time.time()
             self.action_buffer[0]['timestamp'] = t
             self.action_buffer[0]['action'] = action
+
+    def get_doc(self) -> str:
+        return "No document is available"
+    
+    def get_zero_action(self) -> np.ndarray:
+        return np.zeros((self.action_dim, ), dtype=self.action_dtype)
 
     def run(self):
         """

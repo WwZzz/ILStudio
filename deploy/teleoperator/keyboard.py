@@ -15,6 +15,8 @@ class KeyboardTeleop(BaseTeleopDevice):
                  shm_name: str, 
                  shm_shape: tuple, 
                  shm_dtype: type, 
+                 action_dim: int = 7,
+                 action_dtype = np.float64,
                  frequency: int = 100, 
                  gripper_index: int = -1, 
                  gripper_width: float = 0.08, 
@@ -26,12 +28,13 @@ class KeyboardTeleop(BaseTeleopDevice):
             shm_name: Name of the shared memory segment
             shm_shape: Shape of the shared memory array
             shm_dtype: Data type of the shared memory array
+            action_dim: The dim of the flattened action
             frequency: Control frequency in Hz
             gripper_index: Index of the gripper control in the action array
             gripper_width: Maximum width of the gripper in meters
             use_width_ctrl: Whether to use width-based gripper control
         """
-        super().__init__(shm_name, shm_shape, shm_dtype, frequency)
+        super().__init__(shm_name, shm_shape, shm_dtype, action_dim, action_dtype, frequency)
         self.pressed_keys = set()
 
         # Define control sensitivity as class attributes
@@ -41,7 +44,8 @@ class KeyboardTeleop(BaseTeleopDevice):
         self.gripper_width = 0.08
         self.use_width_ctrl = use_width_ctrl
         self.gripper_delta = 0.1 * self.gripper_width
-
+        self.gripper_width = self.gripper_width
+        self.gripper_index = [gripper_index] if isinstance(gripper_index, int) else gripper_index
         self._start_keyboard_listener()
 
     def _on_press(self, key):
@@ -68,13 +72,22 @@ class KeyboardTeleop(BaseTeleopDevice):
         listener.start()
         print("Keyboard listener started.")
 
+    def get_doc(self):
+        return "\n--- Control Instructions ---\n \
+            Translation: W/S (forward/backward), A/D (left/right), \
+            Q/E (up/down)\nRotation: U/O (around X-axis), I/K (around Y-axis),\
+            J/L (around Z-axis)\nGripper: Hold SPACE to close, \
+            release to open\n\
+            Press Ctrl+C to exit the program.\
+            \n-----------------\n"
+    
     def get_observation(self):
         """Get all currently pressed keys"""
         return self.pressed_keys.copy()
 
     def observation_to_action(self, observation):
         """Convert key states to robot end-effector delta pose and gripper action"""
-        action = np.zeros(self.shm_shape, dtype=self.shm_dtype)
+        action = self.get_zero_action()
 
         # Translation control (X, Y, Z)
         if 'a' in observation: action[0] -= self.MIN_TRANS_STEP
