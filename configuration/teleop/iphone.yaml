@@ -1,0 +1,5 @@
+target: deploy.teleoperator.keyboard.IPhonePhyphox
+config:
+  phyphox_ip: '172.20.10.1'
+  phyphox_port: '80'
+  frequency: 25
