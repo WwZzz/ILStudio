@@ -14,63 +14,71 @@ else:
     import select
 
 
-class IMUIntegrator:
+class IMUProcessor:
     """
-    只处理线性运动：接收世界坐标系下的加速度，并积分计算速度和位置。
+    处理IMU数据，计算每一帧的相对位姿变换。
+    不再进行状态累积，只计算瞬时变化量。
     - acc_unit : m/s² (线性加速度)
+    - gyro_unit: rad/s
     """
 
-    def __init__(self, calib_samples: int = 200):
+    def __init__(self, calib_samples: int = 150):
         self.N = calib_samples
-        self.ACC_THRESHOLD = 0.5  # m/s^2
+        self.ACC_THRESHOLD = 0.25  # m/s^2
+        self.GYRO_THRESHOLD = 0.25  # rad/s
         self.reset()
 
     def reset(self):
-        """重置所有状态和校准数据"""
+        """重置校准数据"""
         self.cnt = 0
-        self.acc_bias = np.zeros(3)
+        self.lin_acc_bias = np.zeros(3)
+        self.gyro_bias = np.zeros(3)
         self.calibrated = False
-        self.position = np.zeros(3)
-        self.velocity = np.zeros(3)
-        self._acc_samples = []
-        print("\nIntegrator has been reset. Please keep phone stationary for recalibration.")
+        self._lin_acc_samples = []
+        self._gyro_samples = []
+        print("\nIMU Processor has been reset. Please keep phone stationary for recalibration.")
 
-    def calibrate_step(self, acc_raw):
-        """在校准阶段累积加速度数据"""
+    def calibrate_step(self, lin_acc_raw, gyro_raw):
+        """在校准阶段累积数据"""
         if self.cnt < self.N:
-            self._acc_samples.append(acc_raw)
+            self._lin_acc_samples.append(lin_acc_raw)
+            self._gyro_samples.append(gyro_raw)
             self.cnt += 1
             if self.cnt >= self.N:
                 self._finalize_calibration()
         return self.calibrated
 
     def _finalize_calibration(self):
-        """计算加速度计的零偏"""
-        self.acc_bias = np.mean(self._acc_samples, axis=0)
+        """计算传感器的零偏"""
+        self.lin_acc_bias = np.mean(self._lin_acc_samples, axis=0)
+        self.gyro_bias = np.mean(self._gyro_samples, axis=0)
         self.calibrated = True
-        print("IMU 加速度计零偏校准完成。")
-        print(f"  - 线性加速度零偏 (Lin Acc bias): {self.acc_bias}")
+        print("\nIMU 零偏校准完成。")
+        print(f"  - 线性加速度零偏 (Lin Acc bias): {self.lin_acc_bias}")
+        print(f"  - 陀螺仪零偏 (Gyro bias): {self.gyro_bias}")
 
-    def integrate_step(self, world_linear_acc, dt):
-        """接收世界坐标系下的加速度，并更新速度和位置"""
-        # 1. 始终进行速度积分
-        self.velocity += world_linear_acc * dt
+    def calculate_delta_pose(self, lin_acc_raw, gyro_raw, dt):
+        """
+        计算单帧的相对位姿变换。
+        返回: (delta_translation, delta_rotation_euler)
+        """
+        lin_acc_corr = lin_acc_raw - self.lin_acc_bias
+        gyro_corr = gyro_raw - self.gyro_bias
 
-        # 2. 应用分轴独立连续动态阻尼
-        gliding_friction = 0.998
-        stopping_friction = 0.85
+        # 应用噪声阈值
+        if np.linalg.norm(lin_acc_corr) < self.ACC_THRESHOLD:
+            lin_acc_corr[:] = 0.0
 
-        for i in range(3):  # 分别处理 X, Y, Z 轴
-            stopping_influence = np.clip(1.0 - abs(world_linear_acc[i]) / self.ACC_THRESHOLD, 0, 1)
-            damping_factor = (1.0 - stopping_influence) * gliding_friction + stopping_influence * stopping_friction
-            self.velocity[i] *= damping_factor
+        if np.linalg.norm(gyro_corr) < self.GYRO_THRESHOLD:
+            gyro_corr[:] = 0.0
 
-        # 3. 最终钳制
-        if np.linalg.norm(self.velocity) < 0.01:
-            self.velocity[:] = 0
+        # 计算瞬时位移 (物理上代表 delta_v = a * dt)
+        delta_translation = lin_acc_corr * dt
 
-        # 4. 更新位置
-        self.position += self.velocity * dt
+        # 计算瞬时旋转 (角速度 * 时间 -> 欧拉角)
+        delta_rotation_euler = gyro_corr * dt
+
+        return delta_translation, delta_rotation_euler
 
 
 class IPhonePhyphox(BaseTeleopDevice):
@@ -82,7 +90,7 @@ class IPhonePhyphox(BaseTeleopDevice):
                  phyphox_ip="192.168.1.5",
                  phyphox_port=80,
                  calib_samples=150,
-                 dt=0.1,
+                 dt=None,
                  ):
         super().__init__(shm_name, shm_shape, shm_dtype,
                          action_dim=action_dim,
@@ -91,65 +99,67 @@ class IPhonePhyphox(BaseTeleopDevice):
 
         if dt is not None:
             self.dt = dt
+            self.frequency = 1.0 / dt
         else:
             self.dt = 1.0 / frequency
 
-        # --- 核心修正: 请求线性加速度和欧拉角 ---
-        # !!!重要!!! 请确保你的Phyphox实验将欧拉角输出命名为 yaw, pitch, roll
-        self.url = f"http://{phyphox_ip}:{phyphox_port}/get?lin_accX&lin_accY&lin_accZ&yaw&pitch&roll"
-        self.integrator = IMUIntegrator(calib_samples=calib_samples)
-
-        # 用于存储姿态信息
-        self.orientation = R.identity()
-        self.initial_orientation_offset = None
+        self.url = f"http://{phyphox_ip}:{phyphox_port}/get?lin_accX&lin_accY&lin_accZ&gyroX&gyroY&gyroZ"
+        self.processor = IMUProcessor(calib_samples=calib_samples)
 
     def get_observation(self):
-        """获取线加速度和欧拉角 (度)"""
+        """获取线加速度和角速度"""
         try:
             response = requests.get(self.url, timeout=0.5)
             response.raise_for_status()
             data = response.json()["buffer"]
-            ax = data["lin_accX"]["buffer"][-1]
-            ay = data["lin_accY"]["buffer"][-1]
-            az = data["lin_accZ"]["buffer"][-1]
-            yaw = data["yaw"]["buffer"][-1]
-            pitch = data["pitch"]["buffer"][-1]
-            roll = data["roll"]["buffer"][-1]
+            ax, ay, az = data["lin_accX"]["buffer"][-1], data["lin_accY"]["buffer"][-1], data["lin_accZ"]["buffer"][-1]
+            gx, gy, gz = data["gyroX"]["buffer"][-1], data["gyroY"]["buffer"][-1], data["gyroZ"]["buffer"][-1]
 
-            if any(v is None for v in [ax, ay, az, yaw, pitch, roll]):
+            if any(v is None for v in [ax, ay, az, gx, gy, gz]):
                 return None
-            return np.array([ax, ay, az, yaw, pitch, roll])
-        except Exception as e:
-            print(f"Phyphox 读取错误: {e}")
+            return np.array([ax, ay, az, gx, gy, gz])
+        except Exception:
             return None
 
-    def get_absolute_pose(self):
-        """从积分器获取绝对位姿"""
-        pos = self.integrator.position
-        abs_rot_euler = self.orientation.as_euler('xyz', degrees=False)
-        return np.concatenate([pos, abs_rot_euler]).astype(self.action_dtype)
-
     def observation_to_action(self, obs):
-        """满足抽象方法的要求"""
-        return self.get_absolute_pose()
+        """将传感器观测值转换为相对位姿变换"""
+        if obs is None:
+            return self.get_zero_action()
+
+        lin_acc_raw = obs[:3]
+        gyro_raw = obs[3:]
+
+        delta_translation, delta_rotation_euler = self.processor.calculate_delta_pose(
+            lin_acc_raw, gyro_raw, self.dt
+        )
+
+        return np.concatenate([delta_translation, delta_rotation_euler]).astype(self.action_dtype)
 
     def run(self):
         """主循环"""
         from deploy.robot.base import RateLimiter
         self.connect_to_buffer()
-        rr.init("iphone_imu_trajectory_direct", spawn=True)
+        rr.init("iphone_imu_relative_pose", spawn=True)
         rr.log("/", rr.ViewCoordinates.RFU, timeless=True)
         rr.log("world/origin_axes", rr.Arrows3D(
             origins=[[0, 0, 0]], vectors=np.eye(3) * 0.1,
             colors=[[255, 0, 0], [0, 255, 0], [0, 0, 255]]
         ), timeless=True)
 
+        # --- Rerun可视化专用变量 ---
+        viz_position = np.zeros(3)
+        viz_orientation = R.identity()
+        viz_velocity = np.zeros(3)
+
         rate_limiter = RateLimiter()
         step = 0
-        trajectory_points = []
+
+        # --- 频率和位姿统计变量 ---
+        frame_count = 0
+        last_print_time = time.time()
 
         try:
-            print("--- 直接使用轴角数据模型 ---")
+            print("--- 相对位姿变换捕捉模型 ---")
             print("校准步骤: 将手机屏幕朝上平放，摄像头朝前，保持静止...")
             while not self.stop_event.is_set():
                 reset_triggered = False
@@ -163,57 +173,85 @@ class IPhonePhyphox(BaseTeleopDevice):
                             reset_triggered = True
 
                 if reset_triggered:
-                    self.integrator.reset()
-                    self.initial_orientation_offset = None  # 重置姿态偏移
-                    trajectory_points = []
-                    rr.log("trajectory", rr.LineStrips3D([]))
+                    self.processor.reset()
+                    # 重置可视化位姿
+                    viz_position = np.zeros(3)
+                    viz_orientation = R.identity()
+                    viz_velocity = np.zeros(3)
 
                 observation = self.get_observation()
                 if observation is None:
                     rate_limiter.sleep(self.frequency)
                     continue
 
-                acc_raw = observation[:3]
-                yaw, pitch, roll = observation[3:]
-
-                if not self.integrator.calibrated:
-                    print(f"校准中... {self.integrator.cnt}/{self.integrator.N}", end='\r')
-                    self.integrator.calibrate_step(acc_raw)
+                if not self.processor.calibrated:
+                    print(f"校准中... {self.processor.cnt}/{self.processor.N}", end='\r')
+                    lin_acc_raw, gyro_raw = observation[:3], observation[3:]
+                    self.processor.calibrate_step(lin_acc_raw, gyro_raw)
                     self.put_action_to_buffer(self.get_zero_action())
                 else:
-                    # --- 核心姿态处理逻辑 ---
-                    # 1. 在校准后的第一帧，捕获初始姿态作为偏移量
-                    if self.initial_orientation_offset is None:
-                        # 注意: 欧拉角顺序 ZYX 对应 yaw, pitch, roll
-                        self.initial_orientation_offset = R.from_euler('zyx', [yaw, pitch, roll], degrees=True)
-                        print(f"捕获到初始姿态 (YPR degrees): {yaw:.1f}, {pitch:.1f}, {roll:.1f}")
+                    # 计算相对变换并写入共享内存
+                    delta_pose = self.observation_to_action(observation)
+                    self.put_action_to_buffer(delta_pose)
 
-                    # 2. 获取当前绝对姿态
-                    current_absolute_rot = R.from_euler('zyx', [yaw, pitch, roll], degrees=True)
+                    # --- 更新Rerun可视化物理模型 ---
+                    delta_translation = delta_pose[:3]
+                    delta_rotation_euler = delta_pose[3:]
 
-                    # 3. 计算相对于初始姿态的旋转
-                    self.orientation = current_absolute_rot * self.initial_orientation_offset.inv()
+                    # 1. 累积旋转
+                    delta_rotation = R.from_euler('xyz', delta_rotation_euler)
+                    viz_orientation = viz_orientation * delta_rotation
 
-                    # 4. 使用更新后的姿态处理线性运动
-                    acc_corr = acc_raw - self.integrator.acc_bias
-                    world_linear_acc = self.orientation.apply(acc_corr)
-                    self.integrator.integrate_step(world_linear_acc, self.dt)
+                    # 2. 将手机坐标系下的平移变换(物理上是Δv)到世界坐标系并累积到速度上
+                    world_delta_velocity = viz_orientation.apply(delta_translation)
+                    viz_velocity += world_delta_velocity
 
-                    # 5. 输出和可视化
-                    absolute_pose = self.get_absolute_pose()
-                    self.put_action_to_buffer(absolute_pose)
+                    # 3. 应用分轴独立连续动态阻尼以实现平滑制动
+                    lin_acc_raw = observation[:3]
+                    lin_acc_corr = lin_acc_raw - self.processor.lin_acc_bias
+                    world_linear_acc = viz_orientation.apply(lin_acc_corr)
 
+                    gliding_friction = 0.998
+                    stopping_friction = 0.85
+
+                    for i in range(3):  # 分别处理 X, Y, Z 轴
+                        # 根据当前轴向的加速度大小，连续地计算阻尼影响力
+                        stopping_influence = np.clip(1.0 - abs(world_linear_acc[i]) / self.processor.ACC_THRESHOLD, 0,
+                                                     1)
+
+                        # 通过影响力，在两种摩擦力之间进行平滑插值
+                        damping_factor = (
+                                                     1.0 - stopping_influence) * gliding_friction + stopping_influence * stopping_friction
+
+                        # 将计算出的动态阻尼应用到该轴向的速度分量上
+                        viz_velocity[i] *= damping_factor
+
+                    # 4. 最终钳制，防止微小蠕动
+                    if np.linalg.norm(viz_velocity) < 0.01:
+                        viz_velocity[:] = 0
+
+                    # 5. 用更新后的速度更新位置
+                    viz_position += viz_velocity * self.dt
+
+                    # --- 打印实时信息 ---
+                    frame_count += 1
+                    current_time = time.time()
+                    elapsed = current_time - last_print_time
+                    if elapsed >= 1.0:
+                        frequency_actual = frame_count / elapsed
+                        pos_str = f"位置(m): x={viz_position[0]:.2f}, y={viz_position[1]:.2f}, z={viz_position[2]:.2f}"
+                        rot_deg = viz_orientation.as_euler('xyz', degrees=True)
+                        rot_str = f"旋转(°): r={rot_deg[0]:.1f}, p={rot_deg[1]:.1f}, y={rot_deg[2]:.1f}"
+                        print(f"频率: {frequency_actual:.2f} Hz | {pos_str} | {rot_str}      ", end="\r")
+                        last_print_time = current_time
+                        frame_count = 0
+
+                    # --- Log到Rerun ---
                     step += 1
                     rr.set_time_sequence("step", step)
-                    pos_viz = self.integrator.position
-                    orient_viz = self.orientation.as_quat()
-
-                    rr.log("iphone", rr.Transform3D(translation=pos_viz, rotation=rr.Quaternion(xyzw=orient_viz)))
+                    rr.log("iphone", rr.Transform3D(translation=viz_position,
+                                                    rotation=rr.Quaternion(xyzw=viz_orientation.as_quat())))
                     rr.log("iphone", rr.Boxes3D(half_sizes=[0.075, 0.035, 0.005]))
-
-                    trajectory_points.append(pos_viz)
-                    if len(trajectory_points) > 1:
-                        rr.log("trajectory", rr.LineStrips3D([trajectory_points]))
 
                 rate_limiter.sleep(self.frequency)
         finally:
@@ -234,13 +272,13 @@ if __name__ == "__main__":
         shm = shared_memory.SharedMemory(name=shm_info['name'])
         print(f"主程序: 已连接到共享内存 '{shm_info['name']}'")
     try:
-        IPHONE_IP = "172.20.10.1"
+        IPHONE_IP = "192.168.71.95"
         dev = IPhonePhyphox(
             shm_name=shm_info['name'], shm_shape=shm_info['shape'], shm_dtype=shm_info['dtype'],
             action_dim=action_dim, action_dtype=action_dtype,
-            frequency=30,
+            frequency=50,
             phyphox_ip=IPHONE_IP, phyphox_port=80,
-            calib_samples=90  # 30Hz下校准3秒
+            calib_samples=90, dt=0.2
         )
         dev.run()
     finally:
