@@ -9,10 +9,11 @@ import traceback
 import time
 
 class AgilexAloha(BaseRobot):
-    def __init__(self, config, extra_args, *args, **kwargs):
+    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, extra_args=None, *args, **kwargs):
         super().__init__()
-        self.ros_operator = RosOperator(SimpleNamespace(**config['ros_operator']))
-        self.init_pos = config.get('init_pos', {})
+        self.ros_operator = RosOperator(SimpleNamespace(**ros_operator))
+        self.init_pos = init_pos
+        self.limit_pos = limit_pos
 
     def reset(self):
         try:

@@ -15,7 +15,7 @@ class DummyRobot(BaseRobot):
     based on a YAML configuration file.
     """
 
-    def __init__(self, config, extra_args={}, **kwargs):
+    def __init__(self, obs_config, action_config,  ctrl_type='delta', ctrl_space='ee', extra_args={}, **kwargs):
         """
         Initializes the virtual robot according to the configuration in the YAML file.
 
@@ -26,7 +26,6 @@ class DummyRobot(BaseRobot):
         """
         print("[DummyRobot] Initializing...")
         self.args = extra_args
-        self.config = config
         self.shutdown_event = threading.Event()
 
         self.dtypes = {
@@ -39,12 +38,10 @@ class DummyRobot(BaseRobot):
             # ... can add more data types
         }
 
-        # Check for essential configuration keys
-        assert 'observation' in self.config, "YAML configuration must contain an 'observation' key."
-        assert 'action' in self.config, "YAML configuration must contain an 'action' key."
-
-        self.obs_config = self.config['observation']
-        self.action_config = self.config['action']
+        self.obs_config = obs_config
+        self.action_config = action_config
+        self.ctrl_type = ctrl_type
+        self.ctrl_space = ctrl_space
 
         print("[DummyRobot] Initialization complete, ready.")
         print(f"[DummyRobot] Observation format: {self.obs_config}")

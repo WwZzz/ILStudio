@@ -1,6 +1,7 @@
 # deploy/robots/base_robot.py
 
 import abc
+import importlib
 from typing import Dict, Optional, Sequence, List, Any
 import numpy as np
 from benchmark.base import MetaAction, MetaObs
@@ -68,11 +69,6 @@ class AbstractRobotInterface(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def rate_sleep(self, hz: int):
-        """Performs a sleep at a specified frequency."""
-        pass
-
-    @abc.abstractmethod
     def meta2act(self, mact):
         """Convert the MetaAct to execusable actions for the robot"""
         pass
@@ -96,3 +92,31 @@ class BaseRobot(AbstractRobotInterface):
     def obs2meta(self, obs):
         """Convert the observations from the robot to MetaObs"""
         return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))
+
+def make_robot(robot_cfg: Dict, args):
+    """
+    Factory function to create a robot instance from a config dictionary.
+
+    Args:
+        robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
+    """
+    full_path = robot_cfg['target']
+    module_path, class_name = full_path.rsplit('.', 1)
+    module = importlib.import_module(module_path)
+    RobotCls = getattr(module, class_name)
+    print(f"Creating robot: {full_path}")
+
+    # .get() is used to safely access params, which might not exist
+    robot_config = robot_cfg.get('config', {})
+
+    robot = RobotCls(extra_args=args, **robot_config)
+    # connect to robot
+    retry_counts = 1
+    MAX_RETRY = 5
+    while not robot.connect():
+        print(f"Retrying for {retry_counts} time...")
+        retry_counts += 1
+        if retry_counts>MAX_RETRY:
+            exit(0)
+        time.sleep(1)
+    return robot

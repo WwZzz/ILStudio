@@ -1,6 +1,6 @@
 target: deploy.robot.dummy_robot.DummyRobot
 config:
-  observation:
+  obs_config:
     image:
       primary:
         shape: (640,480, 3)
@@ -17,7 +17,7 @@ config:
     qvel:
       shape: (14,)
       dtype: float32
-  action:
+  action_config:
     shape: (14,)
     dtype: float32
   ctrl_type: abs

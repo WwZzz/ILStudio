@@ -19,8 +19,7 @@ class KeyboardTeleop(BaseTeleopDevice):
                  action_dtype = np.float64,
                  frequency: int = 100, 
                  gripper_index: int = -1, 
-                 gripper_width: float = 0.08, 
-                 use_width_ctrl: bool = True):
+                 delta_scale=1.0):
         """
         Initialize the keyboard teleoperation device
         
@@ -32,19 +31,14 @@ class KeyboardTeleop(BaseTeleopDevice):
             frequency: Control frequency in Hz
             gripper_index: Index of the gripper control in the action array
             gripper_width: Maximum width of the gripper in meters
-            use_width_ctrl: Whether to use width-based gripper control
         """
         super().__init__(shm_name, shm_shape, shm_dtype, action_dim, action_dtype, frequency)
         self.pressed_keys = set()
 
         # Define control sensitivity as class attributes
-        self.MIN_TRANS_STEP = 0.005  # Minimum translation step per key press (meters)
-        self.MIN_ROT_STEP = np.deg2rad(1.5)  # Minimum rotation step per key press (radians)
+        self.MIN_TRANS_STEP = 0.005*delta_scale  # Minimum translation step per key press (meters)
+        self.MIN_ROT_STEP = np.deg2rad(1.5)*delta_scale  # Minimum rotation step per key press (radians)
         self.gripper_index = gripper_index
-        self.gripper_width = 0.08
-        self.use_width_ctrl = use_width_ctrl
-        self.gripper_delta = 0.1 * self.gripper_width
-        self.gripper_width = self.gripper_width
         self.gripper_index = [gripper_index] if isinstance(gripper_index, int) else gripper_index
         self._start_keyboard_listener()
 
@@ -107,10 +101,8 @@ class KeyboardTeleop(BaseTeleopDevice):
 
         # Gripper control
         if keyboard.Key.space in observation:
-            action[6] = -1.0  # Close signal
+            action[6] = 0.  # Close signal
         else:
             action[6] = 1.0  # Open signal
-        if self.use_width_ctrl:
-            action[6] = action[6] * self.gripper_delta
         print('create_action', action)
         return action

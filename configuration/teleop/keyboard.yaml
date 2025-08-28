@@ -1,1 +1,2 @@
 target: deploy.teleoperator.keyboard.KeyboardTeleop
+delta_scale: 5.0

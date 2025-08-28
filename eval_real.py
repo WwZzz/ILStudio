@@ -116,7 +116,7 @@ def make_robot(robot_cfg: Dict, args):
     # .get() is used to safely access params, which might not exist
     robot_config = robot_cfg.get('config', {})
 
-    robot = RobotCls(config=robot_config, extra_args=args)
+    robot = RobotCls(config=robot_config, extra_args=args, **robot_config)
     # connect to robot
     retry_counts = 1
     MAX_RETRY = 5
