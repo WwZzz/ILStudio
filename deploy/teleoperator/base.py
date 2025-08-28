@@ -3,6 +3,7 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
 from abc import ABC, abstractmethod
+from deploy.robot.base import RateLimiter
 
 # --- 1. Base Teleoperation Device Class ---
 
@@ -59,6 +60,7 @@ class BaseTeleopDevice(ABC):
         Main loop: get observation, convert to action, and write to buffer at specified frequency
         """
         self.connect_to_buffer()
+        rate_limiter = RateLimiter()
         rate = 1.0 / self.frequency
         try:
             while not self.stop_event.is_set():
@@ -67,10 +69,11 @@ class BaseTeleopDevice(ABC):
                 observation = self.get_observation()
                 action = self.observation_to_action(observation)
                 self.put_action_to_buffer(action)
-                elapsed_time = time.time() - start_time
-                sleep_time = rate - elapsed_time
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                rate_limiter.sleep(self.frequency)
+                # elapsed_time = time.time() - start_time
+                # sleep_time = rate - elapsed_time
+                # if sleep_time > 0:
+                #     time.sleep(sleep_time)
         finally:
             print("Teleop device: Shutting down...")
             if self.shm:
@@ -88,3 +91,16 @@ def str2dtype(s: str):
     elif s=='long' or s=='int64': return np.int64
     else:
         raise ValueError(f'Invalid string {s}')
+
+def generate_shm_info(shm_name: str, action_dim:int, action_dtype=np.float64) -> dict:
+    """Define the shared-memory layout"""
+    shm_info = {
+        'name': shm_name,
+        'dtype': np.dtype([
+            ('timestamp', np.float64),
+            ('action', action_dtype, action_dim),
+        ]),
+        'shape': (1,),
+    }
+    shm_info['size'] = shm_info['dtype'].itemsize
+    return shm_info

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import importlib
 import argparse
 import yaml
-from deploy.teleoperator.base import str2dtype, BaseTeleopDevice
+from deploy.teleoperator.base import str2dtype, BaseTeleopDevice, generate_shm_info
 
 def load_teleoperator(teleop_cfg: dict, args, shm_info: dict) -> BaseTeleopDevice:
     """
@@ -46,19 +46,19 @@ def main():
     parser = argparse.ArgumentParser(description='Teleoperation parameters')
 
     parser.add_argument(
-        '--tele-config', type=str, default='configuration/teleop/keyboard.yaml',
+        '--tele_config', type=str, default='configuration/teleop/keyboard.yaml',
         help='YAML file describing the teleoperator configuration'
     )
     parser.add_argument(
-        '--shm-name', type=str, default='teleop_action_buffer',
+        '--shm_name', type=str, default='teleop_action_buffer',
         help='Name of the shared-memory buffer used for actions'
     )
     parser.add_argument(
-        '--action-dim', type=int, default=7,
+        '--action_dim', type=int, default=7,
         help='Dimensionality of the action space'
     )
     parser.add_argument(
-        '--action-dtype', type=str, default='float64', choices=['float32', 'float64'],
+        '--action_dtype', type=str, default='float64', choices=['float32', 'float64'],
         help='Numpy dtype used for action values'
     )
     parser.add_argument(
@@ -71,15 +71,7 @@ def main():
     args.action_dtype = str2dtype(args.action_dtype)
 
     # Define the shared-memory layout
-    shm_info = {
-        'name': args.shm_name,
-        'dtype': np.dtype([
-            ('timestamp', np.float64),
-            ('action', args.action_dtype, args.action_dim),
-        ]),
-        'shape': (1,),
-    }
-    shm_info['size'] = shm_info['dtype'].itemsize
+    shm_info = generate_shm_info(args.shm_name, args.action_dim, args.action_dtype)
 
     # Create or attach to the shared-memory block
     try:
