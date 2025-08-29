@@ -37,28 +37,13 @@ class HyperArguments:
     is_pretrained: bool=field(default=True)
     device: str = 'cuda'
     
-    # model_name: str = 'divla'
-    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/divla_zscore"
-    # norm_path: str = ''
-    # chunk_size: int = field(default=16)
-    # freq: int = 16
-    # save_dir: str = 'results/divla_test'
-    
-    # model_name: str = 'diffusion_policy'
-    # model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/dp_test/checkpoint-7700"
-    # norm_path: str = ''
-    # chunk_size: int = field(default=16)
-    # freq: int = 16
-    # save_dir: str = 'results/dp_test'
-
     model_name: str = 'diffusion_policy'
     model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/diffusion_policy_transfer_cube_top_zscore_official_aug"
     norm_path: str = ''
     chunk_size: int = field(default=50)
-    freq: int = 50
     save_dir: str = 'results/dp_aloha_transer-official-ema-freq50-dnoise10-aug'
-    dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
-    
+    # dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
+    dataset_dir: str = ""
     ################ simulator #############
     # env_name: str = field(default='libero')
     # task: str = field(default="libero_object_1")

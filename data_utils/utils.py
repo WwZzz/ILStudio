@@ -387,11 +387,16 @@ def save_norm_meta_to_json(file_path: str, data: dict):
         # 截断多余内容（当新内容比旧内容短时）
         f.truncate()
 
-def load_normalizer_from_meta(dataset_dir:str, norm_meta, src_dir=''):
+def load_normalizer_from_meta(dataset_dir:str='', norm_meta=None, src_dir=''):
+    assert norm_meta is not None, "norm_meta cannot be None "
     if isinstance(norm_meta, str):
         with open(norm_meta, 'r') as f:
             norm_meta = json.load(f)
     kwargs = norm_meta.get('kwargs', {})
+    if dataset_dir=='': 
+        # when dataset_dir is not specified, using the first dataset dir in normalize.json
+        dataset_dir = list(norm_meta['state'].keys())[0]
+        warnings.warn(f"dataset_dir was not specified. using {dataset_dir} as the default value.")
     if src_dir=='': src_dir = dataset_dir
     dname = BaseNormalizer.meta2name(dataset_dir=dataset_dir, ctrl_space=kwargs.get('ctrl_space', 'ee'), ctrl_type=kwargs.get('ctrl_type', 'delta'))
     state_normalizer = NORMTYPE2CLASS[norm_meta['state'][dataset_dir]](src_dir, dataset_name=dname, **kwargs)

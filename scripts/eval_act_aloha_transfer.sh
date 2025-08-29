@@ -1,35 +1,36 @@
 #!/bin/bash
 
-export DISPLAY=:0          # 根据 echo $DISPLAY 调整
+export MUJOCO_GL=egl # enable this line for headless ubuntu server 
 
+# benchmark infomation
 ENV=aloha
-TASKNAME=transfer_cube_top
+TASKNAME=transfer_cube
+CAM_IDS="[0]"
+IMAGE_SIZE="(640,480)"
 
+# policy information
 MODELNAME=act
-NORM=zscore
-CHUNKSIZE=50
-# DATASET=/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted
-DATASET=/home/agilex/wz/data/aloha_sim/sim_transfer_cube_scripted
-CKPT=/home/agilex/wz/code/IL-Studio/ckpt/act_agilex_transfer_cube_zscore_long/checkpoint-40
+CHUNKSIZE=100
+CKPT=/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/act_transfer_human_zscore
 
+# evaluation information
 FPS=50
 ROLLOUT=50
-PARALLEL=2
-OUTPUT=results/${MODELNAME}_${TASKNAME}_${NORM}
+PARALLEL=5
+MAX_STEPS=400
+OUTPUT=results/${MODELNAME}_${TASKNAME}_human
 
 python eval.py --env_name $ENV \
     --task $TASKNAME \
     --model_name $MODELNAME \
     --model_name_or_path $CKPT \
+    --chunk_size $CHUNKSIZE \
     --save_dir $OUTPUT \
     --num_rollout $ROLLOUT \
     --num_envs $PARALLEL \
-    --dataset_dir $DATASET \
     --fps $FPS \
-    --freq $CHUNKSIZE \
-    --chunk_size $CHUNKSIZE \
-    --camera_ids "[0]" \
-    --image_size_primary "(640,480)" \
-    --image_size_wrist "(256,256)" \
-    --max_timesteps 400 \
-    --use_spawn True \
+    --camera_ids $CAM_IDS \
+    --image_size_primary $IMAGE_SIZE \
+    --image_size_wrist $IMAGE_SIZE \
+    --max_timesteps $MAX_STEPS \
+    # --use_spawn True \

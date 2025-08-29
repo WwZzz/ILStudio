@@ -187,6 +187,25 @@ TASK_CONFIGS = {
         'ctrl_type': 'abs',
         'ctrl_space': 'joint',
     },
+    'transfer_human':{
+        'dataset_dir': [
+            '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_human',
+        ],
+        'camera_names': ['primary',],
+        'dataset_class': 'AlohaSimDataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    },
+    'insertion_human':{
+        'dataset_dir': [
+            '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_insertion_human',
+        ],
+        'camera_names': ['primary',],
+        'dataset_class': 'AlohaSimDataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    },
+    
 }
 
 ### ALOHA fixed constants
