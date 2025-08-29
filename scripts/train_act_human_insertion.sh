@@ -1,9 +1,17 @@
 #!/bin/bash
 export TORCH_HOME=.
+
+DEFAULT_SUFFIX=default
+DEFAULT_POLICY=act
+DEFAULT_NORM=zscore
+
+SUFFIX="${1:-$DEFAULT_SUFFIX}"
+MODELNAME="${2:-$DEFAULT_POLICY}"
+NORM="${3:-$DEFAULT_NORM}"
+
 TASKNAME=insertion_human
-MODELNAME=act
-NORM=zscore
-OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${NORM} # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
+
+OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${SUFFIX} # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
 
 /opt/conda/envs/py310/bin/python ./train.py \
     --task_name $TASKNAME \
