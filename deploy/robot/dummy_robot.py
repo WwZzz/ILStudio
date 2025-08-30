@@ -97,7 +97,11 @@ class DummyRobot(BaseRobot):
         """
         # The actual blocking is controlled by robot.rate_sleep in the main program.
         return self._generate_data_from_config(self.obs_config)
-
+    
+    def get_action_dim(self):
+        expected_shape = tuple(self.action_config['shape'] if isinstance(self.action_config['shape'][0], int) else eval(self.action_config['shape']))
+        return np.prod(expected_shape).item()
+        
     def publish_action(self, action: np.ndarray):
         """
         Simulates publishing an action command to the robot and validates the action format.

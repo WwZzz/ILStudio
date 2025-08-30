@@ -12,7 +12,6 @@ import numpy as np
 from benchmark.base import MetaPolicy
 from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 from deploy.robot.base import AbstractRobotInterface, RateLimiter
-from deploy.teleoperator.base import str2dtype
 from PIL import Image, ImageDraw, ImageFont
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
@@ -23,7 +22,8 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
 from abc import ABC, abstractmethod
-
+from deploy.teleoperator.base import str2dtype, generate_shm_info
+import h5py
 
 # action_lock = threading.Lock()
 
@@ -33,7 +33,11 @@ class HyperArguments:
     action_dtype: str = 'float64'
     action_dim: int = 7
     robot_config: str = "configuration/robots/dummy.yaml"
-    # publish_rate决定动作消费的频率，如果太慢，会导致动作还没消费就被顶替（缓冲区较小时），造成大的抖动；如果消费太快，动作生产者跟不上消费的速度，会造成很多卡顿；此外，机器执行跟不上消费的速度，也会导致动作被发送却没执行完毕，造成动作被浪费；
+    frequency: int = 30
+    # publish_rate determines how frequently actions are consumed.  
+    # If too slow, actions may be overwritten before being used (especially when the buffer is small), causing large jitters.  
+    # If too fast, the action producer cannot keep up, causing many stalls.  
+    # Additionally, if the robot cannot execute as fast as the consumption rate, actions will be sent but not fully executed, wasting them.
     save_dir: str = 'data/debug'
     task: str = field(default="sim_transfer_cube_scripted")
 
@@ -43,7 +47,7 @@ class HyperArguments:
     ctrl_space: str = 'joint'
     ctrl_type: str = 'abs'
     camera_ids: str = '[0]'
-    #  ############ data ###################
+    # ############ data ###################
     image_size_primary: str = "(640,480)"  # image size of non-wrist camera
     image_size_wrist: str = "(640,480)"  # image size of wrist camera
     camera_names: List[str] = field(
@@ -51,7 +55,7 @@ class HyperArguments:
         metadata={"help": "List of camera names", "nargs": "+"}
     )
 
-#  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def parse_param():
     global local_rank
     # Use HFParser to pass parameters, which are defined in the dataclass above
@@ -83,7 +87,7 @@ def parse_param():
     return args
 
 
-def make_robot(robot_cfg: Dict, args, max_connect_retry: int=5):
+def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
     """
     Factory function to create a robot instance from a config dictionary.
 
@@ -99,7 +103,7 @@ def make_robot(robot_cfg: Dict, args, max_connect_retry: int=5):
     # .get() is used to safely access params, which might not exist
     robot_config = robot_cfg.get('config', {})
 
-    robot = RobotCls( **robot_config, extra_args=args)
+    robot = RobotCls(**robot_config, extra_args=args)
     # connect to robot
     retry_counts = 1
     while not robot.connect():
@@ -113,7 +117,7 @@ def make_robot(robot_cfg: Dict, args, max_connect_retry: int=5):
 
 class RobotController:
     """
-    从共享内存读取动作并发送给机器人
+    Reads actions from shared memory and sends them to the robot.
     """
 
     def __init__(self, robot, shm_name, shm_shape, shm_dtype):
@@ -125,22 +129,26 @@ class RobotController:
         self.action_buffer = None
         self.last_timestamp = 0.0
         self.stop_event = mp.Event()
+        if not self.is_connected():
+            self.connect_to_buffer()
+    
+    def is_connected(self):
+        return self.shm is not None
 
     def connect_to_buffer(self):
-        """连接到共享内存"""
+        """Connect to shared memory."""
         try:
             self.shm = shared_memory.SharedMemory(name=self.shm_name)
             self.action_buffer = np.ndarray(self.shm_shape, dtype=self.shm_dtype, buffer=self.shm.buf)
-            print("机器人控制器：成功连接到共享内存。")
+            print("Robot controller: Successfully connected to shared memory.")
         except FileNotFoundError:
-            print(f"机器人控制器：错误！共享内存 '{self.shm_name}' 不存在。")
+            print(f"Robot controller: Error! Shared memory '{self.shm_name}' does not exist.")
             raise
 
     def run(self):
         """
-        主循环，非阻塞地从缓冲区获取数据并发送给机器人
+        Main loop: non-blocking read from buffer and send to the robot.
         """
-        self.connect_to_buffer()
         try:
             while not self.stop_event.is_set():
                 current_timestamp = self.action_buffer[0]['timestamp']
@@ -149,12 +157,36 @@ class RobotController:
                     action = self.action_buffer[0]['action'].copy()
                     self.robot.publish_action(action)
         finally:
-            print("\n机器人控制器：正在关闭...")
+            print("\nRobot controller: Shutting down...")
             if self.shm:
                 self.shm.close()
 
     def stop(self):
         self.stop_event.set()
+
+def save_episode_to_hdf5(save_dir, episode_id, observations, actions):
+    """Saves a single episode's data to an HDF5 file."""
+    os.makedirs(save_dir, exist_ok=True)
+    file_path = os.path.join(save_dir, f'episode_{episode_id}.hdf5')
+    
+    with h5py.File(file_path, 'w') as f:
+        # Save actions
+        f.create_dataset('actions', data=np.array(actions, dtype=np.float32))
+        
+        # Save observations (assuming obs is a dictionary)
+        # This handles nested dictionaries of numpy arrays, which is common.
+        obs_group = f.create_group('observations')
+        if observations:
+            # Get keys from the first observation dictionary
+            for key in observations[0].keys():
+                # Stack all values for this key across all timesteps
+                data_list = [obs[key] for obs in observations]
+                try:
+                    obs_group.create_dataset(key, data=np.stack(data_list))
+                except (TypeError, ValueError) as e:
+                    print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
+
+    print(f"Episode {episode_id} data saved to {file_path}")
 
 if __name__ == '__main__':
     set_seed(0)
@@ -168,33 +200,109 @@ if __name__ == '__main__':
     robot = make_robot(robot_cfg, args)
     print("Robot successfully loaded.")
 
-
     # --- 2. Connect to shm
-    args.action_dtype = str2dtype(args.action_dtype)
-    shm_info = {
-        'name': args.shm_name, 
-        'dtype': np.dtype([
-            ('timestamp', np.float64),
-            ('action', args.action_dtype, args.action_dim), 
-        ]),
-        'shape': (1,),
-    }
-    shm_info['size'] = shm_info['dtype'].itemsize
-    robot_controller = RobotController(
-        robot = robot,
-        shm_name=shm_info['name'],
-        shm_shape=shm_info['shape'],
-        shm_dtype=shm_info['dtype'],
-    )
-
-    input("=" * 10 + "Press Enter to collect data..." + "=" * 10)
-
-    # Create thread-safe queues
-
-    print("[Main Control Loop] Consumer started.")
+    if args.shm_name !='':
+        args.action_dtype = str2dtype(args.action_dtype)
+        shm_info = generate_shm_info(args.shm_name, args.action_dim, args.action_dtype)
+        robot_controller = RobotController(
+            robot=robot,
+            shm_name=shm_info['name'],
+            shm_shape=shm_info['shape'],
+            shm_dtype=shm_info['dtype'],
+        )
+        controller_process = mp.Process(target=robot_controller.run)
+        controller_process.start()
+        print("Robot controller process started in the background.")
+        time.sleep(1)
+        # The main process also needs to connect to shared memory to LOG actions.
+        action_shm = None
+        action_buffer = None
+        try:
+            action_shm = shared_memory.SharedMemory(name=shm_info['name'])
+            action_buffer = np.ndarray(shm_info['shape'], dtype=shm_info['dtype'], buffer=action_shm.buf)
+            print("Main process connected to shared memory for logging.")
+        except (FileNotFoundError, TypeError):
+            print("Warning: Could not connect to shared memory for logging. Actions will not be saved.")
+    else:
+        action_buffer = None
+    
+    # --- 4. Main Data Collection Loop ---
+    episode_count = 0
     try:
-        robot_controller.run()
-    except KeyboardInterrupt:
-        print(f"[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
-        robot.shutdown()
+        rate_limiter = RateLimiter()
+        while True:
+            # Wait for user to start the episode
+            input(f"\n{'='*10}\nPress Enter to START episode {episode_count}...\n{'='*10}")
+            print(f"Starting episode {episode_count}. Recording...")
+            
+            # Data storage for the current episode
+            observations = []
+            actions = []
+            
+            # Non-blocking input to stop collection
+            stop_event = threading.Event()
+            def wait_for_enter():
+                input("Press Enter to STOP recording...")
+                stop_event.set()
 
+            input_thread = threading.Thread(target=wait_for_enter)
+            input_thread.start()
+
+            # Collection loop
+            while not stop_event.is_set():
+                # Get the latest observation from the robot
+                # NOTE: We assume robot.get_obs() returns a dictionary of numpy arrays
+                obs = robot.get_observation() 
+                observations.append(obs)
+                
+                # Get the latest action from shared memory
+                if action_buffer is not None:
+                    action = action_buffer[0]['action'].copy()
+                    actions.append(action)
+                
+                # Control the loop frequency (e.g., 50 Hz)
+                rate_limiter.sleep(args.frequency)
+
+            print(f"Episode {episode_count} finished. Collected {len(observations)} timesteps.")
+            
+            # Save the collected data
+            saving_prompt = input("Saving this episode? (Enter/ n+Enter)").lower()
+            if len(saving_prompt.strip())>0:
+                if observations:
+                    save_episode_to_hdf5(args.save_dir, episode_count, observations, actions)
+                    episode_count += 1
+                    
+                else:
+                    print("No data collected, skipping save.")
+
+    except KeyboardInterrupt:
+        print("\n[Main Process] Exit by KeyboardInterrupt (Ctrl+C).")
+    finally:
+        # --- 5. Graceful Shutdown ---
+        print("\n[Main Process] Shutting down...")
+        
+        # Signal the controller process to stop
+        if robot_controller:
+            robot_controller.stop()
+            print("Stop signal sent to robot controller.")
+            
+        # Wait for the controller process to terminate
+        if 'controller_process' in locals() and controller_process.is_alive():
+            controller_process.join(timeout=2)
+            if controller_process.is_alive():
+                print("Controller process did not terminate gracefully, forcing termination.")
+                controller_process.terminate()
+            else:
+                print("Robot controller process joined successfully.")
+
+        # Close shared memory connection in the main process
+        if action_shm:
+            action_shm.close()
+            print("Main process shared memory link closed.")
+
+        # Shut down the robot connection
+        if robot:
+            robot.shutdown()
+            print("Robot shutdown command sent.")
+            
+        print("Cleanup complete. Exiting.")

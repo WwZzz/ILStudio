@@ -9,7 +9,7 @@ class MetaAction:
     ctrl_type: str = 'delta' # absolute, relative, or delta control
     action: np.ndarray = None # action[-1] is gripper control signal, i.e., 1 is open and 0 is close
     gripper_continuous: bool = False # is gripper controlled by continuous action, where action[-1] is position ratio to the gripper width
-
+    
     def __getitem__(self, key):
         return getattr(self, key)
     

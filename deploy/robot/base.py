@@ -82,7 +82,11 @@ class AbstractRobotInterface(abc.ABC):
     def shutdown(self):
         """Disconnect the robot and shutdown"""
         pass
-
+    
+    @abc.abstractmethod
+    def get_action_dim(self):
+        """Return the shape of the action space"""
+        pass
 
 class BaseRobot(AbstractRobotInterface):
     def meta2act(self, mact: MetaAction):

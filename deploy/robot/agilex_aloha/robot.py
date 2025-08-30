@@ -56,6 +56,9 @@ class AgilexAloha(BaseRobot):
             obs['base_vel'] = [0.0, 0.0]
         return obs
 
+    def get_action_dim(self):
+        return 14
+    
     def publish_action(self, action: np.ndarray):
         """
         Simulates publishing an action command to the robot and validates the action format.

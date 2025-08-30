@@ -67,7 +67,7 @@ class DeltaEERobot(BaseRobot):
 
         # 速率控制器
         self._rate_limiter = RateLimiter()
-
+    
     def connect(self):
         """连接到PyBullet物理服务器并加载机器人。"""
         if self.physics_client is not None:
@@ -94,7 +94,9 @@ class DeltaEERobot(BaseRobot):
             print(f"Failed to connect to PyBullet: {e}")
             return False
 
-
+    def get_action_dim(self):
+        return 8 # 7 joints + 1 gripper
+    
     def get_observation(self) -> Dict[str, Any]:
         """
         从PyBullet获取多模态观测数据。
