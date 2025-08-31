@@ -1,5 +1,5 @@
 from deploy.robot.base import BaseRobot
-from .rosoperator import RosOperator
+from .rosoperator import RosOperator, RosTeleOperator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Dict, Optional, Sequence, List, Any
@@ -7,6 +7,8 @@ import numpy as np
 import rospy
 import traceback
 import time
+import os
+import h5py
 
 class AgilexAloha(BaseRobot):
     def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, extra_args=None, *args, **kwargs):
@@ -84,4 +86,118 @@ class AgilexAloha(BaseRobot):
 
     def shutdown(self):
         rospy.signal_shutdown("Shutdown robot node")
+
+
+  
+  
+class AgilexAlohaTele(BaseRobot):
+    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, use_master_action:bool = False, use_ee_space:bool=False, extra_args=None,  *args, **kwargs):
+        super().__init__()
+        self.ros_operator = RosTeleOperator(SimpleNamespace(**ros_operator))
+        self.init_pos = init_pos
+        self.limit_pos = limit_pos
+        self.use_master_action = use_master_action
+        self.use_ee_space = use_ee_space
+
+    def connect(self):
+        return True
+    
+    def get_observation(self) -> Dict[str, Any]:
+        """
+        """
+        result = self.ros_operator.get_frame()
+        if not result: return False
+        (img_front, img_left, img_right, img_front_depth, img_left_depth, img_right_depth,
+         puppet_arm_left, puppet_arm_right,master_arm_left, master_arm_right, robot_base, puppet_eef_left, puppet_eef_right,) = result
+
+        obs = {}
+        # organize image
+        obs['image'] = dict(primary=img_front, wrist_left=img_left, wrist_right=img_right)
+        # organize depth
+        if self.ros_operator.args.use_depth_image:
+            obs['depth'] = dict(primary=img_front_depth, wrist_left=img_left_depth, wrist_right=img_right_depth)
+        obs['qpos'] = np.concatenate((np.array(puppet_arm_left.position), np.array(puppet_arm_right.position)), axis=0).astype(np.float32)
+        obs['qvel'] = np.concatenate((np.array(puppet_arm_left.velocity), np.array(puppet_arm_right.velocity)), axis=0).astype(np.float32)
+        
+        obs['effort'] = np.concatenate([
+            np.array([puppet_eef_left.pose.position.x, puppet_eef_left.pose.position.y, puppet_eef_left.pose.position.z, ]), 
+            np.array([puppet_eef_left.pose.orientation.x, puppet_eef_left.pose.orientation.y, puppet_eef_left.pose.orientation.z,puppet_eef_left.pose.orientation.w,]), 
+            np.array([puppet_arm_left.position[-1]]), # left gripper
+            np.array([puppet_eef_right.pose.position.x, puppet_eef_right.pose.position.y, puppet_eef_right.pose.position.z]), 
+            np.array([puppet_eef_right.pose.orientation.x,puppet_eef_right.pose.orientation.y,puppet_eef_right.pose.orientation.z,puppet_eef_right.pose.orientation.w,] ),
+            np.array([puppet_arm_right.position[-1]]), # right gripper
+            ], axis=0)
+        
+        if self.ros_operator.args.use_robot_base:
+            obs['base_vel'] = [robot_base.twist.twist.linear.x, robot_base.twist.twist.angular.z]
+            obs['qpos'] = np.concatenate((obs['qpos'], obs['base_vel']), axis=0)
+        else:
+            obs['base_vel'] = [0.0, 0.0]
+
+        obs['qpos_master'] = np.concatenate((
+            np.array(master_arm_left.position), 
+            np.array(master_arm_right.position)), 
+            axis=0).astype(np.float32)
+        return obs
+
+    def get_action_dim(self):
+        return 14
+    
+    def publish_action(self, action: np.ndarray):
+        """
+        Simulates publishing an action command to the robot and validates the action format.
+        """
+        left_action, right_action = action[:7], action[7:14]
+        self.ros_operator.puppet_arm_publish(left_action, right_action)
+        if self.ros_operator.args.use_robot_base:
+            vel_action = action[14:16]
+            self.ros_operator.robot_base_publish(vel_action)
+
+    def is_running(self) -> bool:
+        """
+        Checks if the robot system is still running.
+        A threading event is used to simulate system shutdown.
+        """
+        return not rospy.is_shutdown()
+
+    def shutdown(self):
+        rospy.signal_shutdown("Shutdown robot node")
+
+    def save_episode(self, file_path, observations, actions=None):
+        """Save observations into episode"""
+        save_dir = os.path.dirname(file_path)
+        os.makedirs(save_dir, exist_ok=True)
+        # generate actions
+        if self.use_ee_space:
+            assert not self.use_master_action, "Master arms's ee_pose cannot be recorded"
+            action_key = 'effort'
+        else:
+            if self.use_master_action:
+                action_key = 'qpos_master'
+            else:
+                action_key = 'qpos'
+        with h5py.File(file_path, 'w') as f:
+            actions = np.stack([obs[action_key] for obs in observations]).astype(np.float32)
+            f.create_dataset('actions', data=actions)
+
+            obs_group = f.create_group('observations')
+            if observations:
+                for key in observations[0].keys():
+                    if key=='image': continue
+                    data_list = [obs[key] for obs in observations]
+                    try:
+                        obs_group.create_dataset(key, data=np.stack(data_list))
+                    except (TypeError, ValueError) as e:
+                        print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
+                images = observations[0]['image']
+                img_group = obs_group.create_group('image')
+                for img_key in images.keys():
+                    data_list = [obs['image'][img_key] for obs in observations]
+                    try:
+                        img_group.create_dataset(img_key, data=np.stack(data_list).astype(np.uint8))
+                    except Exception as e:
+                        print(f"Failed to save images {img_key} due to error: {e}")
+
+
+
 
