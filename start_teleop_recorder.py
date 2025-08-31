@@ -41,8 +41,6 @@ class HyperArguments:
     save_dir: str = 'data/debug'
     task: str = field(default="sim_transfer_cube_scripted")
     start_idx: int = 0
-    num_rollout: int = 4
-    max_timesteps: int = 400
     image_size: str = '(640, 480)'  # (width, height)
     ctrl_space: str = 'joint'
     ctrl_type: str = 'abs'
@@ -63,6 +61,7 @@ class KBHit:
         self.old_term = termios.tcgetattr(self.fd)
         # New terminal setting unbuffered
         self.new_term[3] = (self.new_term[3] & ~termios.ICANON & ~termios.ECHO)
+        self.chars = ""
         self.set_normal_term()
 
     def set_normal_term(self):
@@ -92,13 +91,15 @@ class KBHit:
         """Checks for Enter key press and consumes the input line."""
         if self.check():
             # Read all available characters to find a newline
-            chars = ""
             while self.check():
                 char = self.getch()
                 if char == '\n' or char == '\r':
-                    return chars.strip() # Return stripped line if Enter is pressed
+                    res = self.chars.strip() # Return stripped line if Enter is pressed
+                    self.chars = ""
+                    return res
                 else:
-                    chars += char
+                    self.chars += char
+                    print("Current Input: ", self.chars)
         return None # Return None if no Enter key was pressed
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -308,7 +309,10 @@ if __name__ == '__main__':
 
             if len(saving_prompt) == 0:
                 if observations:
-                    save_episode_to_hdf5(args.save_dir, episode_count, observations, actions)
+                    if hasattr(robot, 'save_episode'):
+                        robot.save_episode(os.path.join(args.save_dir, f'episode_{episode_count:04d}.hdf5'), observations, actions)
+                    else:
+                        save_episode_to_hdf5(args.save_dir, episode_count, observations, actions)
                     print(f"Episode {episode_count} was successfully saved to {args.save_dir}.")
                     episode_count += 1
                 else:

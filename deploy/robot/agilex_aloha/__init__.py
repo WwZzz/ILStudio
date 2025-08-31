@@ -1,1 +1,1 @@
-from .robot import AgilexAloha
+from .robot import AgilexAloha, AgilexAlohaTele
