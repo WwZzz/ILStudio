@@ -247,7 +247,7 @@ if __name__ == '__main__':
 
             input_thread = threading.Thread(target=wait_for_enter)
             input_thread.start()
-
+            
             # Collection loop
             while not stop_event.is_set():
                 # Get the latest observation from the robot
