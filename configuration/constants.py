@@ -205,7 +205,15 @@ TASK_CONFIGS = {
         'ctrl_type': 'abs',
         'ctrl_space': 'joint',
     },
-    
+    'sii_pick_twice':{
+        'dataset_dir': [
+            '/inspire/hdd/project/robot-action/public/data/sfo_train/pick_two_objects',
+        ],
+        'camera_names': ['primary', 'wrist_left', 'wrist_right'],
+        'dataset_class': 'AlohaSIIv2Dataset',
+        'ctrl_type': 'abs',
+        'ctrl_space': 'joint',
+    },
 }
 
 ### ALOHA fixed constants

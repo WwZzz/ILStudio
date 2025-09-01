@@ -377,3 +377,89 @@ class RobomimicDataset(EpisodicDataset):
         # gc.collect()
         # torch.cuda.empty_cache()
         return sample
+
+
+class AlohaSIIv2Dataset(EpisodicDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.freq = 25 # 25hz 
+    
+    def get_freq(self):
+        return self.freq
+    
+    def get_language_instruction(self):
+        return "Put the green duck to the blue bowl and the orange square to the pink plate"
+        
+    def load_onestep_from_episode(self, dataset_path, start_ts=None):
+        """Load one-step data at start_ts from the episode specified by dataset_path"""
+        root = self.loaded_data[dataset_path] if self.loaded_data is not None else h5py.File(dataset_path, 'r')
+        # 加载文本
+        raw_lang = self.get_language_instruction()
+        # 加载动作 & 状态
+        action = root[f'/action'][start_ts:start_ts+self.chunk_size]
+        # 根据控制类型加载相应动作数据
+        if self.ctrl_type=='abs':
+            state = root[f'/observations/qpos'][start_ts]
+        elif self.ctrl_type=='delta':
+            states = root[f'/observations/qpos'][start_ts:start_ts+self.chunk_size]
+            action = action - states
+            state = states[0]
+        elif self.ctrl_type=='rel':
+            raise NotImplementedError("relative action was not implemented")
+        # 加载图像
+        image_dict = dict(
+            primary =  cv2.resize(root[f'/observations/image/primary'][start_ts], eval(self.data_args.image_size_primary)),
+            wrist_left = cv2.resize(root[f'/observations/image/wrist_left'][start_ts], eval(self.data_args.image_size_wrist)),
+            wrist_right = cv2.resize(root[f'/observations/image/wrist_right'][start_ts], eval(self.data_args.image_size_wrist)),
+        )
+        # 加载推理信息
+        reasoning = ""
+        if self.loaded_data is None: root.close()
+        return {
+            'action': action,
+            'image': image_dict,
+            'state': state,
+            'language_instruction': raw_lang,
+            'reasoning': reasoning,
+        }
+        
+    def load_feat_from_episode(self, dataset_path, feats=[]):
+        """Load all steps data from the episode specified by dataset_path"""
+        data_dict = {}
+        if isinstance(feats, str): feats = [feats]
+        with h5py.File(dataset_path, 'r') as root:
+            if 'language_instruction' in feats or len(feats)==0: data_dict['language_instruction'] = self.get_language_instruction() # 加载文本
+            if 'state' in feats or len(feats)==0: data_dict['state'] = root[f'/observations/qpos'][()] # 加载状态
+            if 'qpos' in feats or len(feats)==0: data_dict['qpos'] = root[f'/observations/qpos'][()]
+            if 'qvel' in feats or len(feats)==0: data_dict['qvel'] = root[f'/observations/qvel'][()]
+            if 'action' in feats or len(feats)==0: # 加载动作 
+                data_dict['action'] = root[f'/action'][()] # 根据控制类型加载相应动作数据
+                if self.ctrl_type=='delta': 
+                    data_dict['action'] = data_dict['action'] - data_dict.get('state', root[f'/observations/qpos'][()])
+                elif self.ctrl_type=='rel':
+                    raise NotImplementedError("relative action was not implemented")
+            image_dict = dict()
+            if 'image_primary' in feats or 'image' in feats or len(feats)==0: # 加载图像
+                img_bytes = root[f'/observations/image/primary'][()]
+                image_dict.update(
+                    dict(
+                        primary =  np.stack([cv2.resize(img_byte, eval(self.data_args.image_size_primary)) for img_byte in img_bytes]),
+                    )
+                )
+            if 'image_wrist' in feats or 'image' in feats or len(feats)==0:
+                left_bytes = root[f'/observations/image/wrist_left'][()]
+                image_dict.update(
+                    dict(
+                        wrist_left = np.stack([cv2.resize(lb, eval(self.data_args.image_size_wrist)) for lb in left_bytes]),
+                    )
+                )
+                del left_bytes
+                right_bytes = root[f'/observations/image/wrist_right'][()]
+                image_dict.update(
+                    dict(
+                        wrist_right = np.stack([cv2.resize(rb ,eval(self.data_args.image_size_wrist)) for rb in right_bytes]),
+                    )
+                )
+                del right_bytes
+            if len(image_dict)>0: data_dict['image'] = image_dict
+        return data_dict

@@ -4,3 +4,4 @@ hub/
 assets/robot/
 vla/act_*
 data/
+__pycache__/
