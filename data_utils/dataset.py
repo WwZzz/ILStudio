@@ -396,7 +396,7 @@ class AlohaSIIv2Dataset(EpisodicDataset):
         # 加载文本
         raw_lang = self.get_language_instruction()
         # 加载动作 & 状态
-        action = root[f'/action'][start_ts:start_ts+self.chunk_size]
+        action = root[f'/actions'][start_ts:start_ts+self.chunk_size]
         # 根据控制类型加载相应动作数据
         if self.ctrl_type=='abs':
             state = root[f'/observations/qpos'][start_ts]
@@ -433,7 +433,7 @@ class AlohaSIIv2Dataset(EpisodicDataset):
             if 'qpos' in feats or len(feats)==0: data_dict['qpos'] = root[f'/observations/qpos'][()]
             if 'qvel' in feats or len(feats)==0: data_dict['qvel'] = root[f'/observations/qvel'][()]
             if 'action' in feats or len(feats)==0: # 加载动作 
-                data_dict['action'] = root[f'/action'][()] # 根据控制类型加载相应动作数据
+                data_dict['action'] = root[f'/actions'][()] # 根据控制类型加载相应动作数据
                 if self.ctrl_type=='delta': 
                     data_dict['action'] = data_dict['action'] - data_dict.get('state', root[f'/observations/qpos'][()])
                 elif self.ctrl_type=='rel':
