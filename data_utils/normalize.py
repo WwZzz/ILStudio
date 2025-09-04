@@ -87,6 +87,7 @@ from benchmark.base import MetaAction, MetaObs
 from typing import List
 import fnmatch
 import hashlib
+import warnings
 
 def str2hash(s: str):
     return str(hashlib.md5(s.encode()).hexdigest())
@@ -171,7 +172,9 @@ class BaseNormalizer:
             } if isinstance(v, dict) else v for k,v in self.all_stats.items()
         }
         save_path = os.path.join(target_dir, self.stats_filename)
-        if os.path.exists(save_path): raise FileExistsError(f"Stats file {save_path} already exists.")
+        if os.path.exists(save_path): 
+            warnings.warn(f"Stats file {save_path} already exists.")
+            return
         with open(save_path, 'wb') as file:  # 使用二进制写模式 ('wb')
             pickle.dump(stats_to_save, file)
 

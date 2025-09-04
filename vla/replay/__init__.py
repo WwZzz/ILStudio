@@ -1,5 +1,5 @@
 from data_utils.utils import EpisodicDataset, load_normalizer_from_meta
-from configuration.constants import TASK_CONFIGS
+from configuration.utils import load_task_config
 from dataclasses import dataclass
 import importlib
 import torch.nn as nn
@@ -35,7 +35,7 @@ class Replay(nn.Module):
         return batch_act
 
 def load_model(args):
-    task_config = TASK_CONFIGS[args.task]
+    task_config = load_task_config(args.task)
     args.camera_names = task_config['camera_names']
     with open(args.norm_path, 'r') as f:
         norm_meta = json.load(f)

@@ -14,7 +14,7 @@ from configuration.utils import *
 from data_utils.utils import set_seed, WrappedDataset, load_data
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
-from configuration.constants import TASK_CONFIGS
+from configuration.utils import load_task_config
 # from data_utils.cooker.episode_tools import extract_traj_feature_of_episode
 e = IPython.embed
 local_rank = None
@@ -175,7 +175,7 @@ def parse_param():
 def main(args):
     # 初始化任务信息
     set_seed(1)
-    task_config = TASK_CONFIGS[args.task_name]
+    task_config = load_task_config(args.task_name)
     args.camera_names = task_config['camera_names']
     args.image_sizes = [args.image_size_primary if 'primary' in cam else args.image_size_wrist for cam in args.camera_names]
 

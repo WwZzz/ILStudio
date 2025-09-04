@@ -1,0 +1,8 @@
+dataset_dir:
+  - "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_10/h5"
+  - "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5"
+  - "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_goal/h5"
+  - "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_spatial/h5"
+episode_len: 400
+camera_names:
+  - top

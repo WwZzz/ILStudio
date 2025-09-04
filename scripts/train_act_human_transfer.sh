@@ -9,12 +9,11 @@ SUFFIX="${1:-$DEFAULT_SUFFIX}"
 MODELNAME="${2:-$DEFAULT_POLICY}"
 NORM="${3:-$DEFAULT_NORM}"
 
-TASKNAME=transfer_human
+TASKNAME=aloha_transfer_cube
 
 OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${SUFFIX} # Notice a standard OUTPUT dir should include key words "lora" and "qwen2_vl" for better load model(e.g. /root/path/lora_qwen2_vla_factory_sorting)
 
-
-/opt/conda/envs/py310/bin/python ./train.py \
+accelerate launch --mixed_precision 'bf16' train.py \
     --task_name $TASKNAME \
     --output_dir $OUTPUT  \
     --model_name $MODELNAME \
@@ -40,7 +39,7 @@ OUTPUT=ckpt/${MODELNAME}_${TASKNAME}_${SUFFIX} # Notice a standard OUTPUT dir sh
     --logging_steps 100 \
     --dataloader_num_workers 8 \
     --dataloader_pin_memory True \
-    --preload_data True \
+    --preload_data False \
     --report_to tensorboard \
     --resume_from_checkpoint True \
     --logging_dir $OUTPUT/log | tee $OUTPUT/log.log

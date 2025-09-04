@@ -1,0 +1,8 @@
+dataset_dir:
+  - '/home/wz/project/IL-Studio/data/transfer_scripted'
+episode_len: 400
+camera_names:
+  - primary
+dataset_class: AlohaSimDataset
+ctrl_type: abs
+ctrl_space: joint

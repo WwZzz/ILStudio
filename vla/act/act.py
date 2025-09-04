@@ -66,45 +66,36 @@ class ACTPolicyConfig(PretrainedConfig):
 class ACTPolicy(PreTrainedModel):
     config_class = ACTPolicyConfig  # 配置类
 
-    def __init__(self, config):
+    def __init__(self, config, use_bf16=False):
         super().__init__(config)
-        # 构建模型和优化器
         self.model = build(config)
         self.kl_weight = config.kl_weight
-        # print(f'KL Weight {self.kl_weight}')
+        self.use_bf16 = use_bf16
 
     
     def forward(self, qpos, image, actions=None, is_pad=None):
-        """
-        Forward method for training and inference. Trainer calls this method automatically.
-        
-        Args:
-            qpos: Tensor, shape (batch_size, state_dim), robot state.
-            image: Tensor, shape (batch_size, C, H, W), normalized visual inputs.
-            actions: Tensor, shape (batch_size, num_queries, action_dim), action sequences for training.
-            is_pad: Tensor, shape (batch_size, num_queries), padding mask.
-        Returns:
-            Loss dictionary during training; sampled actions during inference.
-        """
         env_state = None
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         image = normalize(image)
-        if actions is not None: # training time
-            actions = actions[:, :self.model.num_queries]
-            is_pad = is_pad[:, :self.model.num_queries]
-
-            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, is_pad)
-            total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
-            loss_dict = dict()
-            all_l1 = F.l1_loss(actions, a_hat, reduction='none')
-            l1 = (all_l1 * ~is_pad.unsqueeze(-1)).mean()
-            loss_dict['l1'] = l1
-            loss_dict['kl'] = total_kld[0]
-            loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
-            return loss_dict
-        else: # inference time
-            a_hat, _, (_, _) = self.model(qpos, image, env_state) # no action, sample from prior
-            return a_hat
+        import torch
+        from torch.cuda.amp import autocast
+        dtype = torch.bfloat16 if self.use_bf16 else torch.float32
+        with autocast(device_type='cuda', dtype=dtype, enabled=self.use_bf16):
+            if actions is not None: # training time
+                actions = actions[:, :self.model.num_queries]
+                is_pad = is_pad[:, :self.model.num_queries]
+                a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, is_pad)
+                total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
+                loss_dict = dict()
+                all_l1 = F.l1_loss(actions, a_hat, reduction='none')
+                l1 = (all_l1 * ~is_pad.unsqueeze(-1)).mean()
+                loss_dict['l1'] = l1
+                loss_dict['kl'] = total_kld[0]
+                loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
+                return loss_dict
+            else: # inference time
+                a_hat, _, (_, _) = self.model(qpos, image, env_state)
+                return a_hat
 
     def select_action(self, obs):
         # process data
