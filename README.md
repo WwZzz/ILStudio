@@ -22,7 +22,7 @@ pip install -r requirements.txt
 
 # Usage
 ```shell
-# model_name must be in vla and task_name must be in configuration.constants.TASK_CONFIGS
+# model_name must be in vla and task_name must have a corresponding YAML file in configuration/task/
 python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
 ```
 
@@ -98,17 +98,20 @@ The dataset's item should be a dict like
 ```
 
 To add customized datasets, please modify
-```python
-TASK_CONFIGS = {
-    ...,
-    'task_name':{
-        'dataset_dir': [
-            dataset_dir, # the path of the dataset
-        ],
-        'episode_len': int,
-        'camera_names': List(str), # e.g., ['primary']
-    },
-}
+
+## Task Configuration (YAML)
+
+Each task should have a YAML file in `configuration/task/` named `<task_name>.yaml`. Example:
+
+```yaml
+dataset_dir:
+    - /path/to/sim_transfer_cube_scripted
+episode_len: 400
+camera_names:
+    - primary
+dataset_class: AlohaSimDataset
+ctrl_type: abs
+ctrl_space: joint
 ```
 
 ## Data Preparation
@@ -139,21 +142,21 @@ There are three ways to download the generated datasets.
 
 ## Add the dataset to configuration
 ```python
-# configuration/constants.py
-TASK_CONFIGS = {
-    ...,
-    'sim_transfer_cube_scripted': {
-        'dataset_dir': [
-            '/path/to/sim_transfer_cube_scripted',
-        ],
-        'episode_len': 400,          
-        'camera_names': ['primary'], # using the front camera as vision input
-        'dataset_class': 'AlohaSimDataset',
-        'ctrl_type': 'abs',
-        'ctrl_space': 'joint',
-    },
-    ...
-}
+
+## Add the dataset to configuration
+
+Create a YAML file in `configuration/task/` (e.g., `sim_transfer_cube_scripted.yaml`) with the following content:
+
+```yaml
+dataset_dir:
+    - /path/to/sim_transfer_cube_scripted
+episode_len: 400
+camera_names:
+    - primary
+dataset_class: AlohaSimDataset
+ctrl_type: abs
+ctrl_space: joint
+```
 
 ```
 ## Train
