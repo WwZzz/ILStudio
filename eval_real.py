@@ -16,7 +16,6 @@ from PIL import Image, ImageDraw, ImageFont
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List, Any
-from configuration.constants import TASK_CONFIGS
 from deploy.action_manager import load_action_manager
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

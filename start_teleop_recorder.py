@@ -13,7 +13,6 @@ from PIL import Image, ImageDraw, ImageFont
 from configuration.utils import *
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List, Any
-from configuration.constants import TASK_CONFIGS
 import time
 import threading
 import numpy as np
