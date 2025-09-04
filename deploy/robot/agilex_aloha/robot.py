@@ -78,17 +78,9 @@ class AgilexAloha(BaseRobot):
         """
         return not rospy.is_shutdown()
 
-    def rate_sleep(self, hz: int):
-        """
-        Performs a sleep to control the frequency.
-        """
-        time.sleep(1.0 / hz)
-
     def shutdown(self):
         rospy.signal_shutdown("Shutdown robot node")
 
-
-  
   
 class AgilexAlohaTele(BaseRobot):
     def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, use_master_action:bool = False, use_ee_space:bool=False, extra_args=None,  *args, **kwargs):

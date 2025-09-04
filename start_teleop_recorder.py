@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List, Any
 import time
 import threading
+import os
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
@@ -23,9 +24,13 @@ from deploy.teleoperator.base import str2dtype, generate_shm_info
 import h5py
 import signal
 import sys
-import select  # <<< ADDED: For non-blocking input without threads
-import termios # <<< ADDED: For terminal control
-import tty     # <<< ADDED: For terminal control
+import os
+import sys
+if os.name == 'nt':
+    import msvcrt  # Windows only
+else:
+    import select  # Unix only
+    import termios # Unix only
 
 # action_lock = threading.Lock()
 
@@ -35,9 +40,9 @@ class HyperArguments:
     shm_name: str=''
     action_dtype: str = 'float64'
     action_dim: int = 7
-    robot_config: str = "configuration/robots/dummy.yaml"
+    config: str = "configuration/robots/dummy.yaml"
     frequency: int = 100
-    save_dir: str = 'data/debug'
+    save_dir: str = 'data\\pick_red_cap_into_cup'
     task: str = field(default="sim_transfer_cube_scripted")
     start_idx: int = 0
     image_size: str = '(640, 480)'  # (width, height)
@@ -51,55 +56,72 @@ class HyperArguments:
         metadata={"help": "List of camera names", "nargs": "+"}
     )
 
-# <<< ADDED: Non-blocking Keyboard Input Class (replaces thread) >>>
 class KBHit:
     def __init__(self):
-        # Save the terminal settings
-        self.fd = sys.stdin.fileno()
-        self.new_term = termios.tcgetattr(self.fd)
-        self.old_term = termios.tcgetattr(self.fd)
-        # New terminal setting unbuffered
-        self.new_term[3] = (self.new_term[3] & ~termios.ICANON & ~termios.ECHO)
         self.chars = ""
-        self.set_normal_term()
+        if os.name == 'nt':
+            # Windows: no terminal settings needed
+            pass
+        else:
+            # Unix: Save the terminal settings
+            self.fd = sys.stdin.fileno()
+            self.new_term = termios.tcgetattr(self.fd)
+            self.old_term = termios.tcgetattr(self.fd)
+            self.new_term[3] = (self.new_term[3] & ~termios.ICANON & ~termios.ECHO)
+            self.set_normal_term()
 
     def set_normal_term(self):
-        termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.old_term)
+        if os.name != 'nt':
+            termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.old_term)
 
     def set_curses_term(self):
-        termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.new_term)
+        if os.name != 'nt':
+            termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.new_term)
 
     def check(self):
-        # Check if there is data available on stdin
-        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+        if os.name == 'nt':
+            return msvcrt.kbhit()
+        else:
+            return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
     def getch(self):
-        # Read a character from stdin
-        return sys.stdin.read(1)
+        if os.name == 'nt':
+            return msvcrt.getwch()
+        else:
+            return sys.stdin.read(1)
 
     def getarrow(self):
-        # Read an arrow key sequence
         c1 = self.getch()
         if c1 == '\x1b': # ESC
             c2 = self.getch()
             c3 = self.getch()
             return c3
         return None
-    
+
     def get_input(self):
-        """Checks for Enter key press and consumes the input line."""
-        if self.check():
-            # Read all available characters to find a newline
+        if os.name == 'nt':
             while self.check():
                 char = self.getch()
-                if char == '\n' or char == '\r':
-                    res = self.chars.strip() # Return stripped line if Enter is pressed
+                if char in ('\r', '\n'):
+                    res = self.chars.strip()
                     self.chars = ""
                     return res
                 else:
                     self.chars += char
                     print("Current Input: ", self.chars)
-        return None # Return None if no Enter key was pressed
+            return None
+        else:
+            if self.check():
+                while self.check():
+                    char = self.getch()
+                    if char == '\n' or char == '\r':
+                        res = self.chars.strip()
+                        self.chars = ""
+                        return res
+                    else:
+                        self.chars += char
+                        print("Current Input: ", self.chars)
+            return None
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def parse_param():
@@ -188,17 +210,35 @@ class RobotController:
 def save_episode_to_hdf5(save_dir, episode_id, observations, actions):
     os.makedirs(save_dir, exist_ok=True)
     file_path = os.path.join(save_dir, f'episode_{episode_id:04d}.hdf5')
+    def write_group(group, data_list, key_prefix=None):
+        # data_list: list of dict or value
+        if isinstance(data_list[0], dict):
+            # For each key, collect list of values and recurse
+            for key in data_list[0].keys():
+                sub_list = [obs[key] for obs in data_list]
+                if isinstance(sub_list[0], dict):
+                    sub_group = group.create_group(key)
+                    write_group(sub_group, sub_list)
+                else:
+                    try:
+                        group.create_dataset(key, data=np.stack(sub_list))
+                    except (TypeError, ValueError) as e:
+                        print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
+        else:
+            # If not dict, just create dataset
+            try:
+                if key_prefix is None:
+                    group.create_dataset('data', data=np.stack(data_list))
+                else:
+                    group.create_dataset(key_prefix, data=np.stack(data_list))
+            except (TypeError, ValueError) as e:
+                print(f"Warning: Could not stack data for key '{key_prefix}'. Skipping. Error: {e}")
+
     with h5py.File(file_path, 'w') as f:
         f.create_dataset('actions', data=np.array(actions, dtype=np.float32))
         obs_group = f.create_group('observations')
         if observations:
-            for key in observations[0].keys():
-                data_list = [obs[key] for obs in observations]
-                try:
-                    obs_group.create_dataset(key, data=np.stack(data_list))
-                except (TypeError, ValueError) as e:
-                    print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
-    print(f"Episode {episode_id} data saved to {file_path}")
+            write_group(obs_group, observations)
 
 # Global event to signal all threads to shut down gracefully.
 shutdown_event = threading.Event()
@@ -218,14 +258,14 @@ if __name__ == '__main__':
     kb_hit.set_curses_term()
 
     # --- 1. Create Real-World Environment ---
-    print(f"Loading robot configuration from {args.robot_config}")
-    with open(args.robot_config, 'r') as f:
+    print(f"Loading robot configuration from {args.config}")
+    with open(args.config, 'r') as f:
         robot_cfg = yaml.safe_load(f)
     robot = make_robot(robot_cfg, args)
     print("Robot successfully loaded.")
     
     robot_controller = None
-    controller_process = None
+    controller_worker = None
     action_shm = None
 
     # --- 2. Connect to shm ---
@@ -238,9 +278,14 @@ if __name__ == '__main__':
             shm_shape=shm_info['shape'],
             shm_dtype=shm_info['dtype'],
         )
-        controller_process = mp.Process(target=robot_controller.run)
-        controller_process.start()
-        print("Robot controller process started in the background.")
+        if os.name == 'nt':
+            # Windows: use thread
+            controller_worker = threading.Thread(target=robot_controller.run, daemon=True)
+        else:
+            # Linux/macOS: use process
+            controller_worker = mp.Process(target=robot_controller.run)
+        controller_worker.start()
+        print("Robot controller worker started in the background.")
         time.sleep(1)
         action_buffer = None
         try:
@@ -330,14 +375,21 @@ if __name__ == '__main__':
         if robot_controller:
             robot_controller.stop()
             print("Stop signal sent to robot controller.")
-            
-        if controller_process and controller_process.is_alive():
-            controller_process.join(timeout=2)
-            if controller_process.is_alive():
-                print("Controller process did not terminate gracefully, forcing termination.")
-                controller_process.terminate()
+
+        if controller_worker is not None:
+            if os.name == 'nt':
+                controller_worker.join(timeout=2)
+                if controller_worker.is_alive():
+                    print("Controller thread did not terminate gracefully.")
+                else:
+                    print("Robot controller thread joined successfully.")
             else:
-                print("Robot controller process joined successfully.")
+                controller_worker.join(timeout=2)
+                if controller_worker.is_alive():
+                    print("Controller process did not terminate gracefully, forcing termination.")
+                    controller_worker.terminate()
+                else:
+                    print("Robot controller process joined successfully.")
 
         if action_shm:
             action_shm.close()

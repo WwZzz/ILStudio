@@ -46,7 +46,7 @@ def main():
     parser = argparse.ArgumentParser(description='Teleoperation parameters')
 
     parser.add_argument(
-        '--tele_config', type=str, default='configuration/teleop/keyboard.yaml',
+        '--config', type=str, default='configuration/teleop/keyboard.yaml',
         help='YAML file describing the teleoperator configuration'
     )
     parser.add_argument(
@@ -58,7 +58,7 @@ def main():
         help='Dimensionality of the action space'
     )
     parser.add_argument(
-        '--action_dtype', type=str, default='float64', choices=['float32', 'float64'],
+        '--action_dtype', type=str, default='float64', 
         help='Numpy dtype used for action values'
     )
     parser.add_argument(
@@ -87,8 +87,8 @@ def main():
         shm = shared_memory.SharedMemory(name=shm_info['name'])
 
     # Load teleoperator configuration and instantiate the device
-    print(f"Loading teleop configuration from {args.tele_config}")
-    with open(args.tele_config, 'r') as f:
+    print(f"Loading teleop configuration from {args.config}")
+    with open(args.config, 'r') as f:
         teleop_cfg = yaml.safe_load(f)
 
     teleop_dev = load_teleoperator(teleop_cfg, args, shm_info)
