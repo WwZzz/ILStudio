@@ -1,31 +1,30 @@
 #!/bin/bash
-export MUJOCO_GL=egl
+export MUJOCO_GL=glfw # egl for headless ubuntu server
+# export DM_CONTROL_RENDERER=software
+export NUMPY_EXPERIMENTAL_DTYPE_API=1
 
 ENV=aloha
 TASKNAME=transfer_cube_top
-MODELNAME=act
-CHUNKSIZE=100
+POLICYCONFIG=configs/policy/act.yaml  # Policy config file path
 
-DATASET=/path/to/sim_transfer_cube_scripted
-CKPT=/path/to/checkpoint
-OUTPUT=results/${MODELNAME}_${TASKNAME}_${CHUNKSIZE}_example
+DATASET=data/sim_transfer_cube_scripted
+CKPT=ckpt/act_sim_transfer_cube_scripted_zscore_example
+OUTPUT=results/act_${TASKNAME}_example
 
 FPS=50
 ROLLOUT=10
 PARALLEL=5
 
+# Task-related parameters (action_dim, state_dim, chunk_size, camera_names, etc.) are now loaded from task config
 python eval.py --env_name $ENV \
     --task $TASKNAME \
-    --model_name $MODELNAME \
+    --policy_config $POLICYCONFIG \
     --model_name_or_path $CKPT \
     --save_dir $OUTPUT \
     --num_rollout $ROLLOUT \
     --num_envs $PARALLEL \
     --dataset_dir $DATASET \
     --fps $FPS \
-    --freq $CHUNKSIZE \
-    --chunk_size $CHUNKSIZE \
     --camera_ids "[0]" \
-    --image_size_primary "(640,480)" \
-    --image_size_wrist "(256,256)" \
     --max_timesteps 400 \
+    --use_spawn

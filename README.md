@@ -21,9 +21,21 @@ pip install -r requirements.txt
 - ...
 
 # Usage
+
+## Policy Configuration System
+
 ```shell
-# model_name must be in vla and task_name must have a corresponding YAML file in configuration/task/
-python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
+# Use policy_config to load from YAML file path
+python train.py --policy_config configs/policy/act.yaml --task_name example_tasks --output_dir output_dir_path 
+
+# Available policies: configs/policy/act.yaml, configs/policy/qwen2dp.yaml, etc.
+python train.py --policy_config configs/policy/qwen2dp.yaml --task_name example_tasks --output_dir output_dir_path
+
+# Evaluation
+python eval.py --policy_config configs/policy/act.yaml --env_name aloha --task sim_transfer_cube_scripted
+
+# Real-world evaluation
+python eval_real.py --policy_config configs/policy/act.yaml --robot_config configs/robots/dummy.yaml --task sim_transfer_cube_scripted 
 ```
 
 # Overview
@@ -31,7 +43,7 @@ We show the architecture as below:
 ![framework](assets/fig_il.png)
 
 # Model
-important APIs from each `vla.algo_name.__init__`
+important APIs from each `policy.algo_name.__init__`
 - `def load_model(args: transformers.HfArgumentParser) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
 - (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> function` # sample-level data processing
 - (OPTIONAL) `def get_data_collator(args: transformers.HfArgumentParser, model_components:dict) -> function` # batch-level data processing
@@ -101,7 +113,7 @@ To add customized datasets, please modify
 
 ## Task Configuration (YAML)
 
-Each task should have a YAML file in `configuration/task/` named `<task_name>.yaml`. Example:
+Each task should have a YAML file in `configs/task/` named `<task_name>.yaml`. Example:
 
 ```yaml
 dataset_dir:
@@ -137,7 +149,7 @@ export MUJOCO_GL=egl
 ## Simulation Data Preparation
 There are three ways to download the generated datasets.
 - 1) Download from the official repo [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O?usp=share_link)
-- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir /path/to/sim_transfer_cube_scripted`
+- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir ./data/sim_transfer_cube_scripted`
 - 3) Generate the data by following the guidence in [link](https://github.com/tonyzhaozh/act)
 
 ## Add the dataset to configuration
@@ -145,7 +157,7 @@ There are three ways to download the generated datasets.
 
 ## Add the dataset to configuration
 
-Create a YAML file in `configuration/task/` (e.g., `sim_transfer_cube_scripted.yaml`) with the following content:
+Create a YAML file in `configs/task/` (e.g., `sim_transfer_cube_scripted.yaml`) with the following content:
 
 ```yaml
 dataset_dir:

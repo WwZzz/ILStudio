@@ -1,0 +1,37 @@
+name: act
+module_path: policy.act
+config_class: ACTPolicyConfig
+model_class: ACTPolicy
+pretrained_config:
+  model_name_or_path: "facebook/opt-125m"
+  is_pretrained: false
+config_params:
+  # Model architecture parameters
+  backbone: "resnet18"
+  dilation: false
+  position_embedding: "sine"
+  camera_names: ["primary"]
+  enc_layers: 4
+  dec_layers: 7
+  dim_feedforward: 3200
+  hidden_dim: 512
+  dropout: 0.1
+  nheads: 8
+  chunk_size: 400
+  pre_norm: false
+  masks: false
+  # Training parameters
+  lr_backbone: 0.00001  # 1e-5 as float
+  kl_weight: 10
+  # Task parameters (will be overridden by args if provided)
+  state_dim: 14
+  action_dim: 14
+model_args:
+  camera_names: ["primary"]
+  history_len: 1
+  prediction_len: 100
+  chunk_size: 100
+  num_queries: 100
+data_processor: null  # ACT doesn't have a separate data processor
+data_collator: get_data_collator
+trainer_class: Trainer

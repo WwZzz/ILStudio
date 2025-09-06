@@ -7,16 +7,15 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
 import importlib
-import IPython
+# import IPython  # Removed to avoid unnecessary dependency
 import torch
 import numpy as np
-from configuration.utils import *
+from configs.task.loader import load_task_config
 from data_utils.utils import set_seed, WrappedDataset, load_data
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
-from configuration.utils import load_task_config
 # from data_utils.cooker.episode_tools import extract_traj_feature_of_episode
-e = IPython.embed
+# e = IPython.embed  # Removed to avoid unnecessary dependency
 local_rank = None
 
 @dataclass
@@ -43,7 +42,7 @@ class HyperArguments(transformers.TrainingArguments):
     select_seg_token_mask: bool = False
     is_multimodal: bool = False
     image_aspect_ratio: str = 'square'
-    task_name: str = field(default="stack_cube_2024_6_2") # task name corresponding to configuration/constants.py
+    task_name: str = field(default="stack_cube_2024_6_2") # task name corresponding to configs/constants.py
     skip_mirrored_data: bool = field(default=False)
 
 

@@ -7,7 +7,7 @@ import fnmatch
 import cv2
 import json
 import torchvision.transforms as transforms
-import IPython
+# import IPython  # Removed to avoid unnecessary dependency
 import copy
 import gc
 import warnings
@@ -16,11 +16,10 @@ from time import time
 from torch.utils.data import TensorDataset, DataLoader, ConcatDataset
 from torchvision.transforms.functional import to_pil_image, to_tensor
 from .normalize import BaseNormalizer, MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
-from configuration.utils import *
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
-e = IPython.embed
+# e = IPython.embed  # Removed to avoid unnecessary dependency
 
 # Normalize Class
 NORMTYPE2CLASS = {
@@ -218,7 +217,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 try:
                     reasoning = root['reasoning'][start_ts].decode('utf-8')
                 except Exception as e:
-                    print(f"Read reasoning from {dataset_path} happens {YELLOW}{e}{RESET}")
+                    print(f"Read reasoning from {dataset_path} happens {e}")
                     exit(0)
         if self.loaded_data is None: root.close()
         return {
@@ -268,7 +267,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     try:
                         reasoning = root['reasoning'][()].decode('utf-8')
                     except Exception as e:
-                        print(f"Read reasoning from {dataset_path} happens {YELLOW}{e}{RESET}")
+                        print(f"Read reasoning from {dataset_path} happens {e}")
                         exit(0)
         return data_dict
 
@@ -416,9 +415,11 @@ def load_data(args, task_config, save_norm=True):
     action_normtype = args.action_normalize
     state_normtype = args.state_normalize
     if type(dataset_dir_l) == str: dataset_dir_l = [dataset_dir_l]
-    if data_class=='EpisodicDataset': data_class = eval(data_class)
+    if data_class == 'EpisodicDataset':
+        from data_utils.datasets import EpisodicDataset
+        data_class = EpisodicDataset
     else:
-        data_class = getattr(importlib.import_module('data_utils.dataset'), data_class)
+        data_class = getattr(importlib.import_module('data_utils.datasets'), data_class)
     # 以数据集为维度，计算统计量
     datasets = [data_class(find_all_hdf5(dataset_dir, True), camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
         # 获取normalizer class

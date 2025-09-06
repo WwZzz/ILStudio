@@ -10,7 +10,7 @@ from benchmark.base import MetaPolicy
 from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 from deploy.robot.base import AbstractRobotInterface, RateLimiter
 from PIL import Image, ImageDraw, ImageFont
-from configuration.utils import *
+from configs.task.loader import load_task_config
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List, Any
 import time
@@ -40,7 +40,7 @@ class HyperArguments:
     shm_name: str=''
     action_dtype: str = 'float64'
     action_dim: int = 7
-    config: str = "configuration/robots/dummy.yaml"
+    config: str = "configs/robots/dummy.yaml"
     frequency: int = 100
     save_dir: str = 'data\\pick_red_cap_into_cup'
     task: str = field(default="sim_transfer_cube_scripted")
@@ -422,7 +422,6 @@ if __name__ == '__main__':
             controller_worker = threading.Thread(target=robot_controller.run, daemon=True)
         else:
             # Linux/macOS: use process
-            print("linux multiproceeeess")
             controller_worker = mp.Process(target=robot_controller.run)
         controller_worker.start()
         print("Robot controller worker started in the background.")

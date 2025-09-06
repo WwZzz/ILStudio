@@ -1,9 +1,0 @@
-target: deploy.robot.sim_pybullet.DeltaEERobot
-action_dim: 6
-action_dtype: float64
-robot_urdf_path: "kuka_iiwa/model.urdf"
-ee_link_index: 6  # Last link of Kuka IIWA
-initial_joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-gripper_joint_indices: []  # No gripper
-gripper_width: 0.0
-use_gui: true

@@ -10,6 +10,12 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "args": [
+                "--task_name","sim_transfer_cube_scripted",
+                "--policy_config","configs/policy/diffusion_policy.yaml",
+                "--training_config","configs/training/default.yaml",
+                "--output_dir","ckpt/dp_sim_transfer_cube_scripted_zscore_example",
+            ],
             // "args": [
             //     "--model_name_or_path",
             //     "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/act_transfer_cube_top_zscore_long2/checkpoint-700",
@@ -17,8 +23,10 @@
             //     "/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted"
             // ],
             "args": [
-                "--robot_config", "configuration/robots/agilex_aloha.yaml",
-                
+                "--task_name", "sim_transfer_cube_scripted",
+                "--policy_config", "configs/policy/diffusion_policy.yaml",
+                "--training_config", "configs/training/default.yaml",
+                "--output_dir", "ckpt/dp_sim_transfer_cube_scripted_zscore_example"
             ]
         }
     ]

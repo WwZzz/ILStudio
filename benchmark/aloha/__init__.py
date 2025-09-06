@@ -74,7 +74,7 @@ class AlohaSimEnv(MetaEnv):
         self.config = config
         self.ctrl_space= 'joint'
         self.ctrl_type = 'abs'
-        self.camera_ids = self.config.camera_ids
+        self.camera_ids = eval(self.config.camera_ids) if isinstance(self.config.camera_ids, str) else self.config.camera_ids
         image_size_primary = eval(self.config.image_size_primary)
         width, height = image_size_primary if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
         self.image_size_primary = (width, height)

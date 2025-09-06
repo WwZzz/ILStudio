@@ -2,6 +2,11 @@ ckpt/
 results/
 hub/
 assets/robot/
-vla/act_*
+policy/act_*
 data/
 __pycache__/
+scripts/*
+!scripts/*example*.sh
+logs/
+vla_backup/
+eval_real_old.py
