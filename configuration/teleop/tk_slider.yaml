@@ -1,0 +1,11 @@
+target: deploy.teleoperator.tk_slider.SliderTeleop
+slider_ranges:
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [0.0, 0.04]   # Example for gripper
+  - [0.0, 0.04]   # Example for gripper

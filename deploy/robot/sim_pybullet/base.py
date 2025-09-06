@@ -90,6 +90,7 @@ class DeltaEERobot(BaseRobot):
                 p.resetJointState(self.robot_id, i, pos)
 
             print(f"Robot '{self._robot_urdf_path}' loaded with ID: {self.robot_id}")
+            return True
         except Exception as e:
             print(f"Failed to connect to PyBullet: {e}")
             return False
@@ -151,6 +152,10 @@ class DeltaEERobot(BaseRobot):
         current_pos = np.array(ee_state[4])
         current_orn_quat = np.array(ee_state[5])  # 当前姿态是一个四元数 [x, y, z, w]
         target_pos = current_pos + delta_pos
+        
+        # print(f"Delta position: {delta_pos}")
+        # print(f"Current position: {current_pos}")
+        # print(f"Target position: {target_pos}")
 
         # --- 姿态控制 (新增部分) ---
         # 默认目标姿态为当前姿态
@@ -173,8 +178,12 @@ class DeltaEERobot(BaseRobot):
                 orientationB=delta_orn_quat  # 要应用的旋转
             )
             target_gripper_pos = self.gripper_width * action[-1]
+        else:
+            # If no gripper action provided, keep current gripper position
+            gripper_states = p.getJointStates(self.robot_id, self.gripper_joint_indices)
+            target_gripper_pos = np.mean([state[0] for state in gripper_states])
 
-
+        # print(f"Gripper target: {target_gripper_pos}")
 
         # --- 逆运动学 (IK) ---
         # 使用新的目标位置和目标姿态
@@ -188,6 +197,8 @@ class DeltaEERobot(BaseRobot):
             maxNumIterations=100,
             residualThreshold=.01
         )
+        
+        # print(f"Target joint positions: {target_joint_positions[:len(self._controllable_joints)]}")
 
         # --- 电机控制 (与之前相同) ---
         MAX_FORCE = 100

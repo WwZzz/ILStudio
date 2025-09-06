@@ -1,0 +1,8 @@
+target: deploy.robot.sim_pybullet.AbsJointRobot
+action_dim: 12
+action_dtype: float64
+robot_urdf_path: "a1/a1.urdf"
+initial_joint_positions: [0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3]  # 12 joints for quadruped
+gripper_joint_indices: []  # No gripper
+gripper_width: 0.0
+use_gui: true

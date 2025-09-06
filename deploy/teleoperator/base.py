@@ -68,6 +68,7 @@ class BaseTeleopDevice(ABC):
                 # Core three steps
                 observation = self.get_observation()
                 action = self.observation_to_action(observation)
+                # print(f"Teleop device: action = {action}")
                 self.put_action_to_buffer(action)
                 rate_limiter.sleep(self.frequency)
                 # elapsed_time = time.time() - start_time

@@ -1,0 +1,8 @@
+target: deploy.robot.sim_pybullet.AbsJointRobot
+action_dim: 7
+action_dtype: float64
+robot_urdf_path: "kuka_iiwa/model.urdf"
+initial_joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+gripper_joint_indices: []  # No gripper
+gripper_width: 0.0
+use_gui: true
