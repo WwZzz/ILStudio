@@ -6,9 +6,9 @@ from abc import ABC, abstractmethod
 import importlib
 import argparse
 import yaml
-from deploy.teleoperator.base import str2dtype, BaseTeleopDevice, generate_shm_info
+from deploy.teleoperator.base import str2dtype, BaseTeleopDevice, generate_shm_info, dtype2code
 
-def load_teleoperator(teleop_cfg: dict, args, shm_info: dict) -> BaseTeleopDevice:
+def load_teleoperator(teleop_cfg: dict, shm_info: dict, action_dim: int, action_dtype, freq: float) -> BaseTeleopDevice:
     """
     Dynamically load a teleoperator class specified in the configuration file.
 
@@ -16,10 +16,14 @@ def load_teleoperator(teleop_cfg: dict, args, shm_info: dict) -> BaseTeleopDevic
         teleop_cfg : dict
             Teleoperator configuration dictionary. Must contain a 'target' key
             pointing to the fully-qualified class name, e.g. 'some.module.TeleOpClass'.
-        args : argparse.Namespace
-            Command-line arguments.
         shm_info : dict
             Shared-memory metadata containing 'name', 'shape', 'dtype', and 'size'.
+        action_dim : int
+            Dimensionality of the action space.
+        action_dtype : numpy.dtype
+            Numpy dtype used for action values.
+        freq : float
+            Teleoperation update frequency in Hz.
 
     Returns:
         teleoperator : BaseTeleopDevice
@@ -30,14 +34,18 @@ def load_teleoperator(teleop_cfg: dict, args, shm_info: dict) -> BaseTeleopDevic
     module = importlib.import_module(module_path)
     TeleOpCls = getattr(module, class_name)
     print(f"Creating Teleop Device: {full_path}")
+    # Filter out 'target' and any keys that are already explicitly passed
+    excluded_keys = {'target', 'shm_name', 'action_dim', 'action_dtype', 'freq'}
+    teleop_kwargs = {k: v for k, v in teleop_cfg.items() if k not in excluded_keys}
+    
     teleoperator = TeleOpCls(
         shm_name=shm_info['name'],
         shm_shape=shm_info['shape'],
         shm_dtype=shm_info['dtype'],
-        action_dim=args.action_dim,
-        action_dtype=args.action_dtype,
-        frequency=args.freq,
-        **{k: v for k, v in teleop_cfg.items() if k != 'target'}
+        action_dim=action_dim,
+        action_dtype=action_dtype,
+        frequency=freq,
+        **teleop_kwargs
     )
     return teleoperator
 
@@ -47,31 +55,25 @@ def main():
 
     parser.add_argument(
         '--config', type=str, default='configs/teleop/keyboard.yaml',
-        help='YAML file describing the teleoperator configuration'
+        help='YAML file describing the teleoperator device configuration'
     )
-    parser.add_argument(
-        '--shm_name', type=str, default='teleop_action_buffer',
-        help='Name of the shared-memory buffer used for actions'
-    )
-    parser.add_argument(
-        '--action_dim', type=int, default=7,
-        help='Dimensionality of the action space'
-    )
-    parser.add_argument(
-        '--action_dtype', type=str, default='float64', 
-        help='Numpy dtype used for action values'
-    )
-    parser.add_argument(
-        '--freq', type=float, default=10.0,
-        help='Teleoperation update frequency in Hz'
-    )
+    
+    # Parse only the teleop config file argument
     args = parser.parse_args()
 
-    # Convert the string dtype to an actual numpy dtype
-    args.action_dtype = str2dtype(args.action_dtype)
+    # Load teleoperator device configuration
+    print(f"Loading teleop device configuration from {args.config}")
+    with open(args.config, 'r') as f:
+        teleop_cfg = yaml.safe_load(f)
+    
+    # Extract parameters directly from teleop config
+    shm_name = teleop_cfg.get('shm_name', 'ilstd_teleop_controller')
+    action_dim = teleop_cfg.get('action_dim', 7)
+    action_dtype = str2dtype(teleop_cfg.get('action_dtype', 'float64'))
+    freq = teleop_cfg.get('freq', 10.0)
 
     # Define the shared-memory layout
-    shm_info = generate_shm_info(args.shm_name, args.action_dim, args.action_dtype)
+    shm_info = generate_shm_info(shm_name, action_dim, action_dtype)
 
     # Create or attach to the shared-memory block
     try:
@@ -80,18 +82,18 @@ def main():
             create=True,
             size=shm_info['size']
         )
+        # Initialize metadata fields
+        shm_array = np.ndarray((1,), dtype=shm_info['dtype'], buffer=shm.buf)
+        shm_array['action_dim'][0] = action_dim
+        shm_array['action_dtype_code'][0] = dtype2code(action_dtype)
         print(f"Main: created shared-memory '{shm_info['name']}' "
-              f"({shm_info['size']} bytes)")
+              f"({shm_info['size']} bytes) with action_dim={action_dim}, action_dtype={action_dtype}")
     except FileExistsError:
         print(f"Main: shared-memory '{shm_info['name']}' already exists; attaching")
         shm = shared_memory.SharedMemory(name=shm_info['name'])
 
-    # Load teleoperator configuration and instantiate the device
-    print(f"Loading teleop configuration from {args.config}")
-    with open(args.config, 'r') as f:
-        teleop_cfg = yaml.safe_load(f)
-
-    teleop_dev = load_teleoperator(teleop_cfg, args, shm_info)
+    # Instantiate the teleoperator device using teleop configuration
+    teleop_dev = load_teleoperator(teleop_cfg, shm_info, action_dim, action_dtype, freq)
     if hasattr(teleop_dev, 'get_doc'):
         print(teleop_dev.get_doc())
 

@@ -11,7 +11,7 @@ import os
 import h5py
 
 class AgilexAloha(BaseRobot):
-    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, extra_args=None, *args, **kwargs):
+    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, *args, **kwargs):
         super().__init__()
         self.ros_operator = RosOperator(SimpleNamespace(**ros_operator))
         self.init_pos = init_pos
@@ -83,7 +83,7 @@ class AgilexAloha(BaseRobot):
 
   
 class AgilexAlohaTele(BaseRobot):
-    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, use_master_action:bool = False, use_ee_space:bool=False, extra_args=None,  *args, **kwargs):
+    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, use_master_action:bool = False, use_ee_space:bool=False, *args, **kwargs):
         super().__init__()
         self.ros_operator = RosTeleOperator(SimpleNamespace(**ros_operator))
         self.init_pos = init_pos

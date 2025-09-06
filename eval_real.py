@@ -11,7 +11,7 @@ import torch
 import numpy as np
 from benchmark.base import MetaPolicy
 from data_utils.utils import set_seed,  _convert_to_type, load_normalizers
-from deploy.robot.base import AbstractRobotInterface, RateLimiter
+from deploy.robot.base import AbstractRobotInterface, RateLimiter, make_robot
 from PIL import Image, ImageDraw, ImageFont
 from configs.task.loader import load_task_config
 from typing import Dict, Optional, Sequence, List, Any
@@ -19,7 +19,6 @@ from deploy.action_manager import load_action_manager
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
-os.environ["WANDB_DISABLED"] = "true"
 local_rank = None
 
 def parse_param():
@@ -90,33 +89,6 @@ def parse_param():
     
     return args
 
-def make_robot(robot_cfg: Dict, args) -> AbstractRobotInterface:
-    """
-    Create a robot instance based on the provided configuration.
-
-    Args:
-        robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
-    """
-    full_path = robot_cfg['target']
-    module_path, class_name = full_path.rsplit('.', 1)
-    module = importlib.import_module(module_path)
-    RobotCls = getattr(module, class_name)
-    print(f"Creating robot: {full_path}")
-
-    # .get() is used to safely access params, which might not exist
-    robot_config = robot_cfg.get('config', {})
-
-    robot = RobotCls(config=robot_config, extra_args=args, **robot_config)
-    # connect to robot
-    retry_counts = 1
-    MAX_RETRY = 5
-    while not robot.connect():
-        print(f"Retrying for {retry_counts} time...")
-        retry_counts += 1
-        if retry_counts>MAX_RETRY:
-            exit(0)
-        time.sleep(1)
-    return robot
 
 def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Queue, args):
     """Sensing producer thread, uses an abstract interface to get observations."""

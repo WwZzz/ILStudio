@@ -93,11 +93,40 @@ def str2dtype(s: str):
     else:
         raise ValueError(f'Invalid string {s}')
 
+def dtype2code(dtype):
+    """Convert numpy dtype to integer code"""
+    if dtype == np.float32:
+        return 0
+    elif dtype == np.float64:
+        return 1
+    elif dtype == np.int32:
+        return 2
+    elif dtype == np.int64:
+        return 3
+    else:
+        raise ValueError(f'Unsupported dtype: {dtype}')
+
+def code2dtype(code):
+    """Convert integer code to numpy dtype"""
+    if code == 0:
+        return np.float32
+    elif code == 1:
+        return np.float64
+    elif code == 2:
+        return np.int32
+    elif code == 3:
+        return np.int64
+    else:
+        raise ValueError(f'Unknown dtype code: {code}')
+
 def generate_shm_info(shm_name: str, action_dim:int, action_dtype=np.float64) -> dict:
-    """Define the shared-memory layout"""
+    """Define the shared-memory layout with metadata"""
+    dtype_code = dtype2code(action_dtype)
     shm_info = {
         'name': shm_name,
         'dtype': np.dtype([
+            ('action_dim', np.int32),      # Store action_dim as metadata
+            ('action_dtype_code', np.int32), # Store dtype code as metadata
             ('timestamp', np.float64),
             ('action', action_dtype, action_dim),
         ]),
