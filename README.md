@@ -1,5 +1,5 @@
 <div align="center">
-  <img src='assets/ilstd_logo.png'  width="200"/>
+  <img src='assets/fig_ilstd_logo.png'  width="200"/>
 <h1> IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
 </h1>
 
