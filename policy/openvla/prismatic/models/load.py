@@ -12,12 +12,12 @@ from typing import List, Optional, Union
 
 from huggingface_hub import HfFileSystem, hf_hub_download
 
-from prismatic.conf import ModelConfig
-from prismatic.models.materialize import get_llm_backbone_and_tokenizer, get_vision_backbone_and_transform
-from prismatic.models.registry import GLOBAL_REGISTRY, MODEL_REGISTRY
-from prismatic.models.vlas import OpenVLA
-from prismatic.models.vlms import PrismaticVLM
-from prismatic.overwatch import initialize_overwatch
+from .conf import ModelConfig
+from .materialize import get_llm_backbone_and_tokenizer, get_vision_backbone_and_transform
+from .registry import GLOBAL_REGISTRY, MODEL_REGISTRY
+from .vlas import OpenVLA
+from .vlms import PrismaticVLM
+from ..overwatch import initialize_overwatch
 from prismatic.vla.action_tokenizer import ActionTokenizer
 
 # Initialize Overwatch =>> Wraps `logging.Logger`

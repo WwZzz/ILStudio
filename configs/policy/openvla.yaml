@@ -1,0 +1,38 @@
+name: openvla
+module_path: policy.openvla
+config_class: OpenVLAPolicyConfig
+model_class: OpenVLAPolicy
+pretrained_config:
+  model_name_or_path: "microsoft/git-base"
+  is_pretrained: true
+config_params:
+  # Training mode: "lora" or "full"
+  training_mode: "lora"
+  # LoRA parameters (only used when training_mode="lora")
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  # Quantization (only used when training_mode="lora")
+  use_quantization: false
+  # Model parameters
+  max_length: 2048
+  # Task parameters (will be overridden by args if provided)
+  state_dim: 14
+  action_dim: 14
+  camera_names: ["primary"]
+model_args:
+  camera_names: ["primary"]
+  history_len: 1
+  prediction_len: 1
+  chunk_size: 1
+  action_dim: 14
+  state_dim: 14
+  max_length: 2048
+  training_mode: "lora"
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  use_quantization: false
+data_processor: OpenVLAProcessor
+data_collator: get_data_collator
+trainer_class: OpenVLATrainer
