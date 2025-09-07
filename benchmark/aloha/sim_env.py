@@ -12,8 +12,6 @@ from .constants import MASTER_GRIPPER_POSITION_NORMALIZE_FN
 from .constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN
 from .constants import PUPPET_GRIPPER_VELOCITY_NORMALIZE_FN
 
-import IPython
-e = IPython.embed
 
 BOX_POSE = [None] # to be changed from outside
 

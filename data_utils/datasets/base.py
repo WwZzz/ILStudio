@@ -16,14 +16,12 @@ from time import time
 from torch.utils.data import TensorDataset, DataLoader, ConcatDataset
 import torchvision.transforms as transforms
 from torchvision.transforms.functional import to_pil_image, to_tensor
-import IPython
 from data_utils.rotate import quat2axisangle
 from collections import OrderedDict
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import warnings
 
-e = IPython.embed
 
 
 class EpisodicDataset(torch.utils.data.Dataset):

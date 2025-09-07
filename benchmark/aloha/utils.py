@@ -4,8 +4,6 @@ import os
 import h5py
 from torch.utils.data import TensorDataset, DataLoader
 
-import IPython
-e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
     def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):

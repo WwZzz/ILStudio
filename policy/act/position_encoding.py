@@ -8,8 +8,6 @@ from torch import nn
 
 from .utils.misc import NestedTensor
 
-import IPython
-e = IPython.embed
 
 class PositionEmbeddingSine(nn.Module):
     """
