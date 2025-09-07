@@ -182,14 +182,14 @@ class DirectPolicyLoader:
               f"camera_names={getattr(args, 'camera_names', 'N/A')}, "
               f"action_dim={getattr(args, 'action_dim', 'N/A')}")
     
-    def get_data_processor(self, checkpoint_path: str, dataset, args, model_components):
+    def get_data_processor(self, checkpoint_path: str, args, model_components):
         """Get data processor for the policy."""
         policy_type = self.detect_policy_type(checkpoint_path)
         policy_module = self.load_policy_module(policy_type)
         
         # Try to get data processor function
         if hasattr(policy_module, 'get_data_processor'):
-            return policy_module.get_data_processor(dataset, args, model_components)
+            return policy_module.get_data_processor(args, model_components)
         
         return None
     
@@ -223,9 +223,9 @@ def load_model_from_checkpoint(checkpoint_path: str, args) -> Dict[str, Any]:
     return direct_policy_loader.load_model_from_checkpoint(checkpoint_path, args)
 
 
-def get_data_processor_from_checkpoint(checkpoint_path: str, dataset, args, model_components):
+def get_data_processor_from_checkpoint(checkpoint_path: str, args, model_components):
     """Convenience function to get data processor from checkpoint."""
-    return direct_policy_loader.get_data_processor(checkpoint_path, dataset, args, model_components)
+    return direct_policy_loader.get_data_processor(checkpoint_path, args, model_components)
 
 
 def get_data_collator_from_checkpoint(checkpoint_path: str, args, model_components):

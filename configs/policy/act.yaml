@@ -1,7 +1,5 @@
 name: act
 module_path: policy.act
-config_class: ACTPolicyConfig
-model_class: ACTPolicy
 pretrained_config:
   model_name_or_path: "facebook/opt-125m"
   is_pretrained: false
@@ -32,6 +30,3 @@ model_args:
   prediction_len: 100
   chunk_size: 100
   num_queries: 100
-data_processor: null  # ACT doesn't have a separate data processor
-data_collator: get_data_collator
-trainer_class: Trainer

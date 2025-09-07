@@ -1,7 +1,5 @@
 name: diffusion_policy
 module_path: policy.diffusion_policy
-config_class: DiffusionPolicyConfig
-model_class: DiffusionPolicyModel
 pretrained_config:
   model_name_or_path: null
   is_pretrained: false
@@ -24,6 +22,3 @@ model_args:
   pretrained_model_path: null
   # Image sizes will be set from task config
   image_sizes: null
-data_processor: StateToQposProcessor
-data_collator: data_collator_wrapper
-trainer_class: Trainer

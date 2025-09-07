@@ -1,0 +1,74 @@
+# OpenVLA Training Configuration
+# Optimized settings for OpenVLA fine-tuning
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION
+# =============================================================================
+
+# Data loading (training process related)
+preload_data: false
+
+# =============================================================================
+# OPTIMIZER CONFIGURATION
+# =============================================================================
+
+# Learning rate and scheduling
+learning_rate: 0.0001
+weight_decay: 0.01
+warmup_steps: 0
+warmup_ratio: 0.1
+lr_scheduler_type: "constant"
+
+# Optimizer settings
+optim: "adamw_torch"
+adam_beta1: 0.95
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+
+# =============================================================================
+# LOGGING AND SAVING CONFIGURATION
+# =============================================================================
+
+# Logging settings
+logging_strategy: "steps"
+logging_steps: 10
+report_to: "none"
+
+# Saving settings
+save_strategy: "steps"
+save_steps: 100
+save_total_limit: 3
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION (TrainingArguments)
+# =============================================================================
+
+# DataLoader settings
+dataloader_num_workers: 4
+dataloader_pin_memory: false
+remove_unused_columns: false
+
+# Evaluation settings
+do_eval: true
+eval_steps: 100
+
+# System settings
+seed: 0
+
+# =============================================================================
+# CORE TRAINING PARAMETERS
+# =============================================================================
+
+# Training duration
+num_train_epochs: 3
+max_steps: 1000
+
+# Batch sizes (optimized for OpenVLA)
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 2
+
+# Logging directory
+logging_dir: "./logs"
+
+# Checkpoint resuming
+resume_from_checkpoint: true

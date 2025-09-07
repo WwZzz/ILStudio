@@ -87,6 +87,7 @@ class SimpleOpenVLAPolicy(PreTrainedModel):
             quantization_config=quantization_config,
             low_cpu_mem_usage=True,
             trust_remote_code=True,
+            attn_implementation="eager",  # Use eager attention to avoid SDPA issues
         )
         
         # Initialize tokenizer
@@ -119,6 +120,8 @@ class SimpleOpenVLAPolicy(PreTrainedModel):
         if self.model is None:
             raise ValueError("Model components not loaded. Call load_pretrained_components first.")
             
+        # Remove num_items_in_batch if present (from trainer)
+        kwargs.pop('num_items_in_batch', None)
         return self.model(
             pixel_values=pixel_values,
             input_ids=input_ids,
@@ -221,34 +224,36 @@ def load_model(args):
     
     return {
         'model': model,
-        'processor': model.processor,
-        'tokenizer': model.tokenizer
+        'tokenizer': model.tokenizer,
+        'processor': model.processor
     }
 
 
 def get_data_collator(args, model_components):
     """Get data collator for OpenVLA."""
-    from transformers import DataCollatorForLanguageModeling
-    
     tokenizer = model_components['tokenizer']
-    collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,
-        pad_to_multiple_of=8
-    )
     
-    class MyCollator:
-        def __init__(self, collator, dtype=torch.bfloat16):
-            self.collator = collator
+    class SimpleCollator:
+        def __init__(self, tokenizer, dtype=torch.bfloat16):
+            self.tokenizer = tokenizer
             self.dtype = dtype
         
-        def __call__(self, *args, **kwargs):
-            batch = self.collator(*args, **kwargs)
-            if 'pixel_values' in batch:
-                batch['pixel_values'] = batch['pixel_values'].to(self.dtype)
-            return batch
+        def __call__(self, features):
+            # Extract pixel_values, input_ids, and labels
+            pixel_values = torch.stack([f['pixel_values'] for f in features])
+            input_ids = torch.stack([f['input_ids'] for f in features])
+            labels = torch.stack([f['labels'] for f in features])
+            
+            # Convert pixel_values to the correct dtype
+            pixel_values = pixel_values.to(self.dtype)
+            
+            return {
+                'pixel_values': pixel_values,
+                'input_ids': input_ids,
+                'labels': labels
+            }
     
-    return MyCollator(collator)
+    return SimpleCollator(tokenizer)
 
 
 class SimpleOpenVLAProcessor:
@@ -260,28 +265,28 @@ class SimpleOpenVLAProcessor:
     
     def __call__(self, sample):
         """Process a single sample."""
-        # Convert image to PIL
-        if isinstance(sample['image'], torch.Tensor):
-            if sample['image'].dim() == 4:  # Batch dimension
-                image = sample['image'][0]
-            else:
-                image = sample['image']
-            image = Image.fromarray(image.permute(1, 2, 0).numpy().astype(np.uint8))
-        else:
-            image = Image.fromarray(sample['image'][0].permute(1, 2, 0).numpy())
+        # Handle image format: (num_cameras, C, H, W) -> take first camera
+        image_tensor = sample['image'][0]  # Take first camera (primary)
+        # Convert from tensor to PIL Image
+        image_array = image_tensor.permute(1, 2, 0).numpy().astype(np.uint8)
+        image = Image.fromarray(image_array)
         
         # Get action and instruction
-        action = sample['action']
-        if action.shape[0] > 1:
-            warnings.warn("Simple OpenVLA only supports actions without chunking")
-        action = action[0]
+        action = sample['action'][0]  # Take first action from chunk
         instruction = sample['raw_lang']
         
-        # Build simple conversation
-        prompt = f"Human: What action should the robot take to {instruction}?\nAssistant: The robot should take action {action.tolist()}"
+        # Build simple conversation with fixed format
+        prompt = f"Human: {instruction}\nAssistant: {action.tolist()}"
         
-        # Tokenize
-        inputs = self.tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
+        # Tokenize with fixed length
+        inputs = self.tokenizer(
+            prompt, 
+            add_special_tokens=True, 
+            padding="max_length",  # Pad to max_length
+            truncation=True, 
+            max_length=256,  # Shorter max length
+            return_tensors="pt"
+        )
         input_ids = inputs.input_ids[0]
         labels = input_ids.clone()
         
@@ -295,7 +300,7 @@ class SimpleOpenVLAProcessor:
         return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels)
 
 
-def get_data_processor(dataset, args, model_components):
+def get_data_processor(args, model_components):
     """Get data processor for OpenVLA."""
     tokenizer = model_components['tokenizer']
     image_transform = model_components['processor'].image_processor.apply_transform

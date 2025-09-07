@@ -33,7 +33,7 @@ Observation space: {"qpos": Concat[ left_arm_qpos (6),         # absolute joint 
                                     right_gripper_qvel (1)]     # normalized gripper velocity (pos: opening, neg: closing)
                     "images": {"main": (480x640x3)}        # h, w, c, dtype='uint8'
 """
-from numpy.core.tests.test_mem_overlap import shape
+# Removed problematic numpy import that causes compatibility issues
 from benchmark.base import MetaEnv, MetaAction, MetaObs, MetaPolicy
 from .constants import SIM_TASK_CONFIGS
 from .ee_sim_env import make_ee_sim_env
