@@ -6,7 +6,6 @@ import copy
 import json
 from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 import tensorflow as tf
-# from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 import argparse
@@ -47,12 +46,10 @@ def parse_param():
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use for evaluation')
     
-    # Policy config system
-    parser.add_argument('--policy_config', type=str, default='configs/policy/diffusion_policy.yaml',
-                       help='Policy config file path')
+    # Direct checkpoint loading
     parser.add_argument('--model_name_or_path', type=str, 
-                       default='/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/diffusion_policy_transfer_cube_top_zscore_official_aug',
-                       help='Path to the model checkpoint')
+                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
+                       help='Path to the model checkpoint (directory or specific checkpoint)')
     parser.add_argument('--norm_path', type=str, default='',
                        help='Path to normalization data')
     parser.add_argument('--save_dir', type=str, default='results/dp_aloha_transer-official-ema-freq50-dnoise10-aug',
@@ -84,6 +81,20 @@ def parse_param():
     parser.add_argument('--use_spawn', action='store_true',
                        help='Use spawn method for multiprocessing')
     
+    # Model parameters (will be loaded from checkpoint config if not provided)
+    parser.add_argument('--chunk_size', type=int, default=64,
+                       help='Chunk size for policy (will be overridden by checkpoint config)')
+    parser.add_argument('--camera_names', type=str, default='["primary"]',
+                       help='Camera names (will be overridden by checkpoint config)')
+    parser.add_argument('--image_size_primary', type=str, default='(640, 480)',
+                       help='Primary camera image size (will be overridden by checkpoint config)')
+    parser.add_argument('--image_size_wrist', type=str, default='(640, 480)',
+                       help='Wrist camera image size (will be overridden by checkpoint config)')
+    parser.add_argument('--action_dim', type=int, default=14,
+                       help='Action dimension (will be overridden by checkpoint config)')
+    parser.add_argument('--state_dim', type=int, default=14,
+                       help='State dimension (will be overridden by checkpoint config)')
+    
     # Parse arguments
     args = parser.parse_args()
     
@@ -100,14 +111,14 @@ if __name__=='__main__':
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
     
-    # Load policy using policy config system for evaluation - uses saved model config
-    print(f"Loading policy config: {args.policy_config}")
-    from policy.policy_loader import load_policy_model_for_evaluation
-    model_components = load_policy_model_for_evaluation(args.policy_config, args)
+    # Load policy directly from checkpoint
+    print(f"Loading model from checkpoint: {args.model_name_or_path}")
+    from policy.direct_loader import load_model_from_checkpoint
+    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model']
     config = model_components.get('config', None)
     if config:
-        print(f"Loaded config from YAML: {type(config).__name__}")
+        print(f"Loaded config from checkpoint: {type(config).__name__}")
     policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'], state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
     # load env
     env_module = importlib.import_module(f"benchmark.{args.env_name}") 

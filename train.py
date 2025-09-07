@@ -124,6 +124,18 @@ def main(args, training_args):
     if trainer.is_world_process_zero():
         trainer.save_state()
         trainer.save_model(training_args.output_dir)
+        
+        # Save policy module information for direct loading
+        policy_metadata = {
+            'policy_module': policy_config['module_path'],
+            'policy_name': policy_config['name'],
+            'model_class': policy_config['model_class']
+        }
+        import json
+        metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(policy_metadata, f, indent=2)
+        print(f"Saved policy metadata to {metadata_path}")
 
 if __name__ == '__main__':
     args, training_args = parse_param()

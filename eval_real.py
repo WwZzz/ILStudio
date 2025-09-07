@@ -46,12 +46,10 @@ def parse_param():
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use for evaluation')
     
-    # Policy config system
-    parser.add_argument('--policy_config', type=str, default='configs/policy/act.yaml',
-                       help='Policy config file path')
+    # Direct checkpoint loading
     parser.add_argument('--model_name_or_path', type=str, 
-                       default='/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_sfov1_insertion_top_zscore_tau_0.01',
-                       help='Path to the model checkpoint')
+                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
+                       help='Path to the model checkpoint (directory or specific checkpoint)')
     parser.add_argument('--norm_path', type=str, default='',
                        help='Path to normalization data')
     parser.add_argument('--save_dir', type=str, default='results/real_debug',
@@ -147,14 +145,14 @@ if __name__ == '__main__':
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
     
     # --- 1. Load Policy ---
-    # Use policy config system for evaluation - uses saved model config
-    print(f"Loading policy config: {args.policy_config}")
-    from policy.policy_loader import load_policy_model_for_evaluation
-    model_components = load_policy_model_for_evaluation(args.policy_config, args)
+    # Load policy directly from checkpoint
+    print(f"Loading model from checkpoint: {args.model_name_or_path}")
+    from policy.direct_loader import load_model_from_checkpoint
+    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model'].to('cuda')
     config = model_components.get('config', None)
     if config:
-        print(f"Loaded config from YAML: {type(config).__name__}")
+        print(f"Loaded config from checkpoint: {type(config).__name__}")
     policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'],
                         state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
 

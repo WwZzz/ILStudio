@@ -5,7 +5,6 @@ export NUMPY_EXPERIMENTAL_DTYPE_API=1
 
 ENV=aloha
 TASKNAME=transfer_cube_top
-POLICYCONFIG=configs/policy/act.yaml  # Policy config file path
 
 DATASET=data/sim_transfer_cube_scripted
 CKPT=ckpt/act_sim_transfer_cube_scripted_zscore_example
@@ -18,7 +17,6 @@ PARALLEL=5
 # Task-related parameters (action_dim, state_dim, chunk_size, camera_names, etc.) are now loaded from task config
 python eval.py --env_name $ENV \
     --task $TASKNAME \
-    --policy_config $POLICYCONFIG \
     --model_name_or_path $CKPT \
     --save_dir $OUTPUT \
     --num_rollout $ROLLOUT \

@@ -13,4 +13,3 @@ python ./train.py \
     --policy_config $POLICYCONFIG \
     --training_config $TRAININGCONFIG \
     --output_dir $OUTPUT \
-#   --resume_from_checkpoint True
