@@ -63,7 +63,7 @@ class DataTransform:
         return sample
     
 
-def get_data_processor(train_dataset, args, model_components):
+def get_data_processor(args, model_components):
     img_size = eval(args.image_size_primary)
     return DataTransform(img_size, 0.95)
 

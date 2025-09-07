@@ -104,7 +104,7 @@ class TrainingConfig:
         for key, value in config_data.items():
             if hasattr(instance, key):
                 # Handle scientific notation strings that should be floats
-                if key in ['adam_epsilon'] and isinstance(value, str):
+                if key in ['adam_epsilon', 'learning_rate', 'weight_decay', 'warmup_ratio'] and isinstance(value, str):
                     try:
                         value = float(value)
                     except ValueError:

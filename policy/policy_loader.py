@@ -36,8 +36,8 @@ class PolicyConfig:
         return cls(
             name=config_data['name'],
             module_path=config_data['module_path'],
-            config_class=config_data['config_class'],
-            model_class=config_data['model_class'],
+            config_class=config_data.get('config_class'),
+            model_class=config_data.get('model_class'),
             pretrained_config=config_data.get('pretrained_config'),
             model_args=config_data.get('model_args', {}),
             config_params=config_data.get('config_params', {}),
@@ -88,6 +88,10 @@ class PolicyLoader:
         model_module = self.load_model_module(policy_config)
         
         # Get the config class
+        if policy_config.config_class is None:
+            # If no config class specified, skip config creation
+            return None
+            
         if not hasattr(model_module, policy_config.config_class):
             raise AttributeError(f"Module {policy_config.module_path} does not have config class {policy_config.config_class}")
         
@@ -245,28 +249,9 @@ class PolicyLoader:
             raise ValueError(f"Failed to create config instance with parameters {config_kwargs}: {e}")
     
     def load_model_with_config(self, policy_name_or_path: str, args, task_config=None, phase='training') -> Dict[str, Any]:
-        """Load model using policy configuration with custom config instance."""
-        # Load policy configuration
-        policy_config = self.load_policy_config(policy_name_or_path)
-        
-        # Load model module
-        model_module = self.load_model_module(policy_config)
-        
-        # Create config instance from YAML parameters, task config, and args
-        config_instance = self.create_config_instance(policy_config, args, task_config, phase)
-        
-        # Get the model class
-        if not hasattr(model_module, policy_config.model_class):
-            raise AttributeError(f"Module {policy_config.module_path} does not have model class {policy_config.model_class}")
-        
-        model_class = getattr(model_module, policy_config.model_class)
-        
-        # Create model instance with the config
-        try:
-            model = model_class(config=config_instance)
-            return {'model': model, 'config': config_instance}
-        except Exception as e:
-            raise ValueError(f"Failed to create model instance: {e}")
+        """Load model using policy configuration - always uses the module's load_model function."""
+        # Always use the direct load_model approach for consistency
+        return self.load_model(policy_name_or_path, args)
     
     def load_model_for_training(self, policy_name_or_path: str, args, task_config=None) -> Dict[str, Any]:
         """Load model for training phase - uses task config parameters."""
@@ -293,14 +278,20 @@ class PolicyLoader:
         
         return model_components
     
-    def get_data_processor(self, policy_name_or_path: str, dataset, args, model_components):
+    def get_data_processor(self, policy_name_or_path: str, args, model_components):
         """Get data processor for the policy."""
         policy_config = self.load_policy_config(policy_name_or_path)
         model_module = self.load_model_module(policy_config)
         
+        # Always try to get get_data_processor function from the module
+        if hasattr(model_module, 'get_data_processor'):
+            processor_func = getattr(model_module, 'get_data_processor')
+            return processor_func(args, model_components)
+        
+        # Fallback to config-specified processor
         if policy_config.data_processor and hasattr(model_module, policy_config.data_processor):
             processor_func = getattr(model_module, policy_config.data_processor)
-            return processor_func(dataset, args, model_components)
+            return processor_func(args, model_components)
         
         return None
     
@@ -309,6 +300,12 @@ class PolicyLoader:
         policy_config = self.load_policy_config(policy_name_or_path)
         model_module = self.load_model_module(policy_config)
         
+        # Always try to get get_data_collator function from the module
+        if hasattr(model_module, 'get_data_collator'):
+            collator_func = getattr(model_module, 'get_data_collator')
+            return collator_func(args, model_components)
+        
+        # Fallback to config-specified collator
         if policy_config.data_collator and hasattr(model_module, policy_config.data_collator):
             collator_func = getattr(model_module, policy_config.data_collator)
             return collator_func(args, model_components)
@@ -353,9 +350,9 @@ def load_policy_model_for_evaluation(policy_name_or_path: str, args) -> Dict[str
     return policy_loader.load_model_for_evaluation(policy_name_or_path, args)
 
 
-def get_policy_data_processor(policy_name_or_path: str, dataset, args, model_components):
+def get_policy_data_processor(policy_name_or_path: str, args, model_components):
     """Convenience function to get data processor."""
-    return policy_loader.get_data_processor(policy_name_or_path, dataset, args, model_components)
+    return policy_loader.get_data_processor(policy_name_or_path, args, model_components)
 
 
 def get_policy_data_collator(policy_name_or_path: str, args, model_components):

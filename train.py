@@ -100,7 +100,7 @@ def main(args, training_args):
     train_dataset, val_dataset = load_data(args, task_config)
     
     # 包装数据集
-    data_processor = get_policy_data_processor(args.policy_config, train_dataset, args, model_components)
+    data_processor = get_policy_data_processor(args.policy_config, args, model_components)
     data_collator = get_policy_data_collator(args.policy_config, args, model_components)
     
     data_module = dict(
