@@ -1,4 +1,13 @@
-# IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+<div align="center">
+  <img src='assets/ilstd_logo.png'  width="200"/>
+<h1> IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+</h1>
+
+
+
+</div>
+
+
 
 | ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Square                                      |
 |----------------------------------------------|--------------------------------------------------|---------------------------------------------------|
