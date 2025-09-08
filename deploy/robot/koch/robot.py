@@ -8,7 +8,7 @@ from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 
 class KochFollowerWithCamera(BaseRobot):
-    def __init__(self, com: str="COM8", robot_id: str="koch_follower_arm", camera_configs: dict={}, extra_args=None, **kwargs):
+    def __init__(self, com: str="COM8", robot_id: str="koch_follower_arm", camera_configs: dict={}, **kwargs):
         import threading, queue
         super().__init__()
         # 机械臂部分

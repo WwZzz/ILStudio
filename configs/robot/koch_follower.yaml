@@ -1,0 +1,10 @@
+target: deploy.robot.koch.KochFollowerWithCamera
+com: COM8
+robot_id: koch_follower
+camera_configs:
+  primary:
+    index_or_path: 1
+    width: 640
+    height: 480
+    fps: 30
+use_lock: True

@@ -1,4 +1,4 @@
-# eval_real.py (argparse version)
+# eval_real.py (simplified argparse with complete core functionality)
 import yaml
 import os
 import traceback
@@ -11,121 +11,81 @@ import torch
 import numpy as np
 from benchmark.base import MetaPolicy
 from data_utils.utils import set_seed,  _convert_to_type, load_normalizers
-from deploy.robot.base import AbstractRobotInterface, RateLimiter
+from deploy.robot.base import AbstractRobotInterface, RateLimiter, make_robot
 from PIL import Image, ImageDraw, ImageFont
-from configuration.utils import *
-from dataclasses import dataclass, field, fields, asdict
+from configs.task.loader import load_task_config
 from typing import Dict, Optional, Sequence, List, Any
 from deploy.action_manager import load_action_manager
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
-os.environ["WANDB_DISABLED"] = "true"
 local_rank = None
 
-# action_lock = threading.Lock()
-
-@dataclass
-class HyperArguments:
-    robot_config: str = "configuration/robots/dummy.yaml"
-    # publish_rate决定动作消费的频率，如果太慢，会导致动作还没消费就被顶替（缓冲区较小时），造成大的抖动；如果消费太快，动作生产者跟不上消费的速度，会造成很多卡顿；此外，机器执行跟不上消费的速度，也会导致动作被发送却没执行完毕，造成动作被浪费；
-    publish_rate: int = 25
-    # sensing_rate和freq共同决定推理的频率，一方面是需要推理时需要观测，此时没观测会被阻塞，所以观测率不应该太低；另一方面freq决定了多少步推理一次，上回推理结果没用完不会执行推理；
-    sensing_rate: int = 20
-    chunk_size: int = 100 # 对应每次推理往动作缓冲区推送的总动作数量；
-
-    # ############## model  ################
-    is_pretrained: bool = field(default=True)
-    device: str = 'cuda'
-    model_name: str = 'act'
-    model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/act_sfov1_insertion_top_zscore_tau_0.01"
-    norm_path: str = ''
-    save_dir: str = 'results/real_debug'
-    dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted'
-    task: str = field(default="sim_transfer_cube_scripted")
-
-    fps: int = 50
-    num_rollout: int = 4
-    max_timesteps: int = 400
-    image_size: str = '(640, 480)'  # (width, height)
-    ctrl_space: str = 'joint'
-    ctrl_type: str = 'abs'
-    camera_ids: str = '[0]'
-    #  ############ data ###################
-    image_size_primary: str = "(640,480)"  # image size of non-wrist camera
-    image_size_wrist: str = "(640,480)"  # image size of wrist camera
-    camera_names: List[str] = field(
-        default_factory=lambda: ['primary'],
-        metadata={"help": "List of camera names", "nargs": "+"}
-    )
-    
-    # ############ action manager ##########
-    action_manager: str = 'OlderFirstManager'
-    manager_coef = 1.0
-    # manager_coef = 0.05 # delayfree
-    # manager_coef = 1.0 # 
-
-    
-#  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 def parse_param():
-    global local_rank
-    # Use HFParser to pass parameters, which are defined in the dataclass above
-    parser = transformers.HfArgumentParser((HyperArguments,))
-    args, unknown_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
-    print(unknown_args)
-    print(args)
-    extra_args = {}
-    for arg in unknown_args:
-        if arg.startswith("--"):
-            key = arg[2:]  # Remove '--' prefix
-            if "=" in key:
-                key, value = key.split('=', 1)
-            else:
-                value = True  # If no value is specified (e.g., --flag), default to True
-            extra_args[key] = value
-    model_args = {}
-    # Dynamically inject `extra_args` into the args object
-    for key, value in extra_args.items():
-        try:
-            value = _convert_to_type(value)
-            if key.startswith('model.'):
-                model_args[key[6:]] = value  # Dynamically get custom model_args, i.e., strings starting with model.
-            else:
-                setattr(args, key, value)  # Set non-model-related parameters as attributes of args
-        except ValueError as e:
-            print(f"Warning: {e}")
-    args.model_args = model_args
+    """
+    Parse command line arguments using simple argparse.
+    
+    Returns:
+        args: Parsed arguments namespace
+    """
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Evaluate a policy model on real robot')
+    
+    # Robot configuration
+    parser.add_argument('--robot_config', type=str, default='configs/robots/dummy.yaml',
+                       help='Robot configuration file')
+    parser.add_argument('--publish_rate', type=int, default=25,
+                       help='Action publishing rate (Hz)')
+    parser.add_argument('--sensing_rate', type=int, default=20,
+                       help='Sensing rate (Hz)')
+    
+    # Model arguments
+    parser.add_argument('--is_pretrained', action='store_true', default=True,
+                       help='Whether to use pretrained model')
+    parser.add_argument('--device', type=str, default='cuda',
+                       help='Device to use for evaluation')
+    
+    # Direct checkpoint loading
+    parser.add_argument('--model_name_or_path', type=str, 
+                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
+                       help='Path to the model checkpoint (directory or specific checkpoint)')
+    parser.add_argument('--norm_path', type=str, default='',
+                       help='Path to normalization data')
+    parser.add_argument('--save_dir', type=str, default='results/real_debug',
+                       help='Directory to save results')
+    parser.add_argument('--dataset_dir', type=str, 
+                       default='/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted',
+                       help='Dataset directory')
+    parser.add_argument('--task', type=str, default='sim_transfer_cube_scripted',
+                       help='Task name')
+    
+    # Evaluation parameters
+    parser.add_argument('--fps', type=int, default=50,
+                       help='Frames per second')
+    parser.add_argument('--num_rollout', type=int, default=4,
+                       help='Number of rollouts')
+    parser.add_argument('--max_timesteps', type=int, default=400,
+                       help='Maximum timesteps per episode')
+    parser.add_argument('--image_size', type=str, default='(640, 480)',
+                       help='Image size (width, height)')
+    parser.add_argument('--ctrl_space', type=str, default='joint',
+                       help='Control space')
+    parser.add_argument('--ctrl_type', type=str, default='abs',
+                       help='Control type')
+    parser.add_argument('--camera_ids', type=str, default='[0]',
+                       help='Camera IDs')
+    
+    # Action manager
+    parser.add_argument('--action_manager', type=str, default='OlderFirstManager',
+                       help='Action manager type')
+    parser.add_argument('--manager_coef', type=float, default=1.0,
+                       help='Action manager coefficient')
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
     return args
-
-# from deploy.robots.ros_robot import ROSRobot # Example for a real robot
-
-def make_robot(robot_cfg: Dict, args):
-    """
-    Factory function to create a robot instance from a config dictionary.
-
-    Args:
-        robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
-    """
-    full_path = robot_cfg['target']
-    module_path, class_name = full_path.rsplit('.', 1)
-    module = importlib.import_module(module_path)
-    RobotCls = getattr(module, class_name)
-    print(f"Creating robot: {full_path}")
-
-    # .get() is used to safely access params, which might not exist
-    robot_config = robot_cfg.get('config', {})
-
-    robot = RobotCls(config=robot_config, extra_args=args, **robot_config)
-    # connect to robot
-    retry_counts = 1
-    MAX_RETRY = 5
-    while not robot.connect():
-        print(f"Retrying for {retry_counts} time...")
-        retry_counts += 1
-        if retry_counts>MAX_RETRY:
-            exit(0)
-        time.sleep(1)
-    return robot
 
 
 def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Queue, args):
@@ -148,14 +108,11 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
                             pass
                     # Non-blocking: Put data into the queue
                     observation_queue.put((obs, t_obs))
-            # else:
-            #     print("[Sensing Thread] No Observation Found...")
-                rate_limiter.sleep(args.sensing_rate)
+            rate_limiter.sleep(args.sensing_rate)
     except Exception as e:
         print(f"[Sensing Thread] An exception occurred: {e}")
         traceback.print_exc()
         robot.shutdown()
-
 
 def inference_producer(policy, observation_queue: queue.Queue, action_manager: queue.Queue, args):
     """Inference producer thread, consumes observation data and produces actions."""
@@ -177,18 +134,25 @@ def inference_producer(policy, observation_queue: queue.Queue, action_manager: q
             traceback.print_exc()
             robot.shutdown()
 
-
 if __name__ == '__main__':
     set_seed(0)
     args = parse_param()
+    
+    # For evaluation, parameters will be loaded from saved model config
+    # No need to load task config parameters
+    
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
+    
     # --- 1. Load Policy ---
-    model_module = importlib.import_module(f"vla.{args.model_name}")
-    assert hasattr(model_module,
-                   'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
-    model_components = model_module.load_model(args)  # load_model is an interface that the model module must implement
+    # Load policy directly from checkpoint
+    print(f"Loading model from checkpoint: {args.model_name_or_path}")
+    from policy.direct_loader import load_model_from_checkpoint
+    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model'].to('cuda')
+    config = model_components.get('config', None)
+    if config:
+        print(f"Loaded config from checkpoint: {type(config).__name__}")
     policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'],
                         state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
 

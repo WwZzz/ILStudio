@@ -33,7 +33,7 @@ Observation space: {"qpos": Concat[ left_arm_qpos (6),         # absolute joint 
                                     right_gripper_qvel (1)]     # normalized gripper velocity (pos: opening, neg: closing)
                     "images": {"main": (480x640x3)}        # h, w, c, dtype='uint8'
 """
-from numpy.core.tests.test_mem_overlap import shape
+# Removed problematic numpy import that causes compatibility issues
 from benchmark.base import MetaEnv, MetaAction, MetaObs, MetaPolicy
 from .constants import SIM_TASK_CONFIGS
 from .ee_sim_env import make_ee_sim_env
@@ -74,7 +74,7 @@ class AlohaSimEnv(MetaEnv):
         self.config = config
         self.ctrl_space= 'joint'
         self.ctrl_type = 'abs'
-        self.camera_ids = self.config.camera_ids
+        self.camera_ids = eval(self.config.camera_ids) if isinstance(self.config.camera_ids, str) else self.config.camera_ids
         image_size_primary = eval(self.config.image_size_primary)
         width, height = image_size_primary if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
         self.image_size_primary = (width, height)

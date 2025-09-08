@@ -1,8 +1,0 @@
-dataset_dir:
-  - '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
-episode_len: 400
-camera_names:
-  - primary
-dataset_class: AlohaSimDataset
-ctrl_type: abs
-ctrl_space: joint

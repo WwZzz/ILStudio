@@ -1,4 +1,0 @@
-target: deploy.teleoperator.koch_leader.KochLeader
-com: COM7
-robot_id: koch_leader
-elbow_drive_mode: 0
