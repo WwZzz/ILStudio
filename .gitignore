@@ -6,6 +6,7 @@ policy/act_*
 data/
 __pycache__/
 scripts/*
+!scripts/visualize/*
 !scripts/*example*.sh
 logs/
 vla_backup/
