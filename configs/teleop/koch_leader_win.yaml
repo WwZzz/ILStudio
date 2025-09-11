@@ -4,9 +4,9 @@ target: deploy.teleoperator.koch_leader.KochLeader
 shm_name: "ilstd_teleop_controller"
 action_dim: 6
 action_dtype: "float64"
-freq: 100.0
+freq: 10.0
 
 # Device-specific settings
-com: /dev/ttyACM0
+com: COM7
 robot_id: koch_leader
 elbow_drive_mode: 0

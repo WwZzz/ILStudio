@@ -1,5 +1,9 @@
+"""
+集成相机的 KochFollower 机器人实现
+将相机直接集成到 lerobot 的默认 KochFollower 中
+"""
+
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.teleoperators.koch_leader import KochLeaderConfig, KochLeader
 from lerobot.robots.koch_follower import KochFollowerConfig, KochFollower
 from deploy.robot.base import BaseRobot
 import numpy as np
@@ -8,24 +12,30 @@ from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 
 class KochFollowerWithCamera(BaseRobot):
+    """
+    将相机直接集成到 lerobot 的默认 KochFollower 中
+    这样相机就成为机器人的一部分，而不是外部组件
+    """
     def __init__(self, com: str="COM8", robot_id: str="koch_follower_arm", camera_configs: dict={}, **kwargs):
         import threading, queue
         super().__init__()
-        # 机械臂部分
-        self._robot = KochFollower(KochFollowerConfig(port=com, id=robot_id, cameras={}))
+        
+        # 创建相机配置
+        camera_configs_dict = {}
+        for cam_name, cam_config in camera_configs.items():
+            camera_configs_dict[cam_name] = OpenCVCameraConfig(**cam_config)
+        
+        # 机械臂部分 - 直接传递相机配置给 KochFollower
+        self._robot = KochFollower(KochFollowerConfig(
+            port=com, 
+            id=robot_id, 
+            cameras=camera_configs_dict  # 将相机配置传递给 lerobot 的默认实现
+        ))
+        
         self._motors = list(self._robot.bus.motors)
-        # 相机部分
-        self.cam_names = list(camera_configs.keys())
-        self.cameras = {key: OpenCVCamera(OpenCVCameraConfig(**value)) for key, value in camera_configs.items()}
-        # 串口操作队列和线程
-        self._serial_queue = queue.Queue()
-        self._serial_thread = threading.Thread(target=self._serial_worker, daemon=True)
-        self._serial_thread.start()
-        # 观测结果缓存
-        self._obs_result = None
-        self._obs_event = threading.Event()
     
     def connect(self):
+        """连接机器人和相机"""
         try:
             if not self._robot.is_connected:
                 self._robot.connect()
@@ -37,93 +47,75 @@ class KochFollowerWithCamera(BaseRobot):
             traceback.print_exc()
             return False
         print("Robot connected")
-        try:  
-            for cam in self.cameras.values():
-                cam.connect()
-        except DeviceAlreadyConnectedError as e:
-            print(f"Camera already connected: {e}")
-            pass
-        except Exception as e:
-            print(f"Failed to connect to camera due to {e}")
-            traceback.print_exc()
-            return False
-        print("Cameras connected")
         return True
     
     def get_action_dim(self):
+        """获取动作维度"""
         return len(self._motors)
-    
-    def get_low_dim(self, timeout=0.1):
-        self._obs_event.clear()
-        self._serial_queue.put(('get_observation', None))
-        got = self._obs_event.wait(timeout=timeout)
-        if got:
-            return self._obs_result
-        else:
-            return self._obs_result
 
-    def get_camera_image(self, cam_name='primary'):
-        # 独立获取相机图像
-        if cam_name in self.cameras:
-            return self.cameras[cam_name].read()
-        else:
-            return None
-    
     def get_observation(self):
-        data_lowdim = self.get_low_dim()
-        data_rgb = {cam: self.get_camera_image(cam) for cam in self.cam_names}
-        data_lowdim.update({'image': data_rgb})
-        return data_lowdim
+        """获取完整观测数据（包括相机图像）"""
+        # 直接使用 KochFollower 的 get_observation 方法
+        # 它已经包含了相机图像数据
+        try:
+            obs = self._robot.get_observation()
+            return obs
+        except Exception as e:
+            # 返回默认观测数据
+            return None
 
     def shutdown(self):
+        """关闭机器人和相机"""
         if self._robot.is_connected:
             self._robot.disconnect()
-        for cam in self.cameras.values():
-            if cam.is_connected:
-                cam.disconnect()
+        # 相机通过机器人的 disconnect() 方法自动关闭
         
     def publish_action(self, action: np.ndarray):
-        action_dict = {mname+'.pos': action[i] for i, mname in enumerate(self._motors)}
-        self._serial_queue.put(('publish_action', action_dict))
-        
-    def _serial_worker(self):
-        while True:
-            try:
-                op, data = self._serial_queue.get()
-                if op == 'publish_action':
-                    self._robot.send_action(data)
-                elif op == 'get_observation':
-                    obs = {}
-                    observation = self._robot.get_observation()
-                    qpos = np.array([observation[mname+'.pos'] for mname in self._motors], dtype=np.float32)
-                    obs['qpos'] = qpos
-                    self._obs_result = obs
-                    self._obs_event.set()
-            except Exception as e:
-                print(f"[SerialWorker] Error: {e}")
+        """发布动作到机器人"""
+        try:
+            action_dict = {mname+'.pos': action[i] for i, mname in enumerate(self._motors)}
+            self._robot.send_action(action_dict)
+        except Exception as e:
+            pass
+            # print(f"Warning: Failed to publish action: {e}")
     
     def is_running(self):
+        """检查机器人是否正在运行"""
         return self._robot.is_connected
 
+    def save_episode(self, file_path: str, observations: list, actions: list):
+        """保存episode数据到HDF5文件"""
+        import h5py
+        import os
+        
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        def write_group(group, data_list, key_prefix=None):
+            # data_list: list of dict or value
+            if isinstance(data_list[0], dict):
+                # For each key, collect list of values and recurse
+                for key in data_list[0].keys():
+                    sub_list = [obs[key] for obs in data_list]
+                    if isinstance(sub_list[0], dict):
+                        sub_group = group.create_group(key)
+                        write_group(sub_group, sub_list)
+                    else:
+                        try:
+                            group.create_dataset(key, data=np.stack(sub_list))
+                        except (TypeError, ValueError) as e:
+                            print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
+            else:
+                # If not dict, just create dataset
+                try:
+                    if key_prefix is None:
+                        group.create_dataset('data', data=np.stack(data_list))
+                    else:
+                        group.create_dataset(key_prefix, data=np.stack(data_list))
+                except (TypeError, ValueError) as e:
+                    print(f"Warning: Could not stack data for key '{key_prefix}'. Skipping. Error: {e}")
 
-# teleop_config = KochLeaderConfig(
-#     port="COM7",
-#     id="my_blue_leader_arm",
-# )
-
-# robot = KochFollower(robot_config)
-# robot.connect()
-# teleop_device = KochLeader(teleop_config)
-# teleop_device.connect()
-# teleop_device.bus.write("Drive_Mode", "elbow_flex", 0)
-
-# input("enter to continue")
-# try:
-#     while True:
-#         observation = robot.get_observation()
-#         action = teleop_device.get_action()
-#         robot.send_action(action)
-# except (ConnectionError, TimeoutError, KeyboardInterrupt) as e:
-#     print(f"Failed to access observations due to {e}")
-#     robot.disconnect()
-#     teleop_device.disconnect()
+        with h5py.File(file_path, 'w') as f:
+            f.create_dataset('actions', data=np.array(actions, dtype=np.float32))
+            obs_group = f.create_group('observations')
+            if observations:
+                write_group(obs_group, observations)
