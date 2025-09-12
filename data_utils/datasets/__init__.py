@@ -10,11 +10,13 @@ from .aloha_sim import AlohaSimDataset
 from .aloha_sii import AlohaSIIDataset
 from .aloha_sii_v2 import AlohaSIIv2Dataset
 from .robomimic import RobomimicDataset
+from .koch_dataset import KochDataset
 
 __all__ = [
     'EpisodicDataset',
     'AlohaSimDataset', 
     'AlohaSIIDataset',
     'AlohaSIIv2Dataset',
-    'RobomimicDataset'
+    'RobomimicDataset',
+    'KochDataset',
 ]

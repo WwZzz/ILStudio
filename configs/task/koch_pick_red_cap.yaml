@@ -1,0 +1,15 @@
+dataset_dir:
+  - /home/wwzzz/Code/IL-Studio/data/pick_red_cap_into_cup
+camera_names:
+  - primary
+dataset_class: KochDataset
+ctrl_type: abs
+ctrl_space: joint
+
+# Task-specific parameters that will override policy configs
+action_dim: 6
+state_dim: 6
+image_size_primary: "(640, 480)"
+action_normalize: "zscore"
+state_normalize: "zscore"
+chunk_size: 32

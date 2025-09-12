@@ -179,6 +179,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
         """Set state normalizers for the dataset."""
         self.state_normalizers = ns
 
+
+    def extract_from_episode(self, episode_idx, keyname=[]):
+        episode_path = self.dataset_path_list[episode_idx]
+        feat = self.load_feat_from_episode(episode_path, keyname)
+        return feat
+    
+    @property
+    def num_episodes(self):
+        return len(self.dataset_path_list)
+    
     def get_dataset_dir(self):
         """Get the dataset directory path."""
         return os.path.dirname(self.dataset_path_list[0])
