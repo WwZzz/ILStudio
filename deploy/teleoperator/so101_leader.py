@@ -31,7 +31,6 @@ class So101Leader(BaseTeleopDevice):
                 frequency: int = 100, 
                 com: str="COM7",    
                 robot_id: str="so101_leader_arm",
-                elbow_drive_mode: int=1,
             ):
         """
         Initialize the So101 Leader teleoperation device
@@ -44,28 +43,16 @@ class So101Leader(BaseTeleopDevice):
             frequency: Control frequency in Hz
             com: Communication port for the leader device
             robot_id: Identifier for the robot
-            elbow_drive_mode: Drive mode for elbow joint
         """
         super().__init__(shm_name, shm_shape, shm_dtype, action_dim, action_dtype, frequency)
         
         self.com = com
         self.robot_id = robot_id
-        self.elbow_drive_mode = elbow_drive_mode
         
         # 使用官方的 lerobot 支持：
         self._teleop_device = RobotSO101Leader(RobotSO101LeaderConfig(port=com, id=robot_id))
         self._teleop_device.connect()
-        # self._teleop_device.bus.write("Drive_Mode", "elbow_flex", self.elbow_drive_mode)
         self._motors = list(self._teleop_device.bus.motors)
-        
-        
-        # 备用实现（如果官方支持有问题）：
-        # self._teleop_device = None  # 占位符
-        # self._motors = ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6']
-        # self._is_connected = False
-        # self._current_observation = np.zeros(action_dim, dtype=action_dtype)
-        # self._connect_device()
-        
         
     def get_observation(self):
         """获取 Leader 设备的观测数据"""

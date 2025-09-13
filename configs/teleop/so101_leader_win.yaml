@@ -9,4 +9,3 @@ freq: 10.0
 # Device-specific settings
 com: COM3
 robot_id: so101_leader
-elbow_drive_mode: 0
