@@ -10,6 +10,7 @@ import numpy as np
 import traceback
 from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
+from benchmark.base import MetaAction, MetaObs
 
 class KochFollowerWithCamera(BaseRobot):
     """
@@ -64,6 +65,11 @@ class KochFollowerWithCamera(BaseRobot):
             # 返回默认观测数据
             return None
 
+    def obs2meta(self, obs):
+        """Convert the observations from the robot to MetaObs"""
+        obs['qpos'] = np.array([obs[mname+'.pos'] for mname in self._motors], dtype=np.float32)
+        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=obs['front_camera'][np.newaxis,:].transpose(0, 3, 1, 2))
+    
     def shutdown(self):
         """关闭机器人和相机"""
         if self._robot.is_connected:

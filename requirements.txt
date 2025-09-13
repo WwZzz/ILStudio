@@ -17,9 +17,9 @@ pytest
 dm_control==1.0.14
 matplotlib
 robosuite==1.4.0
-imageio-ffmpeg==0.6.0z
+imageio-ffmpeg==0.6.0
 mujoco==2.3.7
 pynput
 numpy==1.26.0
-deepspeed==0.14.4
+# deepspeed==0.14.4
 pybullet

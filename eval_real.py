@@ -58,18 +58,12 @@ def parse_param():
                        help='Task name')
     
     # Evaluation parameters
-    parser.add_argument('--fps', type=int, default=50,
-                       help='Frames per second')
     parser.add_argument('--num_rollout', type=int, default=4,
                        help='Number of rollouts')
     parser.add_argument('--max_timesteps', type=int, default=400,
                        help='Maximum timesteps per episode')
     parser.add_argument('--image_size', type=str, default='(640, 480)',
                        help='Image size (width, height)')
-    parser.add_argument('--ctrl_space', type=str, default='joint',
-                       help='Control space')
-    parser.add_argument('--ctrl_type', type=str, default='abs',
-                       help='Control type')
     parser.add_argument('--camera_ids', type=str, default='[0]',
                        help='Camera IDs')
     

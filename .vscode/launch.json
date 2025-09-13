@@ -11,19 +11,26 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--env_name",               "aloha",
-                "--task",                   "transfer_cube_top",
-                "--policy_config",          "configs/policy/act.yaml",
-                "--model_name_or_path",     "ckpt/act_sim_transfer_cube_scripted_zscore_example",
-                "--save_dir",               "results/act_transfer_cube_top_example",
-                "--num_rollout",            "10",
-                "--num_envs",               "5",
-                "--dataset_dir",            "data/sim_transfer_cube_scripted",
-                "--fps",                    "50",
-                "--camera_ids",             "[0]",      // 字符串本身带括号
-                "--max_timesteps",          "400",
-                "--use_spawn"
-            ],
+                "--robot_config",               "configs/robot/koch_follower.yaml",
+                "--publish_rate",              "10",
+                "--sensing_rate",            "20",
+                "--model_name_or_path",    "ckpt/pick_koch",
+                "--dataset_dir",              "data/pick",
+            ]
+            // "args": [
+            //     "--env_name",               "aloha",
+            //     "--task",                   "transfer_cube_top",
+            //     "--policy_config",          "configs/policy/act.yaml",
+            //     "--model_name_or_path",     "ckpt/act_sim_transfer_cube_scripted_zscore_example",
+            //     "--save_dir",               "results/act_transfer_cube_top_example",
+            //     "--num_rollout",            "10",
+            //     "--num_envs",               "5",
+            //     "--dataset_dir",            "data/sim_transfer_cube_scripted",
+            //     "--fps",                    "50",
+            //     "--camera_ids",             "[0]",      // 字符串本身带括号
+            //     "--max_timesteps",          "400",
+            //     "--use_spawn"
+            // ],
             // "args": [
             //     "--task_name","sim_transfer_cube_scripted",
             //     "--policy_config","configs/policy/diffusion_policy.yaml",
