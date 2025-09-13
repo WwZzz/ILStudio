@@ -1,36 +1,50 @@
 """
-集成相机的 KochFollower 机器人实现
-将相机直接集成到 lerobot 的默认 KochFollower 中
+集成相机的 So101Follower 机器人实现
+参照 Koch 机械臂的实现方式，为 So101 机械臂提供统一接口
 """
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.robots.koch_follower import KochFollowerConfig, KochFollower
+from lerobot.robots.so101_follower import SO101FollowerConfig, SO101Follower
 from deploy.robot.base import BaseRobot
 import numpy as np
 import traceback
-from lerobot.errors import DeviceAlreadyConnectedError
-from benchmark.base import MetaObs
+from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
+from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
+from benchmark.base import MetaAction, MetaObs
 
-class KochFollowerWithCamera(BaseRobot):
+
+class So101FollowerWithCamera(BaseRobot):
     """
-    将相机直接集成到 lerobot 的默认 KochFollower 中
+    将相机直接集成到 So101Follower 中
     这样相机就成为机器人的一部分，而不是外部组件
+    
+    注意：由于 lerobot 可能没有直接支持 So101，这里提供了一个基础框架
+    需要根据实际的 So101 SDK 进行调整
     """
-    def __init__(self, com: str="COM8", robot_id: str="koch_follower_arm", camera_configs: dict={}, **kwargs):
+    def __init__(self, com: str="COM8", robot_id: str="so101_follower_arm", camera_configs: dict={}, **kwargs):
         import threading, queue
         super().__init__()
         
-        # 创建相机配置
-        camera_configs_dict = {}
-        for cam_name, cam_config in camera_configs.items():
-            camera_configs_dict[cam_name] = OpenCVCameraConfig(**cam_config)
+        self.com = com
+        self.robot_id = robot_id
         
-        # 机械臂部分 - 直接传递相机配置给 KochFollower
-        self._robot = KochFollower(KochFollowerConfig(
+        # 创建相机配置
+        self.camera_configs_dict = {}
+        for cam_name, cam_config in camera_configs.items():
+            self.camera_configs_dict[cam_name] = OpenCVCameraConfig(**cam_config)
+        
+        # 初始化相机
+        self.cameras = {}
+        for cam_name, cam_config in self.camera_configs_dict.items():
+            self.cameras[cam_name] = OpenCVCamera(cam_config)
+        
+        # So101 机械臂部分 - 使用官方 lerobot 支持
+        self._robot = SO101Follower(SO101FollowerConfig(
             port=com, 
             id=robot_id, 
-            cameras=camera_configs_dict  # 将相机配置传递给 lerobot 的默认实现
+            cameras=self.camera_configs_dict  # 将相机配置传递给 lerobot 的默认实现
         ))
+        
         
         self._motors = list(self._robot.bus.motors)
     
@@ -55,7 +69,7 @@ class KochFollowerWithCamera(BaseRobot):
 
     def get_observation(self):
         """获取完整观测数据（包括相机图像）"""
-        # 直接使用 KochFollower 的 get_observation 方法
+        # 直接使用 SO101Follower 的 get_observation 方法
         # 它已经包含了相机图像数据
         try:
             obs = self._robot.get_observation()
@@ -66,8 +80,19 @@ class KochFollowerWithCamera(BaseRobot):
 
     def obs2meta(self, obs):
         """Convert the observations from the robot to MetaObs"""
+        if obs is None:
+            return None
+            
         obs['qpos'] = np.array([obs[mname+'.pos'] for mname in self._motors], dtype=np.float32)
-        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=obs['front_camera'][np.newaxis,:].transpose(0, 3, 1, 2))
+        
+        # 处理图像数据
+        if 'front_camera' in obs:
+            image = obs['front_camera'][np.newaxis,:].transpose(0, 3, 1, 2)
+        else:
+            # 如果没有图像，创建一个默认的空图像
+            image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
+            
+        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=image)
     
     def shutdown(self):
         """关闭机器人和相机"""
