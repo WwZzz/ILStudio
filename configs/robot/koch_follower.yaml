@@ -3,7 +3,7 @@ com: /dev/ttyACM1
 robot_id: koch_follower
 camera_configs:
   front_camera:
-    index_or_path: /dev/video3
+    index_or_path: /dev/video2
     width: 640
     height: 480
     fps: 30
