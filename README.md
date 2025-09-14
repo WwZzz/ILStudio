@@ -13,7 +13,7 @@
 |----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
 | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_aloha_insertion.gif" height="200">  | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/diffusion_aloha_transfer.gif" height="200"> | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_robomimic_square.gif" height="200"> |
 
-| Koch - Pick & Place                                      |                                                              |                                                          |
+| Koch - Pick & Place -Inference                                     |                                                              |                                                          |
 |----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
 | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_koch.gif" height="200">             |                                                              |                                                          |
 
