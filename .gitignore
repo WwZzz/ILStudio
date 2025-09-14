@@ -1,9 +1,11 @@
 ckpt/
+ckpt
 results/
 hub/
 assets/robot/
 policy/act_*
 data/
+data
 __pycache__/
 scripts/*
 !scripts/visualize/*

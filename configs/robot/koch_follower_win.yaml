@@ -1,5 +1,5 @@
 target: deploy.robot.koch.KochFollowerWithCamera
-com: COM8
+com: COM4
 robot_id: koch_follower
 camera_configs:
   front_camera:

@@ -7,6 +7,5 @@ action_dtype: "float64"
 freq: 10.0
 
 # Device-specific settings
-com: COM7
+com: COM3
 robot_id: koch_leader
-elbow_drive_mode: 0
