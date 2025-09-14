@@ -127,7 +127,6 @@ def main(args, training_args):
         policy_metadata = {
             'policy_module': policy_config['module_path'],
             'policy_name': policy_config['name'],
-            'model_class': policy_config['model_class']
         }
         import json
         metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
