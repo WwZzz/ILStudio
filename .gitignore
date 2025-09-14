@@ -12,3 +12,4 @@ logs/
 vla_backup/
 eval_real_old.py
 outputs/
+.idea/
