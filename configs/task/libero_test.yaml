@@ -1,5 +1,0 @@
-dataset_dir:
-  - "/inspire/hdd/project/robot-action/public/data/libero_h5"
-episode_len: 400
-camera_names:
-  - primary

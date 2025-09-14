@@ -1,6 +1,5 @@
 dataset_dir:
-  - '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_human'
-episode_len: 400
+  - '/inspire/hdd/global_user/wangzheng-240308120196/data/act_aloha/sim_transfer_cube_scripted'
 camera_names:
   - primary
 dataset_class: AlohaSimDataset

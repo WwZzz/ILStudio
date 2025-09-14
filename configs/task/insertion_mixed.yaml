@@ -1,5 +1,5 @@
 dataset_dir:
-  - '/home/agilex/wz/data/aloha_sim/sim_transfer_cube_scripted'
+  - '/inspire/hdd/global_user/wangzheng-240308120196/data/act_aloha/sim_insertion_mixed'
 camera_names:
   - primary
 dataset_class: AlohaSimDataset

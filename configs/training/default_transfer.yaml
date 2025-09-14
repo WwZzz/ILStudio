@@ -1,22 +1,32 @@
-# OpenVLA Training Configuration
-# Optimized settings for OpenVLA fine-tuning
+# Default Training Configuration
+# This file contains core training process parameters that are typically set once
+# Command-line suitable parameters (like output_dir, learning_rate, max_steps) 
+# are kept in HyperArguments for easy command-line override
+
+# =============================================================================
+# CORE TRAINING PROCESS PARAMETERS
+# =============================================================================
+# These parameters are typically set once and don't change between runs
 
 # =============================================================================
 # DATA PROCESSING CONFIGURATION
 # =============================================================================
+# Data processing parameters that are related to training process
+# Note: Model-specific data processing parameters are now in configs/model/default.yaml
 
 # Data loading (training process related)
-preload_data: false
+preload_data: true
 
 # =============================================================================
 # OPTIMIZER CONFIGURATION
 # =============================================================================
+# Core optimizer settings that are typically set once per training setup
 
 # Learning rate and scheduling
 learning_rate: 0.0001
-weight_decay: 0.01
+weight_decay: 0.0001
 warmup_steps: 0
-warmup_ratio: 0.1
+warmup_ratio: 0.0
 lr_scheduler_type: "constant"
 
 # Optimizer settings
@@ -25,32 +35,36 @@ adam_beta1: 0.95
 adam_beta2: 0.999
 adam_epsilon: 1e-8
 
+# Note: Model architecture, LoRA, and quantization settings are now in configs/model/default.yaml
+
 # =============================================================================
 # LOGGING AND SAVING CONFIGURATION
 # =============================================================================
+# Logging and saving settings that are typically set once
 
 # Logging settings
 logging_strategy: "steps"
 logging_steps: 10
-report_to: "none"
+report_to: "tensorboard"
 
 # Saving settings
 save_strategy: "steps"
-save_steps: 100
-save_total_limit: 3
+save_steps: 10000
+save_total_limit: 50
 
 # =============================================================================
 # DATA PROCESSING CONFIGURATION (TrainingArguments)
 # =============================================================================
+# Data processing settings for the training process
 
 # DataLoader settings
-dataloader_num_workers: 4
+dataloader_num_workers: 8
 dataloader_pin_memory: false
 remove_unused_columns: false
 
 # Evaluation settings
-do_eval: true
-eval_steps: 100
+do_eval: false
+eval_steps: 200
 
 # System settings
 seed: 0
@@ -58,17 +72,18 @@ seed: 0
 # =============================================================================
 # CORE TRAINING PARAMETERS
 # =============================================================================
+# Basic training settings that are typically set once per experiment
 
 # Training duration
 num_train_epochs: 3
-max_steps: 1000
+max_steps: 100000
 
-# Batch sizes (optimized for OpenVLA)
-per_device_train_batch_size: 2
-per_device_eval_batch_size: 2
+# Batch sizes (typically determined by hardware)
+per_device_train_batch_size: 256
+per_device_eval_batch_size: 32
 
-# Logging directory
+# Logging directory (often derived from output_dir)
 logging_dir: "./logs"
 
-# Checkpoint resuming
-resume_from_checkpoint: true
+# Checkpoint resuming (often handled automatically)
+resume_from_checkpoint: True
