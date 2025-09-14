@@ -8,7 +8,7 @@ data/
 data
 __pycache__/
 scripts/*
-!scripts/visualize/*
+!scripts/visualize/
 !scripts/*example*.sh
 logs/
 vla_backup/
