@@ -1,0 +1,144 @@
+# 数据集优化配置文件
+# 用于配置内存映射、共享内存和缓存策略
+
+# 基础设置
+optimization:
+  # 是否启用优化数据集（如果为false，则使用原始数据集）
+  enabled: true
+  
+  # 内存映射设置
+  memory_mapping:
+    enabled: true
+    cache_size: 100  # 每个HDF5文件的缓存项数量
+    
+  # 共享内存设置
+  shared_memory:
+    enabled: true
+    # 预加载关键数据（如episode长度等）到共享内存
+    preload_critical_data: true
+    
+  # 数据加载策略
+  loading_strategy:
+    # 是否完全预加载所有数据到内存（内存充足时使用）
+    full_preload: false
+    # 预加载数据类型优先级
+    preload_priority:
+      - "episode_lengths"
+      - "language_instructions" 
+      - "metadata"
+    
+  # 缓存策略
+  cache_strategy:
+    # LRU缓存大小（每个worker）
+    lru_cache_size: 128
+    # 是否启用图像数据压缩缓存
+    compress_images: false
+    # 缓存清理策略
+    cleanup_frequency: 100  # 每100个batch清理一次
+
+# 数据加载器设置
+dataloader:
+  # worker数量（建议设置为CPU核心数的1/2到1倍）
+  num_workers: 4
+  # 是否启用内存固定
+  pin_memory: true
+  # 是否保持worker进程存活
+  persistent_workers: true
+  # 预取因子
+  prefetch_factor: 2
+  # 是否在最后丢弃不完整的batch
+  drop_last: true
+
+# 多GPU设置
+distributed:
+  # 是否使用分布式采样器
+  use_distributed_sampler: true
+  # 分布式后端
+  backend: "nccl"
+
+# 内存管理
+memory_management:
+  # 内存使用限制（GB），超过此限制会触发缓存清理
+  memory_limit: 16.0
+  # 内存监控间隔（秒）
+  monitor_interval: 30
+  # 是否启用自动垃圾回收
+  auto_gc: true
+  # 垃圾回收间隔（batch数）
+  gc_interval: 50
+
+# 性能监控
+monitoring:
+  # 是否启用性能监控
+  enabled: true
+  # 监控指标
+  metrics:
+    - "memory_usage"
+    - "loading_time"
+    - "cache_hit_rate"
+    - "io_wait_time"
+  # 日志级别
+  log_level: "INFO"
+  # 是否保存性能报告
+  save_report: true
+  report_path: "./performance_report.json"
+
+# 针对不同数据集大小的预设配置
+presets:
+  # 小数据集 (< 1GB)
+  small:
+    optimization:
+      memory_mapping:
+        cache_size: 50
+      shared_memory:
+        preload_critical_data: true
+      loading_strategy:
+        full_preload: true
+    memory_management:
+      memory_limit: 4.0
+      
+  # 中等数据集 (1-10GB)  
+  medium:
+    optimization:
+      memory_mapping:
+        cache_size: 100
+      shared_memory:
+        preload_critical_data: true
+      loading_strategy:
+        full_preload: false
+    memory_management:
+      memory_limit: 8.0
+      
+  # 大数据集 (> 10GB)
+  large:
+    optimization:
+      memory_mapping:
+        cache_size: 200
+      shared_memory:
+        preload_critical_data: true
+      loading_strategy:
+        full_preload: false
+    dataloader:
+      num_workers: 8
+      prefetch_factor: 4
+    memory_management:
+      memory_limit: 32.0
+      
+  # 极大数据集 (> 100GB)
+  xlarge:
+    optimization:
+      memory_mapping:
+        cache_size: 50  # 减少缓存以节省内存
+      shared_memory:
+        preload_critical_data: true
+      loading_strategy:
+        full_preload: false
+    cache_strategy:
+      lru_cache_size: 64  # 减少缓存大小
+      compress_images: true  # 启用图像压缩
+    dataloader:
+      num_workers: 12
+      prefetch_factor: 2
+    memory_management:
+      memory_limit: 64.0
+      gc_interval: 25  # 更频繁的垃圾回收
