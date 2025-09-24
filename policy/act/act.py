@@ -71,8 +71,7 @@ class ACTPolicy(PreTrainedModel):
         # 构建模型和优化器
         self.model = build(config)
         self.kl_weight = config.kl_weight
-        # print(f'KL Weight {self.kl_weight}')
-
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
     def forward(self, qpos, image, actions=None, is_pad=None):
         """
@@ -87,8 +86,7 @@ class ACTPolicy(PreTrainedModel):
             Loss dictionary during training; sampled actions during inference.
         """
         env_state = None
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        image = normalize(image)
+        image = self.normalize(image)
         if actions is not None: # training time
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]
@@ -110,7 +108,7 @@ class ACTPolicy(PreTrainedModel):
         # process data
         device = next(self.parameters()).device  # Get model's device
         obs = {k:torch.from_numpy(v).to(device) if isinstance(v, np.ndarray) else v for k,v in obs.items()}
-        obs['image'] = obs['image']/255.0
+        obs['image'] = self.normalize(obs['image']/255.0)
         # inference
         a_hat, _, (_, _) = self.model(obs['state'], obs['image'], None)
         return a_hat
