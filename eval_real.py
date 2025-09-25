@@ -30,8 +30,8 @@ def parse_param():
     parser = argparse.ArgumentParser(description='Evaluate a policy model on real robot')
     
     # Robot configuration
-    parser.add_argument('--robot_config', type=str, default='configs/robots/dummy.yaml',
-                       help='Robot configuration file')
+    parser.add_argument('--robot_config', type=str, default='robot/dummy',
+                       help='Robot config (name under configs/robot or absolute path to yaml)')
     parser.add_argument('--publish_rate', type=int, default=25,
                        help='Action publishing rate (Hz)')
     parser.add_argument('--sensing_rate', type=int, default=20,
@@ -74,7 +74,9 @@ def parse_param():
                        help='Action manager coefficient')
     
     # Parse arguments
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
     
     return args
 
@@ -128,6 +130,11 @@ def inference_producer(policy, observation_queue: queue.Queue, action_manager: q
 if __name__ == '__main__':
     set_seed(0)
     args = parse_param()
+    # Build config loader from CLI for overrides
+    import sys
+    unknown = [tok for tok in sys.argv[1:] if tok.startswith('--robot.')]
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
     
     # For evaluation, parameters will be loaded from saved model config
     # No need to load task config parameters
@@ -151,9 +158,18 @@ if __name__ == '__main__':
 
     # --- 2. Create Real-World Environment ---
     # Load the robot-specific configuration from the provided YAML file
-    print(f"Loading robot configuration from {args.robot_config}")
-    with open(args.robot_config, 'r') as f:
+    from configs.utils import resolve_yaml, parse_overrides, apply_overrides_to_mapping
+    from data_utils.utils import _convert_to_type
+    # parse unknown overrides here as well
+    # use overrides parsed by ConfigLoader
+    try:
+        robot_cfg_path = cfg_loader._resolve('robot', args.robot_config)
+    except Exception:
+        robot_cfg_path = args.robot_config
+    print(f"Loading robot configuration from {robot_cfg_path}")
+    with open(robot_cfg_path, 'r') as f:
         robot_cfg = yaml.safe_load(f)
+    apply_overrides_to_mapping(robot_cfg, cfg_loader.get_overrides('robot'), _convert_to_type)
 
     robot = make_robot(robot_cfg, args)
     

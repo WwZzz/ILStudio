@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 import importlib
 import argparse
 import yaml
+from configs.utils import resolve_yaml, parse_overrides, apply_overrides_to_mapping
+from data_utils.utils import _convert_to_type
 from deploy.teleoperator.base import str2dtype, BaseTeleopDevice, generate_shm_info, dtype2code
 
 def load_teleoperator(teleop_cfg: dict, shm_info: dict, action_dim: int, action_dtype, freq: float) -> BaseTeleopDevice:
@@ -54,17 +56,26 @@ def main():
     parser = argparse.ArgumentParser(description='Teleoperation parameters')
 
     parser.add_argument(
-        '--config', type=str, default='configs/teleop/keyboard.yaml',
-        help='YAML file describing the teleoperator device configuration'
+        '--config', type=str, default='keyboard',
+        help='Teleop config (name under configs/teleop or absolute path to yaml)'
     )
     
     # Parse only the teleop config file argument
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
 
     # Load teleoperator device configuration
-    print(f"Loading teleop device configuration from {args.config}")
-    with open(args.config, 'r') as f:
+    try:
+        cfg_path = cfg_loader._resolve('teleop', args.config)
+    except Exception:
+        cfg_path = args.config
+    print(f"Loading teleop device configuration from {cfg_path}")
+    with open(cfg_path, 'r') as f:
         teleop_cfg = yaml.safe_load(f)
+
+    # apply dotted overrides --teleop.xxx
+    apply_overrides_to_mapping(teleop_cfg, cfg_loader.get_overrides('teleop'), _convert_to_type)
     
     # Extract parameters directly from teleop config
     shm_name = teleop_cfg.get('shm_name', 'ilstd_teleop_controller')

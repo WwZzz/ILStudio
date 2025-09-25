@@ -34,8 +34,8 @@ def parse_param():
     # Essential arguments
     parser.add_argument('--shm_name', type=str, default='ilstd_teleop_controller',
                        help='Name of shared memory for action data (optional)')
-    parser.add_argument('--config', type=str, default='configs/robot/dummy.yaml',
-                       help='Robot configuration file path')
+    parser.add_argument('--config', type=str, default='robot/dummy',
+                       help='Robot config (name under configs/robot or absolute path to yaml)')
     parser.add_argument('--frequency', "-freq", type=int, default=25,
                        help='Recording frequency in Hz')
     parser.add_argument('--action_frequency', "-afreq", type=int, default=40,
@@ -47,7 +47,10 @@ def parse_param():
     parser.add_argument('--start_idx', type=int, default=0,
                        help='Starting episode index')
     
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
+    args.unknown_overrides = cfg_loader._overrides
     return args
 
 def save_episode_to_hdf5(save_dir, episode_id, observations, actions):
@@ -102,9 +105,18 @@ class SimpleMultiThreadTeleopRecorder:
         
     def initialize_robot(self):
         """初始化机器人"""
-        print(f"Loading robot configuration from {self.args.config}")
-        with open(self.args.config, 'r') as f:
+        from configs.loader import ConfigLoader
+        from configs.utils import apply_overrides_to_mapping
+        from data_utils.utils import _convert_to_type
+        try:
+            cfg_path = ConfigLoader()._resolve('robot', self.args.config)
+        except Exception:
+            cfg_path = self.args.config
+        print(f"Loading robot configuration from {cfg_path}")
+        with open(cfg_path, 'r') as f:
             robot_cfg = yaml.safe_load(f)
+        # apply overrides passed via CLI
+        apply_overrides_to_mapping(robot_cfg, self.args.unknown_overrides.get('robot', {}), _convert_to_type)
         
         # Force no GUI for main process robot
         robot_cfg['use_gui'] = False

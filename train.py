@@ -9,10 +9,66 @@ from configs.task.loader import load_task_config
 from data_utils.utils import set_seed, WrappedDataset, load_data, _convert_to_type
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
+from pathlib import Path
 
 
 
 # Removed HyperArguments dataclass - using simple argparse instead
+
+def _set_nested(obj, keys, value):
+    cur = obj
+    for k in keys[:-1]:
+        if isinstance(cur, dict):
+            if k not in cur or not isinstance(cur[k], (dict,)):
+                cur[k] = {}
+            cur = cur[k]
+        else:
+            if not hasattr(cur, k) or not isinstance(getattr(cur, k), (dict,)):
+                setattr(cur, k, {})
+            cur = getattr(cur, k)
+    last = keys[-1]
+    if isinstance(cur, dict):
+        cur[last] = value
+    else:
+        setattr(cur, last, value)
+
+def _parse_overrides(unknown_args):
+    overrides = { 'task': {}, 'training': {}, 'policy': {} }
+    i = 0
+    while i < len(unknown_args):
+        token = unknown_args[i]
+        if not token.startswith('--'):
+            i += 1
+            continue
+        key = token[2:]
+        value = None
+        if '=' in key:
+            key, value = key.split('=', 1)
+        else:
+            if i + 1 < len(unknown_args) and not unknown_args[i+1].startswith('--'):
+                value = unknown_args[i+1]
+                i += 1
+        if key.startswith('task.') or key.startswith('training.') or key.startswith('policy.'):
+            root, subpath = key.split('.', 1)
+            overrides[root][subpath] = value
+        i += 1
+    return overrides
+
+def _apply_overrides_to_mapping(mapping_obj, flat_overrides, caster):
+    for dotted, raw in flat_overrides.items():
+        if raw is None:
+            continue
+        val = caster(raw)
+        keys = dotted.split('.')
+        _set_nested(mapping_obj, keys, val)
+
+def _apply_overrides_to_object(obj, flat_overrides, caster):
+    for dotted, raw in flat_overrides.items():
+        if raw is None:
+            continue
+        val = caster(raw)
+        keys = dotted.split('.')
+        _set_nested(obj, keys, val)
 
 def parse_param():
     """
@@ -36,24 +92,16 @@ def parse_param():
     parser.add_argument('--output_dir', type=str, default='ckpt/training_output',
                        help='Output directory for checkpoints')
     
-    # Parse arguments
-    args = parser.parse_args()
+    # Parse arguments (allow unknown for dotted overrides)
+    args, unknown = parser.parse_known_args()
     
     # Load training configuration
-    from configs.training.loader import load_training_config, create_training_arguments
-    from configs.utils import resolve_yaml
-    
-    # Resolve training config (name or path)
-    try:
-        training_cfg_path = resolve_yaml(args.training_config, os.path.join(os.path.dirname(__file__), 'configs', 'training'))
-    except FileNotFoundError:
-        training_cfg_path = args.training_config
-    print(f"Loading training config: {training_cfg_path}")
-    training_config = load_training_config(training_cfg_path)
-    
-    # Create TrainingArguments
-    training_args = create_training_arguments(training_cfg_path, args)
-    
+    # Unified config loader
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
+    training_config, training_args, training_cfg_path = cfg_loader.load_training(args.training_config, hyper_args=args)
+    setattr(args, 'config_overrides', cfg_loader._overrides)
+    setattr(args, 'training_cfg_path', training_cfg_path)
     return args, training_args
 
 def main(args, training_args):
@@ -70,35 +118,32 @@ def main(args, training_args):
     """
     # Init task config
     set_seed(1)
-    # Resolve task config (name or path)
-    try:
-        from configs.utils import resolve_yaml
-        task_cfg_path = resolve_yaml(args.task, os.path.join(os.path.dirname(__file__), 'configs', 'task'))
-    except FileNotFoundError:
-        task_cfg_path = os.path.join(os.path.dirname(__file__), 'configs', 'task', f"{args.task}.yaml")
-    task_config = load_task_config(args.task)
+    # Resolve and load task config via ConfigLoader (with overrides)
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
+    task_config, task_cfg_path = cfg_loader.load_task(args.task)
+    # Apply task overrides if any
+    overrides = getattr(args, 'config_overrides', {'task': {}})
+    from data_utils.utils import _convert_to_type
+    _apply_overrides_to_mapping(task_config, overrides.get('task', {}), _convert_to_type)
     
     # Load configurations
     from configs.training.loader import load_training_config
-    from configs.parameter_merger import merge_all_parameters, calculate_image_sizes
+    from configs.loader import ConfigLoader
     import yaml
     
-    training_config = load_training_config(args.training_config)
+    training_config = load_training_config(getattr(args, 'training_cfg_path', args.training_config))
     
     # Load policy config
-    try:
-        from configs.utils import resolve_yaml
-        policy_cfg_path = resolve_yaml(args.policy, os.path.join(os.path.dirname(__file__), 'configs', 'policy'))
-    except FileNotFoundError:
-        policy_cfg_path = args.policy
-    with open(policy_cfg_path, 'r') as f:
-        policy_config = yaml.safe_load(f)
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
+    policy_config, policy_cfg_path = cfg_loader.load_policy(args.policy)
     
-    # Merge all parameters using the parameter merger utility
-    merge_all_parameters(task_config, policy_config, training_config, args)
+    # Merge all parameters using unified loader
+    ConfigLoader.merge_all_parameters(task_config, policy_config, training_config, args)
     
     # Calculate image sizes for backward compatibility
-    args.image_sizes = calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
+    args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
     
     # Load model - using new policy loader
     from policy.policy_loader import load_policy_model, get_policy_data_processor, get_policy_data_collator, get_policy_trainer_class
