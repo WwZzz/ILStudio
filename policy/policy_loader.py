@@ -100,7 +100,10 @@ class PolicyLoader:
         # Prepare parameters for config initialization
         config_kwargs = {}
         
-        # Start with config_params from YAML
+        # Prefer model_args as the single source of truth
+        if policy_config.model_args:
+            config_kwargs.update(policy_config.model_args)
+        # Backward compatibility: also merge config_params if present
         if policy_config.config_params:
             config_kwargs.update(policy_config.config_params)
         

@@ -55,7 +55,7 @@ def parse_param():
                        default='/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted',
                        help='Dataset directory')
     parser.add_argument('--task', type=str, default='sim_transfer_cube_scripted',
-                       help='Task name')
+                       help='Task config (name under configs/task or absolute path to yaml)')
     
     # Evaluation parameters
     parser.add_argument('--num_rollout', type=int, default=4,
@@ -144,8 +144,10 @@ if __name__ == '__main__':
     config = model_components.get('config', None)
     if config:
         print(f"Loaded config from checkpoint: {type(config).__name__}")
+    if args.image_size and isinstance(args.image_size, str): args.image_size = eval(args.image_size0)
+    else: args.image_size = None
     policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'],
-                        state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
+                        state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type, img_size=args.image_size)
 
     # --- 2. Create Real-World Environment ---
     # Load the robot-specific configuration from the provided YAML file

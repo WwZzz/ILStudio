@@ -32,12 +32,9 @@ def merge_all_parameters(
     task_params = {
         'action_dim': task_config.get('action_dim', 7),
         'state_dim': task_config.get('state_dim', 7),
-        'chunk_size': task_config.get('chunk_size', 16),
         'camera_names': task_config.get('camera_names', ['primary']),
         'image_size_primary': task_config.get('image_size_primary', '(256, 256)'),
         'image_size_wrist': task_config.get('image_size_wrist', '(256, 256)'),
-        'action_normalize': task_config.get('action_normalize', 'minmax'),
-        'state_normalize': task_config.get('state_normalize', 'minmax'),
         'use_reasoning': task_config.get('use_reasoning', False),
         'use_prev_subtask': task_config.get('use_prev_subtask', False)
     }
@@ -115,8 +112,20 @@ def merge_all_parameters(
         'resume_from_checkpoint': training_config.resume_from_checkpoint
     }
     
+    # Prefer policy_config for method-specific params; fallback to task_config
+    cfg_params = policy_config.get('config_params', {}) if isinstance(policy_config, dict) else {}
+    model_args = policy_config.get('model_args', {}) if isinstance(policy_config, dict) else {}
+    preferred_chunk_size = cfg_params.get('chunk_size', model_args.get('chunk_size', task_config.get('chunk_size', 16)))
+    preferred_action_norm = cfg_params.get('action_normalize', model_args.get('action_normalize', task_config.get('action_normalize', 'minmax')))
+    preferred_state_norm = cfg_params.get('state_normalize', model_args.get('state_normalize', task_config.get('state_normalize', 'minmax')))
+
     # Combine all parameters
     all_params = {**task_params, **model_params, **training_params}
+    all_params.update({
+        'chunk_size': preferred_chunk_size,
+        'action_normalize': preferred_action_norm,
+        'state_normalize': preferred_state_norm,
+    })
     
     # Set attributes on args object if provided
     if args is not None:

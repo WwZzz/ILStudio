@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
 import transformers
+from ..utils import resolve_yaml
 
 
 @dataclass
@@ -161,11 +162,15 @@ class TrainingConfig:
 
 
 def load_training_config(config_path: str = "configs/training/default.yaml") -> TrainingConfig:
-    """Load training configuration from YAML file."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Training configuration not found: {config_path}")
-    
-    return TrainingConfig.from_yaml(config_path)
+    """Load training configuration from YAML file. Accepts name or path."""
+    base_dir = os.path.join(Path(__file__).resolve().parent)
+    try:
+        resolved = resolve_yaml(config_path, base_dir)
+    except FileNotFoundError:
+        resolved = config_path
+    if not os.path.exists(resolved):
+        raise FileNotFoundError(f"Training configuration not found: {resolved}")
+    return TrainingConfig.from_yaml(resolved)
 
 
 def create_training_arguments(config_path: str = "configs/training/default.yaml", hyper_args=None, **overrides) -> transformers.TrainingArguments:

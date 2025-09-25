@@ -59,7 +59,7 @@ def parse_param():
     parser.add_argument('--env_name', type=str, default='aloha',
                        help='Environment name')
     parser.add_argument('--task', type=str, default='sim_transfer_cube_scripted',
-                       help='Task name')
+                       help='Task config (name under configs/task or absolute path to yaml)')
     parser.add_argument('--fps', type=int, default=50,
                        help='Frames per second')
     parser.add_argument('--num_rollout', type=int, default=4,

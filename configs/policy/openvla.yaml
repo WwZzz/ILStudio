@@ -3,21 +3,6 @@ module_path: policy.openvla
 pretrained_config:
   model_name_or_path: "openvla/openvla-7b"
   is_pretrained: true
-config_params:
-  # Training mode: "lora" or "full"
-  training_mode: "lora"
-  # LoRA parameters (only used when training_mode="lora")
-  lora_r: 16
-  lora_alpha: 32
-  lora_dropout: 0.1
-  # Quantization (only used when training_mode="lora")
-  use_quantization: false
-  # Model parameters
-  max_length: 256
-  # Task parameters (will be overridden by args if provided)
-  state_dim: 14
-  action_dim: 14
-  camera_names: ["primary"]
 model_args:
   # Model architecture parameters
   model_name_or_path: "openvla/openvla-7b"
