@@ -46,7 +46,7 @@ def _set_nested(obj, keys, value):
 
 
 def parse_overrides(unknown_args):
-    overrides = { 'task': {}, 'training': {}, 'policy': {}, 'teleop': {}, 'robot': {} }
+    overrides = { 'task': {}, 'training': {}, 'policy': {}, 'teleop': {}, 'robot': {}, 'env': {} }
     i = 0
     while i < len(unknown_args):
         token = unknown_args[i]
@@ -61,7 +61,7 @@ def parse_overrides(unknown_args):
             if i + 1 < len(unknown_args) and not unknown_args[i+1].startswith('--'):
                 value = unknown_args[i+1]
                 i += 1
-        roots = ('task.', 'training.', 'policy.', 'teleop.', 'robot.')
+        roots = ('task.', 'training.', 'policy.', 'teleop.', 'robot.', 'env.')
         if key.startswith(roots):
             root, subpath = key.split('.', 1)
             overrides[root][subpath] = value

@@ -1,0 +1,5 @@
+type: robomimic
+task: NutAssemblySquare_Panda
+max_timesteps: 400
+ctrl_space: ee
+

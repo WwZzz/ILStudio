@@ -6,6 +6,7 @@ from typing import Tuple, Dict, Any, Optional
 from .utils import resolve_yaml, parse_overrides, apply_overrides_to_mapping, apply_overrides_to_object
 from .training.loader import load_training_config
 from data_utils.utils import _convert_to_type
+from types import SimpleNamespace
 
 
 class ConfigLoader:
@@ -51,6 +52,20 @@ class ConfigLoader:
 
     def load_teleop(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         return self.load_yaml_config('teleop', name_or_path)
+
+    def load_env(self, name_or_path: str) -> Tuple[Any, str]:
+        """Load env config and return a namespace for attribute-style access.
+        Expects a key 'type' in the YAML to indicate which benchmark env to load (e.g., 'aloha', 'libero', 'robomimic').
+        """
+        cfg, path = self.load_yaml_config('env', name_or_path)
+        # recursive dict -> namespace
+        def to_ns(d):
+            if isinstance(d, dict):
+                return SimpleNamespace(**{k: to_ns(v) for k, v in d.items()})
+            elif isinstance(d, list):
+                return [to_ns(x) for x in d]
+            return d
+        return to_ns(cfg), path
 
     def load_training(self, name_or_path: str, hyper_args=None):
         """Return (training_config_obj, training_args_obj, resolved_path)."""
