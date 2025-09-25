@@ -15,20 +15,26 @@ import torch
 
 
 class DirectPolicyLoader:
-    """Direct policy loader that loads models from checkpoint paths."""
+    """Direct policy loader that loads models from checkpoint paths.
+
+    Note: This implementation requires a policy_metadata.json saved alongside the
+    checkpoint directory. Heuristic string-based detection has been removed to
+    ensure extensibility. Train scripts save this metadata before training starts.
+    """
     
     def __init__(self):
         self._loaded_modules = {}
     
     def detect_policy_type(self, checkpoint_path: str) -> str:
         """
-        Detect the policy type from checkpoint metadata, config.json, or directory name.
-        
+        Detect the policy type strictly from checkpoint metadata (policy_metadata.json).
+        Heuristic fallbacks have been removed to avoid hard-coded coupling.
+
         Args:
             checkpoint_path: Path to checkpoint directory or specific checkpoint
-            
+
         Returns:
-            Policy type string (e.g., 'act', 'diffusion_policy', 'divla')
+            Policy type string (e.g., 'act')
         """
         checkpoint_path = Path(checkpoint_path)
         
@@ -36,7 +42,7 @@ class DirectPolicyLoader:
         if checkpoint_path.name.startswith('checkpoint-'):
             checkpoint_path = checkpoint_path.parent
         
-        # Method 1: Try to load from saved policy metadata (preferred)
+        # Require: saved policy metadata
         metadata_path = checkpoint_path / 'policy_metadata.json'
         if metadata_path.exists():
             try:
@@ -48,57 +54,12 @@ class DirectPolicyLoader:
                     return policy_module.split('.')[-1]
             except Exception as e:
                 print(f"Warning: Failed to load policy metadata: {e}")
-        
-        # Method 2: Fallback to architecture detection from config.json
-        config_path = checkpoint_path / 'config.json'
-        if config_path.exists():
-            try:
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                
-                architectures = config.get('architectures', [])
-                if architectures:
-                    architecture = architectures[0]
-                    print(f"Warning: Using fallback architecture detection for {architecture}")
-                    print("Consider retraining to save policy metadata for better performance")
-                    
-                    # Simple fallback mapping based on common patterns
-                    if 'ACT' in architecture:
-                        return 'act'
-                    elif 'Diffusion' in architecture:
-                        return 'diffusion_policy'
-                    elif 'Qwen' in architecture:
-                        if '2.5' in architecture or '25' in architecture:
-                            return 'qwen25dp'
-                        elif '2' in architecture:
-                            return 'qwen2dp'
-                        else:
-                            return 'divla'
-                    elif 'RDT' in architecture:
-                        return 'rdt'
-                    else:
-                        raise ValueError(f"Unknown architecture: {architecture}")
-            except Exception as e:
-                print(f"Warning: Failed to load config.json: {e}")
-        
-        # Method 3: Final fallback - try to infer from directory name
-        checkpoint_name = checkpoint_path.name.lower()
-        if 'act' in checkpoint_name:
-            return 'act'
-        elif 'diffusion' in checkpoint_name or 'dp' in checkpoint_name:
-            return 'diffusion_policy'
-        elif 'qwen' in checkpoint_name:
-            if '25' in checkpoint_name:
-                return 'qwen25dp'
-            elif '2' in checkpoint_name:
-                return 'qwen2dp'
-            else:
-                return 'divla'
-        elif 'rdt' in checkpoint_name:
-            return 'rdt'
-        
-        raise ValueError(f"Could not detect policy type for {checkpoint_path}. "
-                        f"Please retrain to save policy metadata or ensure checkpoint has proper naming.")
+
+        raise ValueError(
+            f"Could not detect policy type for {checkpoint_path}. "
+            f"Missing policy_metadata.json. Please retrain (train.py now saves it before training) "
+            f"or create the file with keys: {{'policy_module': 'policy.<name>', 'policy_name': '<name>'}}."
+        )
     
     def load_policy_module(self, policy_type: str):
         """Load the policy module dynamically."""
