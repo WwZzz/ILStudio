@@ -1,74 +1,20 @@
 import os
+import argparse
+import yaml
+import json
 import transformers
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ['DEVICE'] = "cuda"
-os.environ["WANDB_DISABLED"] = "true"
-import importlib
 import policy.utils as ml_utils
-from configs.task.loader import load_task_config
-from data_utils.utils import set_seed, WrappedDataset, load_data, _convert_to_type
-from dataclasses import dataclass, field, fields, asdict
-from typing import Dict, Optional, Sequence, List
-from pathlib import Path
-
-
+from data_utils.utils import set_seed, WrappedDataset, load_data
+from configs.loader import ConfigLoader
+from configs.training.loader import load_training_config
+from policy.policy_loader import (
+    get_policy_data_processor,
+    get_policy_data_collator,
+    get_policy_trainer_class,
+    load_policy_model_for_training,
+)
 
 # Removed HyperArguments dataclass - using simple argparse instead
-
-def _set_nested(obj, keys, value):
-    cur = obj
-    for k in keys[:-1]:
-        if isinstance(cur, dict):
-            if k not in cur or not isinstance(cur[k], (dict,)):
-                cur[k] = {}
-            cur = cur[k]
-        else:
-            if not hasattr(cur, k) or not isinstance(getattr(cur, k), (dict,)):
-                setattr(cur, k, {})
-            cur = getattr(cur, k)
-    last = keys[-1]
-    if isinstance(cur, dict):
-        cur[last] = value
-    else:
-        setattr(cur, last, value)
-
-def _parse_overrides(unknown_args):
-    overrides = { 'task': {}, 'training': {}, 'policy': {} }
-    i = 0
-    while i < len(unknown_args):
-        token = unknown_args[i]
-        if not token.startswith('--'):
-            i += 1
-            continue
-        key = token[2:]
-        value = None
-        if '=' in key:
-            key, value = key.split('=', 1)
-        else:
-            if i + 1 < len(unknown_args) and not unknown_args[i+1].startswith('--'):
-                value = unknown_args[i+1]
-                i += 1
-        if key.startswith('task.') or key.startswith('training.') or key.startswith('policy.'):
-            root, subpath = key.split('.', 1)
-            overrides[root][subpath] = value
-        i += 1
-    return overrides
-
-def _apply_overrides_to_mapping(mapping_obj, flat_overrides, caster):
-    for dotted, raw in flat_overrides.items():
-        if raw is None:
-            continue
-        val = caster(raw)
-        keys = dotted.split('.')
-        _set_nested(mapping_obj, keys, val)
-
-def _apply_overrides_to_object(obj, flat_overrides, caster):
-    for dotted, raw in flat_overrides.items():
-        if raw is None:
-            continue
-        val = caster(raw)
-        keys = dotted.split('.')
-        _set_nested(obj, keys, val)
 
 def parse_param():
     """
@@ -78,8 +24,6 @@ def parse_param():
         args: Parsed arguments namespace
         training_args: TrainingArguments object
     """
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Train a policy model')
     
     # Essential arguments
@@ -95,9 +39,7 @@ def parse_param():
     # Parse arguments (allow unknown for dotted overrides)
     args, unknown = parser.parse_known_args()
     
-    # Load training configuration
-    # Unified config loader
-    from configs.loader import ConfigLoader
+    # Load training configuration via unified config loader
     cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
     training_config, training_args, training_cfg_path = cfg_loader.load_training(args.training_config, hyper_args=args)
     setattr(args, 'config_overrides', cfg_loader._overrides)
@@ -119,23 +61,14 @@ def main(args, training_args):
     # Init task config
     set_seed(1)
     # Resolve and load task config via ConfigLoader (with overrides)
-    from configs.loader import ConfigLoader
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
     task_config, task_cfg_path = cfg_loader.load_task(args.task)
-    # Apply task overrides if any
-    overrides = getattr(args, 'config_overrides', {'task': {}})
-    from data_utils.utils import _convert_to_type
-    _apply_overrides_to_mapping(task_config, overrides.get('task', {}), _convert_to_type)
     
     # Load configurations
-    from configs.training.loader import load_training_config
-    from configs.loader import ConfigLoader
-    import yaml
     
     training_config = load_training_config(getattr(args, 'training_cfg_path', args.training_config))
     
     # Load policy config
-    from configs.loader import ConfigLoader
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
     policy_config, policy_cfg_path = cfg_loader.load_policy(args.policy)
     
@@ -145,12 +78,19 @@ def main(args, training_args):
     # Calculate image sizes for backward compatibility
     args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
     
-    # Load model - using new policy loader
-    from policy.policy_loader import load_policy_model, get_policy_data_processor, get_policy_data_collator, get_policy_trainer_class
+    # Save policy metadata early (before training starts)
+    policy_metadata = {
+        'policy_module': policy_config['module_path'],
+        'policy_name': policy_config['name'],
+    }
+    metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
+    with open(metadata_path, 'w') as f:
+        json.dump(policy_metadata, f, indent=2)
+    print(f"Saved policy metadata early to {metadata_path}")
     
+    # Load model - using new policy loader
     # Load model - using new policy loader, pass task_config
     print(f"Loading policy config: {policy_cfg_path}")
-    from policy.policy_loader import load_policy_model_for_training
     model_components = load_policy_model_for_training(policy_cfg_path, args, task_config)
     model = model_components['model']
     config = model_components.get('config', None)
@@ -184,17 +124,6 @@ def main(args, training_args):
     if trainer.is_world_process_zero():
         trainer.save_state()
         trainer.save_model(training_args.output_dir)
-        
-        # Save policy module information for direct loading
-        policy_metadata = {
-            'policy_module': policy_config['module_path'],
-            'policy_name': policy_config['name'],
-        }
-        import json
-        metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
-        with open(metadata_path, 'w') as f:
-            json.dump(policy_metadata, f, indent=2)
-        print(f"Saved policy metadata to {metadata_path}")
 
 if __name__ == '__main__':
     args, training_args = parse_param()

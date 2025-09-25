@@ -95,8 +95,6 @@ def parse_param():
     
     # Parse arguments
     args, unknown = parser.parse_known_args()
-    from configs.loader import ConfigLoader
-    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
     
     return args
 
