@@ -5,6 +5,5 @@ max_timesteps: 400
 ctrl_space: joint
 ctrl_type: abs
 camera_ids: "[0]"
-image_size_primary: "(640, 480)"
-image_size_wrist: "(320, 240)"
+image_size: "(640, 480)"
 

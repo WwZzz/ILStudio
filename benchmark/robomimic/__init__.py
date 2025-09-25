@@ -20,14 +20,14 @@ import robomimic.utils.tensor_utils as TensorUtils
 ALL_TASKS = ['Lift_Panda', "PickPlaceCan_Panda", "NutAssemblySquare_Panda", "ToolHang_Panda", "TwoArmTransport_Panda"]
 
 def create_env(config):
-    return RobomimicEnv(config, ctrl_space='ee')
+    return RobomimicEnv(config)
 
 class RobomimicEnv(MetaEnv):
-    def __init__(self, config, ctrl_space='ee', *args):
-        # 初始化env
+    def __init__(self, config, *args):
+        # 初始化env，仅从 config 读取参数
         self.config = config
-        self.ctrl_space = ctrl_space
-        self.ctrl_type = 'delta'
+        self.ctrl_space = getattr(self.config, 'ctrl_space', 'ee')
+        self.ctrl_type = getattr(self.config, 'ctrl_type', 'delta')
         env = self.create_env()
         super().__init__(env)
         

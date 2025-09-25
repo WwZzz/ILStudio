@@ -23,14 +23,14 @@ from robosuite.controllers import load_controller_config
 benchmark_dict = libero_bench.get_benchmark_dict()
 
 def create_env(config):
-    return LiberoEnv(config, ctrl_space=config.ctrl_space)
+    return LiberoEnv(config)
 
 class LiberoEnv(MetaEnv):
-    def __init__(self, config, ctrl_space='ee', *args):
-        # 初始化env
+    def __init__(self, config, *args):
+        # 初始化env，仅从 config 读取参数
         self.config = config
-        self.ctrl_space=ctrl_space
-        self.ctrl_type = 'delta'
+        self.ctrl_space = getattr(self.config, 'ctrl_space', 'ee')
+        self.ctrl_type = getattr(self.config, 'ctrl_type', 'delta')
         env = self.create_env()
         super().__init__(env)
         
@@ -46,7 +46,7 @@ class LiberoEnv(MetaEnv):
         self.task_name = task.name
         task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
         # step over the environment
-        image_size = eval(self.config.image_size)
+        image_size = eval(self.config.image_size) if isinstance(self.config.image_size, str) else self.config.image_size
         if isinstance(image_size, tuple):
             height, width = image_size
         elif isinstance(image_size, int):

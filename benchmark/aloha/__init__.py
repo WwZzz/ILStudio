@@ -69,17 +69,21 @@ def create_env(config):
     return AlohaSimEnv(config)
 
 class AlohaSimEnv(MetaEnv):
-    def __init__(self, config,  *args):
-        # 初始化env
+    def __init__(self, config, *args):
+        # 初始化env，仅从 config 读取参数
         self.config = config
-        self.ctrl_space= 'joint'
-        self.ctrl_type = 'abs'
+        self.ctrl_space = getattr(self.config, 'ctrl_space', 'joint')
+        self.ctrl_type = getattr(self.config, 'ctrl_type', 'abs')
         self.camera_ids = eval(self.config.camera_ids) if isinstance(self.config.camera_ids, str) else self.config.camera_ids
-        image_size_primary = eval(self.config.image_size_primary)
-        width, height = image_size_primary if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
+        # 统一使用 image_size；同时用于 primary 与 wrist
+        image_size = getattr(self.config, 'image_size', '(640, 480)')
+        image_size = eval(image_size) if isinstance(image_size, str) else image_size
+        if isinstance(image_size, int):
+            width, height = image_size, image_size
+        else:
+            # assume (w, h)
+            width, height = image_size
         self.image_size_primary = (width, height)
-        image_size_wrist = eval(self.config.image_size_wrist)
-        width, height = image_size_wrist if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
         self.image_size_wrist = (width, height)
         env = self.create_env()
         super().__init__(env)
