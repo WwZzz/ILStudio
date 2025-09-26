@@ -1,13 +1,7 @@
+# Configuration for SmolVLA adapted to IL-Studio
 from dataclasses import dataclass, field
 from transformers import PretrainedConfig
 from typing import Dict, Any, List
-
-
-@dataclass
-class NormalizationMode:
-    """Normalization mode constants."""
-    IDENTITY = "identity"
-    MEAN_STD = "mean_std"
 
 
 @dataclass
@@ -19,14 +13,24 @@ class FeatureType:
 
 
 @dataclass
+class NormalizationMode:
+    """Normalization mode constants."""
+    IDENTITY = "identity"
+    MEAN_STD = "mean_std"
+
+
+@dataclass
 class PolicyFeature:
     """Policy feature definition."""
     type: str
     shape: tuple
 
+    def to_dict(self):
+        return {"type": self.type, "shape": list(self.shape)}
+
 
 class SmolVLAConfig(PretrainedConfig):
-    """Configuration class for SmolVLA Policy."""
+    """Configuration class for SmolVLA Policy adapted to IL-Studio."""
     
     def __init__(
         self,
@@ -209,6 +213,23 @@ class SmolVLAConfig(PretrainedConfig):
             shape=()
         )
     
+    def to_dict(self) -> dict:
+        """Make config JSON-serializable by converting PolicyFeature objects to plain dicts."""
+        output = super().to_dict()
+        def _serialize_features(feats):
+            if not isinstance(feats, dict):
+                return feats
+            ser = {}
+            for k, v in feats.items():
+                if isinstance(v, PolicyFeature):
+                    ser[k] = v.to_dict()
+                else:
+                    ser[k] = v
+            return ser
+        output["input_features"] = _serialize_features(getattr(self, "input_features", {}))
+        output["output_features"] = _serialize_features(getattr(self, "output_features", {}))
+        return output
+    
     def validate_features(self) -> None:
         """Validate feature configuration."""
         for i in range(self.empty_cameras):
@@ -228,3 +249,4 @@ class SmolVLAConfig(PretrainedConfig):
     def action_feature(self) -> PolicyFeature:
         """Get action feature."""
         return self.output_features["action"]
+

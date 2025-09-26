@@ -1,3 +1,4 @@
+# SmolVLA trainer adapted to IL-Studio
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -7,7 +8,7 @@ import numpy as np
 
 
 class SmolVLATrainer(Trainer):
-    """Custom trainer for SmolVLA policy."""
+    """Custom trainer for SmolVLA policy adapted to IL-Studio."""
     
     def __init__(
         self,
@@ -29,11 +30,9 @@ class SmolVLATrainer(Trainer):
             **kwargs
         )
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs: bool = False, num_items_in_batch: int | None = None):
         """Compute loss for SmolVLA training."""
-        # Forward pass
         loss, loss_dict = model(inputs)
-        
         if return_outputs:
             return loss, loss_dict
         return loss
@@ -70,53 +69,6 @@ class SmolVLATrainer(Trainer):
             return loss.detach().cpu(), predictions, targets
 
 
-def create_smolvla_trainer(
-    model_name_or_path: str,
-    training_args: TrainingArguments,
-    train_dataset=None,
-    eval_dataset=None,
-    data_collator=None,
-    compute_metrics=None,
-    config: Optional[Dict[str, Any]] = None,
-    **kwargs
-) -> SmolVLATrainer:
-    """Create a SmolVLA trainer."""
-    
-    # Load model
-    from .modeling import SmolVLAPolicy, SmolVLAConfig
-    
-    if config is None:
-        config = SmolVLAConfig()
-    
-    model = SmolVLAPolicy(config)
-    
-    # Load pretrained weights if available
-    if model_name_or_path and model_name_or_path != "scratch":
-        try:
-            # Try to load from checkpoint
-            checkpoint = torch.load(model_name_or_path, map_location='cpu')
-            if 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                model.load_state_dict(checkpoint)
-        except Exception as e:
-            print(f"Warning: Could not load pretrained weights from {model_name_or_path}: {e}")
-            print("Training from scratch...")
-    
-    # Create trainer
-    trainer = SmolVLATrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        data_collator=data_collator,
-        compute_metrics=compute_metrics,
-        **kwargs
-    )
-    
-    return trainer
-
-
 def compute_metrics(eval_pred):
     """Compute metrics for evaluation."""
     predictions, labels = eval_pred
@@ -139,3 +91,4 @@ def compute_metrics(eval_pred):
         'mae': mae,
         'rmse': np.sqrt(mse)
     }
+

@@ -1,95 +1,16 @@
+# SmolVLA modeling adapted from LeRobot to IL-Studio
 import math
-import os
-import re
 from collections import deque
 from typing import Dict, Any, List, Union, Optional, Tuple
 
-import safetensors
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from transformers import AutoProcessor, PretrainedModel
+from transformers import AutoProcessor, PreTrainedModel
 
 from .configuration import SmolVLAConfig
 from .smolvlm_with_expert import SmolVLMWithExpertModel
-
-
-# Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
-_VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
-
-
-def canonicalise(k: str) -> str:
-    """Remove dataset-variant markers like '.so100-blue_' or '.so100_' from a normalisation-buffer key."""
-    return _VARIANT_RE.sub(".buffer_", k)
-
-
-def standardise_state_dict(
-    checkpoint: dict[str, torch.Tensor], ref_keys: set[str], *, verbose: bool = True
-) -> tuple[dict[str, torch.Tensor], list[str]]:
-    """Re-keys checkpoint so that every entry matches the reference key set."""
-    out, collisions, unmatched = {}, {}, []
-
-    for k, v in checkpoint.items():
-        canon = canonicalise(k)
-        if canon in ref_keys:
-            if canon in out:  # duplicate after collapsing
-                collisions.setdefault(canon, []).append(k)
-            else:
-                out[canon] = v
-        else:
-            unmatched.append(k)
-
-    if verbose:
-        for canon, variants in collisions.items():
-            print(f"[standardise_state_dict] '{canon}'  ←  {variants}")
-        if unmatched:
-            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys")
-
-    out.update({k: checkpoint[k] for k in unmatched})
-    return out, unmatched
-
-
-def rename_checkpoint_keys(checkpoint: dict, rename_str: str):
-    """Renames keys in a checkpoint dictionary based on the given rename string."""
-    rename_dict = dict(pair.split("//") for pair in rename_str.split(","))
-    new_checkpoint = {}
-    for k, v in checkpoint.items():
-        for old_key, new_key in rename_dict.items():
-            if old_key in k:
-                k = k.replace(old_key, new_key)
-        new_checkpoint[k] = v
-    return new_checkpoint
-
-
-def load_smolvla(
-    model: torch.nn.Module,
-    filename: str | os.PathLike,
-    *,
-    device: str = "cpu",
-    checkpoint_keys_mapping: str = "",
-) -> torch.nn.Module:
-    """Load SmolVLA checkpoint."""
-    state_dict = safetensors.torch.load_file(filename, device=device)
-
-    # Optional user-supplied renames
-    if checkpoint_keys_mapping and "//" in checkpoint_keys_mapping:
-        state_dict = rename_checkpoint_keys(state_dict, checkpoint_keys_mapping)
-
-    state_dict, _ = standardise_state_dict(state_dict, set(model.state_dict().keys()))
-
-    # HACK: to not overwrite normalization parameters as they should come from the dataset
-    norm_keys = ("normalize_inputs", "normalize_targets", "unnormalize_outputs")
-    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(norm_keys)}
-
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-
-    if not all(key.startswith(norm_keys) for key in missing) or unexpected:
-        raise RuntimeError(
-            f"SmolVLA {len(missing)} missing / {len(unexpected)} unexpected keys"
-        )
-
-    return model
 
 
 def create_sinusoidal_pos_embedding(
@@ -114,7 +35,7 @@ def create_sinusoidal_pos_embedding(
 
 
 def make_att_2d_masks(pad_masks, att_masks):
-    """Create 2D attention masks."""
+    """Create 2D attention masks from LeRobot."""
     if att_masks.ndim != 2:
         raise ValueError(att_masks.ndim)
     if pad_masks.ndim != 2:
@@ -171,7 +92,7 @@ def pad_tensor(tensor, max_len, pad_value=0):
 
 
 class VLAFlowMatching(nn.Module):
-    """SmolVLA Flow Matching model."""
+    """SmolVLA Flow Matching model adapted from LeRobot."""
 
     def __init__(self, config: SmolVLAConfig):
         super().__init__()
@@ -260,7 +181,6 @@ class VLAFlowMatching(nn.Module):
                 pad_masks.append(image_start_mask)
 
             img_emb = self.vlm_with_expert.embed_image(img)
-            img_emb = img_emb
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
@@ -327,7 +247,7 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def embed_suffix(self, noisy_actions, timestep):
-        """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
+        """Embed state, noisy_actions, timestep to prepare for Expert processing."""
         embs = []
         pad_masks = []
         att_masks = []
@@ -397,7 +317,7 @@ class VLAFlowMatching(nn.Module):
             attention_mask=att_2d_masks,
             position_ids=position_ids,
             past_key_values=None,
-            inputs_embeds=[prefix_embs, suffix_embs],
+            inputs_embeds=[prefix_embs.to(torch.bfloat16), suffix_embs.to(torch.bfloat16)],
             use_cache=False,
             fill_kv_cache=False,
         )
@@ -485,8 +405,8 @@ class VLAFlowMatching(nn.Module):
         return v_t
 
 
-class SmolVLAPolicy(PretrainedModel):
-    """SmolVLA Policy model for robot action prediction."""
+class SmolVLAPolicy(PreTrainedModel):
+    """SmolVLA Policy model adapted to IL-Studio."""
     
     config_class = SmolVLAConfig
 
@@ -629,3 +549,11 @@ class SmolVLAPolicy(PretrainedModel):
         """Pad action to max_action_dim."""
         actions = pad_vector(batch["action"], self.config.max_action_dim)
         return actions
+
+    def select_action(self, batch: Dict[str, Any]) -> Tensor:
+        """Select action for evaluation (IL-Studio interface)."""
+        self.eval()
+        with torch.no_grad():
+            actions = self.predict_action_chunk(batch)
+            # Return first action from chunk
+            return actions[0, 0]  # (action_dim,)

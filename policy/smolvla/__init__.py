@@ -1,7 +1,8 @@
+# SmolVLA policy module for IL-Studio
 from .configuration import SmolVLAConfig
 from .modeling import SmolVLAPolicy, VLAFlowMatching
 from .data_utils import SmolVLAProcessor, data_collator, get_data_processor, get_data_collator
-from .trainer import SmolVLATrainer, create_smolvla_trainer, compute_metrics
+from .trainer import SmolVLATrainer, compute_metrics
 from .smolvlm_with_expert import SmolVLMWithExpertModel
 
 import torch
@@ -9,21 +10,59 @@ from transformers import AutoProcessor
 
 
 def load_model(args):
-    """Load SmolVLA model components."""
+    """Load SmolVLA model components following IL-Studio policy rules."""
     from .configuration import SmolVLAConfig
     from .modeling import SmolVLAPolicy
     
+    # Extract parameters from args with model_args precedence (following IL-Studio conventions)
+    def get_param(name, default):
+        return getattr(args, name, default)
+    
     # Create configuration
     config = SmolVLAConfig(
-        state_dim=getattr(args, 'state_dim', 14),
-        action_dim=getattr(args, 'action_dim', 14),
-        camera_names=getattr(args, 'camera_names', ['primary']),
-        chunk_size=getattr(args, 'chunk_size', 50),
-        n_action_steps=getattr(args, 'n_action_steps', 50),
-        vlm_model_name=getattr(args, 'vlm_model_name', 'HuggingFaceTB/SmolVLM2-500M-Video-Instruct'),
-        freeze_vision_encoder=getattr(args, 'freeze_vision_encoder', True),
-        train_expert_only=getattr(args, 'train_expert_only', True),
-        train_state_proj=getattr(args, 'train_state_proj', True),
+        # Basic dimensions
+        state_dim=get_param('state_dim', 14),
+        action_dim=get_param('action_dim', 14),
+        camera_names=get_param('camera_names', ['primary']),
+        chunk_size=get_param('chunk_size', 50),
+        n_action_steps=get_param('n_action_steps', 50),
+        
+        # Model parameters
+        vlm_model_name=get_param('vlm_model_name', 'HuggingFaceTB/SmolVLM2-500M-Video-Instruct'),
+        load_vlm_weights=get_param('load_vlm_weights', False),
+        freeze_vision_encoder=get_param('freeze_vision_encoder', True),
+        train_expert_only=get_param('train_expert_only', True),
+        train_state_proj=get_param('train_state_proj', True),
+        
+        # Training parameters
+        optimizer_lr=get_param('optimizer_lr', 1e-4),
+        optimizer_betas=get_param('optimizer_betas', (0.9, 0.95)),
+        optimizer_eps=get_param('optimizer_eps', 1e-8),
+        optimizer_weight_decay=get_param('optimizer_weight_decay', 1e-10),
+        optimizer_grad_clip_norm=get_param('optimizer_grad_clip_norm', 10),
+        
+        # Architecture parameters
+        num_vlm_layers=get_param('num_vlm_layers', 16),
+        num_expert_layers=get_param('num_expert_layers', -1),
+        attention_mode=get_param('attention_mode', 'cross_attn'),
+        expert_width_multiplier=get_param('expert_width_multiplier', 0.75),
+        
+        # Processing parameters
+        max_state_dim=get_param('max_state_dim', 32),
+        max_action_dim=get_param('max_action_dim', 32),
+        resize_imgs_with_padding=get_param('resize_imgs_with_padding', (512, 512)),
+        tokenizer_max_length=get_param('tokenizer_max_length', 48),
+        num_steps=get_param('num_steps', 10),
+        use_cache=get_param('use_cache', True),
+        
+        # Special tokens and padding
+        add_image_special_tokens=get_param('add_image_special_tokens', False),
+        pad_language_to=get_param('pad_language_to', 'longest'),
+        empty_cameras=get_param('empty_cameras', 0),
+        
+        # Aloha adaptation
+        adapt_to_pi_aloha=get_param('adapt_to_pi_aloha', False),
+        use_delta_joint_actions_aloha=get_param('use_delta_joint_actions_aloha', False),
     )
     
     # Create model
@@ -54,20 +93,26 @@ def load_model(args):
 
 
 def get_data_processor(args, model_components):
-    """Get data processor for SmolVLA."""
-    from .data_utils import get_data_processor as _get_data_processor
-    return _get_data_processor(args, model_components)
+    """Get data processor for SmolVLA following IL-Studio policy rules."""
+    tokenizer = model_components.get('tokenizer')
+    if tokenizer is None:
+        raise ValueError("Tokenizer not found in model components")
+    
+    config = model_components.get('config')
+    if config is None:
+        raise ValueError("Config not found in model components")
+    
+    return SmolVLAProcessor(tokenizer=tokenizer, config=config)
 
 
 def get_data_collator(args, model_components):
-    """Get data collator for SmolVLA."""
-    from .data_utils import get_data_collator as _get_data_collator
-    return _get_data_collator(args, model_components)
+    """Get data collator for SmolVLA following IL-Studio policy rules."""
+    from .data_utils import data_collator
+    return data_collator
 
 
-def get_trainer_class(args):
-    """Get trainer class for SmolVLA."""
-    return SmolVLATrainer
+# Optional: return SmolVLATrainer if available, otherwise use default
+Trainer = SmolVLATrainer
 
 
 __all__ = [
@@ -76,12 +121,11 @@ __all__ = [
     'VLAFlowMatching',
     'SmolVLAProcessor',
     'SmolVLATrainer',
-    'create_smolvla_trainer',
     'compute_metrics',
     'SmolVLMWithExpertModel',
     'load_model',
     'get_data_processor',
     'get_data_collator',
-    'get_trainer_class',
     'data_collator'
 ]
+

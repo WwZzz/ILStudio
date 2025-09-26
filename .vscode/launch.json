@@ -11,12 +11,22 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--robot_config",               "configs/robot/koch_follower.yaml",
-                "--publish_rate",              "10",
-                "--sensing_rate",            "20",
-                "--model_name_or_path",    "ckpt/pick_koch",
-                "--dataset_dir",              "data/pick",
-            ]
+                "--task", "debug",
+                "--policy", "smolvla",
+                "--training_config", "default",
+                "--output_dir", "ckpt/debug_smolvla",
+                "--training.logging_dir", "logs/log_debug_smolvla",
+                "--training.batch_size", "2",
+                "--training.max_steps", "50000",
+                "--training.save_steps", "1000"
+            ],
+            // "args": [
+            //     "--robot_config",               "configs/robot/koch_follower.yaml",
+            //     "--publish_rate",              "10",
+            //     "--sensing_rate",            "20",
+            //     "--model_name_or_path",    "ckpt/pick_koch",
+            //     "--dataset_dir",              "data/pick",
+            // ]
             // "args": [
             //     "--env_name",               "aloha",
             //     "--task",                   "transfer_cube_top",
