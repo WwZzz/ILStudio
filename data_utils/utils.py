@@ -447,17 +447,21 @@ def load_data(args, task_config, save_norm=True):
     return train_dataset, val_dataset
 
 def load_normalizers(args):
-    # load normalizers
-    policy_normalize_file = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
-    if not os.path.exists(policy_normalize_file):
-        policy_normalize_file = os.path.join(args.model_name_or_path, 'normalize.json')
+    try:
+        # load normalizers
+        policy_normalize_file = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
         if not os.path.exists(policy_normalize_file):
-            raise FileNotFoundError("No normalize.json found")
-    with open(policy_normalize_file, 'r') as f:
-        norm_meta = json.load(f)
-    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(policy_normalize_file))
-    kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
-    return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
+            policy_normalize_file = os.path.join(args.model_name_or_path, 'normalize.json')
+            if not os.path.exists(policy_normalize_file):
+                raise FileNotFoundError("No normalize.json found")
+        with open(policy_normalize_file, 'r') as f:
+            norm_meta = json.load(f)
+        normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(policy_normalize_file))
+        kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
+        return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
+    except Exception as e:
+        warnings.warn(f"Failed to load normalizers from {args.model_name_or_path} because {e}")
+        return None, None, None
 
 def _convert_to_type(value):
     """
