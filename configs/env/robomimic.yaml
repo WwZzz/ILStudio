@@ -2,4 +2,5 @@ type: robomimic
 task: NutAssemblySquare_Panda
 max_timesteps: 400
 ctrl_space: ee
+camera_ids: [0, 1]
 

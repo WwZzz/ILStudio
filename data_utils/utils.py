@@ -448,17 +448,14 @@ def load_data(args, task_config, save_norm=True):
 
 def load_normalizers(args):
     # load normalizers
-    if args.norm_path=='':
-        res = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
-        if not os.path.exists(res):
-            res = os.path.join(args.model_name_or_path, 'normalize.json')
-            if not os.path.exists(res):
-                raise FileNotFoundError("No normalize.json found")
-    else:
-        res = args.norm_path
-    with open(res, 'r') as f:
+    policy_normalize_file = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
+    if not os.path.exists(policy_normalize_file):
+        policy_normalize_file = os.path.join(args.model_name_or_path, 'normalize.json')
+        if not os.path.exists(policy_normalize_file):
+            raise FileNotFoundError("No normalize.json found")
+    with open(policy_normalize_file, 'r') as f:
         norm_meta = json.load(f)
-    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(res))
+    normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(policy_normalize_file))
     kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
     return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
 

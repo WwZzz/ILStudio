@@ -74,15 +74,16 @@ class AlohaSimEnv(MetaEnv):
         self.config = config
         self.ctrl_space = getattr(self.config, 'ctrl_space', 'joint')
         self.ctrl_type = getattr(self.config, 'ctrl_type', 'abs')
-        self.camera_ids = eval(self.config.camera_ids) if isinstance(self.config.camera_ids, str) else self.config.camera_ids
+        self.camera_ids = getattr(self.config, 'camera_ids', [0])
         # 统一使用 image_size；同时用于 primary 与 wrist
-        image_size = getattr(self.config, 'image_size', '(640, 480)')
-        image_size = eval(image_size) if isinstance(image_size, str) else image_size
+        image_size = getattr(self.config, 'image_size', [640, 480])
         if isinstance(image_size, int):
             width, height = image_size, image_size
-        else:
-            # assume (w, h)
+        elif isinstance(image_size, (list, tuple)):
+            # assume [w, h] or (w, h)
             width, height = image_size
+        else:
+            raise ValueError("image_size should be list [width, height] or int")
         self.image_size_primary = (width, height)
         self.image_size_wrist = (width, height)
         env = self.create_env()

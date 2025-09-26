@@ -59,7 +59,7 @@ def resize_with_pad(img, width, height, pad_value=-1, interpolation=cv2.INTER_LI
         return torch.from_numpy(out).to(device=device, dtype=dtype)
     return out.astype(arr.dtype, copy=False)
 
-def organize_obs(obs: np.ndarray, ctrl_space='ee', camera_ids=[0]):
+def organize_obs(obs: np.ndarray, ctrl_space='ee'):
     """Organize obs returned by SubprocVectorEnv into a dict"""
     # Lazy import to avoid circular dependency at module import time
     from .base import dict2meta
@@ -77,8 +77,7 @@ def organize_obs(obs: np.ndarray, ctrl_space='ee', camera_ids=[0]):
         elif res[k][0] is None:
             res[k] = None
     res['state'] = res['state']
-    if isinstance(camera_ids, str): camera_ids = eval(camera_ids)
-    res['image'] = res['image'][:,camera_ids] # (B, NUM_CAM, C, H, W)
+    # Note: camera selection is now handled in each environment's obs2meta method
     return dict2meta(res)
 
 def evaluate(args, policy, env, video_writer=None):
@@ -89,7 +88,7 @@ def evaluate(args, policy, env, video_writer=None):
         time_start_eval = time.time()
         success =  np.zeros(len(env)).astype(np.bool8)
         obs = env.reset()
-        obs = organize_obs(obs, args.ctrl_space, args.camera_ids)
+        obs = organize_obs(obs, args.ctrl_space)
         for t in range(args.max_timesteps):
             if video_writer is not None:
                 frames = obs['image']
@@ -99,7 +98,7 @@ def evaluate(args, policy, env, video_writer=None):
                     video_frames[env_i].append(frames[env_i])
             act = policy.select_action(obs, t)
             obs, reward, done, info = env.step(act)
-            obs = organize_obs(obs, args.ctrl_space, args.camera_ids)
+            obs = organize_obs(obs, args.ctrl_space)
             # 判断是否成功
             success = success | done
             if success.all(): 
