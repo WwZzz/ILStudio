@@ -8,9 +8,9 @@ import gymnasium_robotics
 gym.register_envs(gymnasium_robotics)
 
 def create_env(config):
-    return PandaGymEnv(config)
+    return GymRoboticsEnv(config)
 
-class PandaGymEnv(MetaEnv):
+class GymRoboticsEnv(MetaEnv):
     def __init__(self, config, *args):
         # 初始化env，仅从 config 读取参数
         self.config = config
