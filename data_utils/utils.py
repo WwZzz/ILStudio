@@ -461,7 +461,8 @@ def load_normalizers(args):
         return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
     except Exception as e:
         warnings.warn(f"Failed to load normalizers from {args.model_name_or_path} because {e}")
-        return None, None, None
+        identity_normalizer = {'state':Identity(), 'action':Identity()}
+        return identity_normalizer, 'ee', 'delta'
 
 def _convert_to_type(value):
     """
