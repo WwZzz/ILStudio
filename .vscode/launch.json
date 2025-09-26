@@ -10,16 +10,55 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "args": [
+                "--task", "debug",
+                "--policy", "smolvla",
+                "--training_config", "default",
+                "--output_dir", "ckpt/debug_smolvla",
+                "--training.logging_dir", "logs/log_debug_smolvla",
+                "--training.batch_size", "2",
+                "--training.max_steps", "50000",
+                "--training.save_steps", "1000"
+            ],
+            // "args": [
+            //     "--robot_config",               "configs/robot/koch_follower.yaml",
+            //     "--publish_rate",              "10",
+            //     "--sensing_rate",            "20",
+            //     "--model_name_or_path",    "ckpt/pick_koch",
+            //     "--dataset_dir",              "data/pick",
+            // ]
+            // "args": [
+            //     "--env_name",               "aloha",
+            //     "--task",                   "transfer_cube_top",
+            //     "--policy_config",          "configs/policy/act.yaml",
+            //     "--model_name_or_path",     "ckpt/act_sim_transfer_cube_scripted_zscore_example",
+            //     "--save_dir",               "results/act_transfer_cube_top_example",
+            //     "--num_rollout",            "10",
+            //     "--num_envs",               "5",
+            //     "--dataset_dir",            "data/sim_transfer_cube_scripted",
+            //     "--fps",                    "50",
+            //     "--camera_ids",             "[0]",      // 字符串本身带括号
+            //     "--max_timesteps",          "400",
+            //     "--use_spawn"
+            // ],
+            // "args": [
+            //     "--task_name","sim_transfer_cube_scripted",
+            //     "--policy_config","configs/policy/diffusion_policy.yaml",
+            //     "--training_config","configs/training/default.yaml",
+            //     "--output_dir","ckpt/dp_sim_transfer_cube_scripted_zscore_example",
+            // ],
             // "args": [
             //     "--model_name_or_path",
             //     "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/act_transfer_cube_top_zscore_long2/checkpoint-700",
             //     "--dataset_dir",
             //     "/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted"
             // ],
-            "args": [
-                "--robot_config", "configuration/robots/agilex_aloha.yaml",
-                
-            ]
+            // "args": [
+            //     "--task_name", "sim_transfer_cube_scripted",
+            //     "--policy_config", "configs/policy/diffusion_policy.yaml",
+            //     "--training_config", "configs/training/default.yaml",
+            //     "--output_dir", "ckpt/dp_sim_transfer_cube_scripted_zscore_example"
+            // ]
         }
     ]
 }

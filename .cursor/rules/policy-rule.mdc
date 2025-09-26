@@ -1,0 +1,16 @@
+---
+description: 项目强制级规则
+globs:
+alwaysApply: true
+---
+
+# 代码规则
+- 每个policy应该提供3个接口函数：load_model, get_data_collator, get_data_processor
+- load_model提供两个功能：1）直接加载原始模型；2）加载经过框架训练过的checkpoint模型。
+- load_model接受输入args，输出一个字典model_components，这个字典至少包含一个名为model的关键字，对应的值为模型
+- get_data_processor的功能输出一个可调用对象，其可以把数据集的__getitem__返回的数据经过格式转化，处理成模型能够接受的格式，以适应不同输入的模型。它返回一个Callable对象，可以进行样本级别的转换
+- get_data_processor接受输入args和model_conponents
+- get_data_collator的功能是将经过get_data_processor输出的多个样本，按模型需要的方式，组织成batch。这是因为不同模型需要的batch的格式也不同。使用这个函数，就可以屏蔽模型的差异，更轻松地且尽可能无改动地接入IL-Studio
+- 这三个接口需要在对应policy模块的__init__.py中可访问。其中load_model是必选项，其余两个接口是可选项，因为框架本身提供默认的样本级处理函数和batch化函数
+- 所有policy一律使用继承自transformers库的Trainer的训练器，通过在__init__.py中指定Trainer来实现。Trainer对于__init__.py也是可选项，这是因为框架提供了policy没有实现Trainer时，默认使用基础的trainer训练
+- policy的config需要至少包括name, module_path, model_args关键字，模型的参数需要定义在model_args中

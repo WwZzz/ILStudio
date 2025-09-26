@@ -15,17 +15,18 @@ class DummyRobot(BaseRobot):
     based on a YAML configuration file.
     """
 
-    def __init__(self, obs_config, action_config,  ctrl_type='delta', ctrl_space='ee', extra_args={}, **kwargs):
+    def __init__(self, obs_config, action_config,  ctrl_type='delta', ctrl_space='ee', **kwargs):
         """
         Initializes the virtual robot according to the configuration in the YAML file.
 
         Args:
-            config: The robot configuration dictionary from the YAML file.
-            extra_args: Additional command-line arguments from the main program.
-            **kwargs: Other parameters loaded from the robot_config.yaml file's 'params' key.
+            obs_config: Observation configuration dictionary.
+            action_config: Action configuration dictionary.
+            ctrl_type: Control type ('delta' or 'abs').
+            ctrl_space: Control space ('ee' or 'joint').
+            **kwargs: Other parameters loaded from the robot_config.yaml file.
         """
         print("[DummyRobot] Initializing...")
-        self.args = extra_args
         self.shutdown_event = threading.Event()
 
         self.dtypes = {

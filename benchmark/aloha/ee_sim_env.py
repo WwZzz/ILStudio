@@ -13,8 +13,6 @@ from dm_control import mujoco
 from dm_control.rl import control
 from dm_control.suite import base
 
-import IPython
-e = IPython.embed
 
 
 def make_ee_sim_env(task_name):

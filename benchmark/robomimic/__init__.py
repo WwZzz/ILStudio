@@ -20,14 +20,15 @@ import robomimic.utils.tensor_utils as TensorUtils
 ALL_TASKS = ['Lift_Panda', "PickPlaceCan_Panda", "NutAssemblySquare_Panda", "ToolHang_Panda", "TwoArmTransport_Panda"]
 
 def create_env(config):
-    return RobomimicEnv(config, ctrl_space='ee')
+    return RobomimicEnv(config)
 
 class RobomimicEnv(MetaEnv):
-    def __init__(self, config, ctrl_space='ee', *args):
-        # 初始化env
+    def __init__(self, config, *args):
+        # 初始化env，仅从 config 读取参数
         self.config = config
-        self.ctrl_space = ctrl_space
-        self.ctrl_type = 'delta'
+        self.ctrl_space = getattr(self.config, 'ctrl_space', 'ee')
+        self.ctrl_type = getattr(self.config, 'ctrl_type', 'delta')
+        self.camera_ids = getattr(self.config, 'camera_ids', [0, 1])
         env = self.create_env()
         super().__init__(env)
         
@@ -74,10 +75,13 @@ class RobomimicEnv(MetaEnv):
         state_ee = np.concatenate([xyz, euler, gripper_state], axis=0).astype(np.float32)
         # joint state
         state_joint = np.concatenate([obs["robot0_joint_pos"], gripper_state], axis=0).astype(np.float32)
-        # image
+        # image - apply camera selection based on camera_ids
         img_primary = obs["agentview_image"]
         img_second = obs['robot0_eye_in_hand_image']
-        image = np.stack([img_primary, img_second])
+        all_imgs = [img_primary, img_second]
+        # Select images based on camera_ids configuration
+        selected_imgs = [all_imgs[i] for i in self.camera_ids if i < len(all_imgs)]
+        image = np.stack(selected_imgs)
         image = (image*255.0).astype(np.uint8)
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
 

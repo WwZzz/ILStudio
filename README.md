@@ -1,8 +1,21 @@
-# IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+<div align="center">
+  <img src='https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_ilstd_logo.png'  width="200"/>
+<h1> IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+</h1>
 
-| ACT - Insertion                              | Diffusion UNet - Transfer Cube                   | ACT - Square                                      |
-|----------------------------------------------|--------------------------------------------------|---------------------------------------------------|
-| <img src="assets/act_aloha_insertion.gif" height="200"> | <img src="assets/diffusion_aloha_transfer.gif" height="200"> | <img src="assets/act_robomimic_square.gif" height="200"> |
+
+
+</div>
+
+
+
+| ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |
+|----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
+| <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_aloha_insertion.gif" height="200">  | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/diffusion_aloha_transfer.gif" height="200"> | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_robomimic_square.gif" height="200"> |
+
+| Koch - Pick & Place -Inference                                     |     SO101 - Fold Tower -Inference               |                                                          |
+|----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
+| <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_koch.gif" height="200">             | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/so101_fold.gif" height="200">          |                                                          |
 
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
@@ -21,17 +34,29 @@ pip install -r requirements.txt
 - ...
 
 # Usage
+
+## Policy Configuration System
+
 ```shell
-# model_name must be in vla and task_name must be in configuration.constants.TASK_CONFIGS
-python train.py --model_name act --task_name example_tasks --output_dir output_dir_path 
+# Use policy_config to load from YAML file path
+python train.py --policy_config configs/policy/act.yaml --task_name example_tasks --output_dir output_dir_path 
+
+# Available policies: configs/policy/act.yaml, configs/policy/qwen2dp.yaml, etc.
+python train.py --policy_config configs/policy/qwen2dp.yaml --task_name example_tasks --output_dir output_dir_path
+
+# Evaluation
+python eval.py --policy_config configs/policy/act.yaml --env_name aloha --task sim_transfer_cube_scripted
+
+# Real-world evaluation
+python eval_real.py --policy_config configs/policy/act.yaml --robot_config configs/robots/dummy.yaml --task sim_transfer_cube_scripted 
 ```
 
 # Overview
 We show the architecture as below:
-![framework](assets/fig_il.png)
+![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_il.png)
 
 # Model
-important APIs from each `vla.algo_name.__init__`
+important APIs from each `policy.algo_name.__init__`
 - `def load_model(args: transformers.HfArgumentParser) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
 - (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> function` # sample-level data processing
 - (OPTIONAL) `def get_data_collator(args: transformers.HfArgumentParser, model_components:dict) -> function` # batch-level data processing
@@ -98,17 +123,20 @@ The dataset's item should be a dict like
 ```
 
 To add customized datasets, please modify
-```python
-TASK_CONFIGS = {
-    ...,
-    'task_name':{
-        'dataset_dir': [
-            dataset_dir, # the path of the dataset
-        ],
-        'episode_len': int,
-        'camera_names': List(str), # e.g., ['primary']
-    },
-}
+
+## Task Configuration (YAML)
+
+Each task should have a YAML file in `configs/task/` named `<task_name>.yaml`. Example:
+
+```yaml
+dataset_dir:
+    - /path/to/sim_transfer_cube_scripted
+episode_len: 400
+camera_names:
+    - primary
+dataset_class: AlohaSimDataset
+ctrl_type: abs
+ctrl_space: joint
 ```
 
 ## Data Preparation
@@ -134,26 +162,26 @@ export MUJOCO_GL=egl
 ## Simulation Data Preparation
 There are three ways to download the generated datasets.
 - 1) Download from the official repo [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O?usp=share_link)
-- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir /path/to/sim_transfer_cube_scripted`
+- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir ./data/sim_transfer_cube_scripted`
 - 3) Generate the data by following the guidence in [link](https://github.com/tonyzhaozh/act)
 
 ## Add the dataset to configuration
 ```python
-# configuration/constants.py
-TASK_CONFIGS = {
-    ...,
-    'sim_transfer_cube_scripted': {
-        'dataset_dir': [
-            '/path/to/sim_transfer_cube_scripted',
-        ],
-        'episode_len': 400,          
-        'camera_names': ['primary'], # using the front camera as vision input
-        'dataset_class': 'AlohaSimDataset',
-        'ctrl_type': 'abs',
-        'ctrl_space': 'joint',
-    },
-    ...
-}
+
+## Add the dataset to configuration
+
+Create a YAML file in `configs/task/` (e.g., `sim_transfer_cube_scripted.yaml`) with the following content:
+
+```yaml
+dataset_dir:
+    - /path/to/sim_transfer_cube_scripted
+episode_len: 400
+camera_names:
+    - primary
+dataset_class: AlohaSimDataset
+ctrl_type: abs
+ctrl_space: joint
+```
 
 ```
 ## Train

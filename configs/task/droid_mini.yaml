@@ -1,0 +1,6 @@
+dataset_dir:
+  - "/inspire/hdd/project/robot-action/public/data/droid_mini"
+episode_len: 1000
+camera_names:
+  - left
+  - right

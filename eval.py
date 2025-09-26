@@ -6,7 +6,6 @@ import copy
 import json
 from data_utils.utils import set_seed, _convert_to_type, load_normalizers
 import tensorflow as tf
-# from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 import argparse
@@ -17,107 +16,93 @@ from benchmark.utils import evaluate
 from benchmark.base import MetaPolicy
 import pickle
 import transformers
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['DEVICE'] = "cuda"
-os.environ["WANDB_DISABLED"] = "true"
 import importlib
-import IPython
 import torch
-from configuration.utils import *
+from configs.task.loader import load_task_config
 from dataclasses import dataclass, field, fields, asdict
 from typing import Dict, Optional, Sequence, List
-from configuration.constants import TASK_CONFIGS
 import multiprocessing as mp
-e = IPython.embed
 local_rank = None
 
-@dataclass
-class HyperArguments:
-    # ############## model  ################
-    is_pretrained: bool=field(default=True)
-    device: str = 'cuda'
-    
-    model_name: str = 'diffusion_policy'
-    model_name_or_path: str = "/inspire/hdd/project/robot-action/wangzheng-240308120196/DexVLA-Framework/ckpt/diffusion_policy_transfer_cube_top_zscore_official_aug"
-    norm_path: str = ''
-    chunk_size: int = field(default=50)
-    save_dir: str = 'results/dp_aloha_transer-official-ema-freq50-dnoise10-aug'
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_transfer_cube_scripted'
-    dataset_dir: str = ""
-    ################ simulator #############
-    # env_name: str = field(default='libero')
-    # task: str = field(default="libero_object_1")
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_object/h5v2'
-    
-    env_name: str = field(default='aloha')
-    task: str = field(default="sim_transfer_cube_scripted")
-    # dataset_dir: str = '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_human'
-    fps: int = 50
-    num_rollout: int = 4
-    num_envs: int = 2
-    max_timesteps: int = 400
-    image_size: str = '(640, 480)' # (width, height)
-    
-    ctrl_space: str = 'joint'
-    ctrl_type: str = 'abs'
-    camera_ids: str = '[0]'
-    
-    #  ############ data ###################
-    image_size_primary: str = "(640,480)"  # image size of non-wrist camera
-    image_size_wrist: str = "(640,480)" # image size of wrist camera
-
-    use_spawn: bool = False
-
-  
-#  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<parameters>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Removed HyperArguments dataclass - using simple argparse instead
 
 def parse_param():
-    global local_rank
-    # 用HFParser来传递参数，定义在上边的dataclass里
-    parser = transformers.HfArgumentParser((HyperArguments,))
-    args, unknown_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
-    print(unknown_args)
-    print(args)
-    extra_args = {}
-    for arg in unknown_args:
-        if arg.startswith("--"):
-            key = arg[2:]  # 去掉 '--' 前缀
-            if "=" in key:  key, value = key.split('=', 1)
-            else: value = True  # 如果没有指定值（如 --flag），默认设置为 True
-            extra_args[key] = value
-    model_args = {}
-    # 动态将 `extra_args` 注入到 args 对象中
-    for key, value in extra_args.items():
-        try:
-            value = _convert_to_type(value)
-            if key.startswith('model.'): 
-                model_args[key[6:]] = value # 动态获取自定义的model_args, i.e.，以model.为起始的字符串
-            else:
-                setattr(args, key, value) # 设置非模型相关的参数为args的属性
-        except ValueError as e:
-            print(f"Warning: {e}")
-    args.model_args = model_args
+    """
+    Parse command line arguments using simple argparse.
+    
+    Returns:
+        args: Parsed arguments namespace
+    """
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Evaluate a policy model')
+    parser.add_argument('--output_dir', type=str, default='results/dp_aloha_transer-official-ema-freq50-dnoise10-aug',
+                    help='Directory to save results')
+    # Model arguments
+    parser.add_argument('--is_pretrained', action='store_true', default=True,
+                       help='Whether to use pretrained model')
+    parser.add_argument('--device', type=str, default='cuda',
+                       help='Device to use for evaluation')
+    # Direct checkpoint loading
+    parser.add_argument('--model_name_or_path', type=str, 
+                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
+                       help='Path to the model checkpoint (directory or specific checkpoint)')
+    parser.add_argument('--dataset_dir', type=str, default='',
+                       help='Dataset directory')
+    # Simulator arguments
+    parser.add_argument('--env', type=str, default='aloha',
+                       help='Env config (name under configs/env or absolute path to yaml)')
+    # task/max_timesteps come from env config; override via --env.task / --env.max_timesteps if needed
+    parser.add_argument('--fps', type=int, default=50,
+                       help='Frames per second')
+    parser.add_argument('--num_rollout', type=int, default=4,
+                       help='Number of rollouts')
+    parser.add_argument('--num_envs', type=int, default=2,
+                       help='Number of environments')
+    parser.add_argument('--use_spawn', action='store_true',
+                       help='Use spawn method for multiprocessing')
+    # Model parameters (will be loaded from checkpoint config if not provided)
+    parser.add_argument('--chunk_size', type=int, default=64,
+                       help='Actual chunk size for policy that will truncate each raw chunk')
+    # Parse arguments
+    args, unknown = parser.parse_known_args()
+    # keep unknown tokens for env overrides (e.g., --env.task)
+    args._unknown = unknown
     return args
 
 if __name__=='__main__':
     set_seed(0)
     args = parse_param()
     if args.use_spawn: mp.set_start_method('spawn', force=True)
-
+    # For evaluation, parameters will be loaded from saved model config
+    # No need to load task config parameters
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
-    # load policy
-    model_module = importlib.import_module(f"vla.{args.model_name}") 
-    assert hasattr(model_module, 'load_model'), "model_name must provide API named `load_model` that returns dict like '\{'model':...\}'"
-    model_components = model_module.load_model(args) # load_model是模型模块必须实现的接口
+    
+    # Load policy directly from checkpoint
+    print(f"Loading model from checkpoint: {args.model_name_or_path}")
+    from policy.direct_loader import load_model_from_checkpoint
+    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model']
+    config = model_components.get('config', None)
+    if config:
+        print(f"Loaded config from checkpoint: {type(config).__name__}")
     policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'], state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
-    # load env
-    env_module = importlib.import_module(f"benchmark.{args.env_name}") 
-    if not hasattr(env_module, 'create_env'): raise AttributeError(f"env {args.env_name} has no 'create_env'")
-    def env_fn(config, env_handler):
+    # load env via YAML config
+    from configs.loader import ConfigLoader
+    cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, '_unknown', []))
+    env_cfg, env_cfg_path = cfg_loader.load_env(args.env)
+    # sync derived values from env config
+    if hasattr(env_cfg, 'task'):
+        args.task = env_cfg.task
+    if hasattr(env_cfg, 'max_timesteps'):
+        args.max_timesteps = env_cfg.max_timesteps
+    env_module = importlib.import_module(f"benchmark.{env_cfg.type}")
+    if not hasattr(env_module, 'create_env'): raise AttributeError(f"env {env_cfg.type} has no 'create_env'")
+    def env_fn(env_config, env_handler):
         def create_env():
-            return env_handler(config)
+            return env_handler(env_config)
         return create_env
 
     all_eval_results = []
@@ -125,14 +110,14 @@ if __name__=='__main__':
     for i in tqdm(range(args.num_rollout//args.num_envs), total=num_iters):
         num_envs = args.num_envs if i<num_iters-1 else args.num_rollout-i*args.num_envs
         # init video recorder
-        if args.save_dir!='':
-            video_dir = os.path.join(args.save_dir, args.env_name, 'video')
+        if args.output_dir!='':
+            video_dir = os.path.join(args.output_dir, env_cfg.type, 'video')
             os.makedirs(video_dir, exist_ok=True)
             video_path = os.path.join(video_dir, f"{args.task}_roll{i*args.num_envs}_{i*args.num_envs+num_envs}.mp4") 
             video_writer = imageio.get_writer(video_path, fps=args.fps)
         else:
             video_writer = None
-        env_fns = [env_fn(args, env_module.create_env) for _ in range(num_envs)]
+        env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
         env = SubprocVectorEnv(env_fns)
         # evaluate
         model.eval()
@@ -149,8 +134,8 @@ if __name__=='__main__':
     eval_result['success_rate'] = 1.0*eval_result['total_success']/eval_result['total']    
     eval_result['horizon_success']/=eval_result['total_success']
     # save result
-    if args.save_dir!='':
-        env_res_dir = os.path.join(args.save_dir, args.env_name)
+    if args.output_dir!='':
+        env_res_dir = os.path.join(args.output_dir, env_cfg.type)
         os.makedirs(env_res_dir, exist_ok=True)
         env_res_file = os.path.join(env_res_dir, f'{args.task}.json')
         # eval_result = {k:v.astype(np.float32) if isinstance(v, np.ndarray) else v for k,v in eval_result.items()}

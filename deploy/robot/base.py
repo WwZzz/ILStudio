@@ -97,12 +97,14 @@ class BaseRobot(AbstractRobotInterface):
         """Convert the observations from the robot to MetaObs"""
         return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))
 
-def make_robot(robot_cfg: Dict, args):
+def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
     """
     Factory function to create a robot instance from a config dictionary.
 
     Args:
         robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
+        args: Command line arguments (not used by robots).
+        max_connect_retry (int): Maximum number of connection retries. Defaults to 5.
     """
     full_path = robot_cfg['target']
     module_path, class_name = full_path.rsplit('.', 1)
@@ -110,17 +112,16 @@ def make_robot(robot_cfg: Dict, args):
     RobotCls = getattr(module, class_name)
     print(f"Creating robot: {full_path}")
 
-    # .get() is used to safely access params, which might not exist
-    robot_config = robot_cfg.get('config', {})
+    # Create a copy of robot_cfg without the 'target' key for passing as kwargs
+    robot_kwargs = {k: v for k, v in robot_cfg.items() if k != 'target'}
 
-    robot = RobotCls(extra_args=args, **robot_config)
+    robot = RobotCls(**robot_kwargs)
     # connect to robot
     retry_counts = 1
-    MAX_RETRY = 5
     while not robot.connect():
         print(f"Retrying for {retry_counts} time...")
         retry_counts += 1
-        if retry_counts>MAX_RETRY:
+        if retry_counts > max_connect_retry:
             exit(0)
         time.sleep(1)
     return robot

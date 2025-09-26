@@ -33,7 +33,7 @@ Observation space: {"qpos": Concat[ left_arm_qpos (6),         # absolute joint 
                                     right_gripper_qvel (1)]     # normalized gripper velocity (pos: opening, neg: closing)
                     "images": {"main": (480x640x3)}        # h, w, c, dtype='uint8'
 """
-from numpy.core.tests.test_mem_overlap import shape
+# Removed problematic numpy import that causes compatibility issues
 from benchmark.base import MetaEnv, MetaAction, MetaObs, MetaPolicy
 from .constants import SIM_TASK_CONFIGS
 from .ee_sim_env import make_ee_sim_env
@@ -69,17 +69,22 @@ def create_env(config):
     return AlohaSimEnv(config)
 
 class AlohaSimEnv(MetaEnv):
-    def __init__(self, config,  *args):
-        # 初始化env
+    def __init__(self, config, *args):
+        # 初始化env，仅从 config 读取参数
         self.config = config
-        self.ctrl_space= 'joint'
-        self.ctrl_type = 'abs'
-        self.camera_ids = self.config.camera_ids
-        image_size_primary = eval(self.config.image_size_primary)
-        width, height = image_size_primary if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
+        self.ctrl_space = getattr(self.config, 'ctrl_space', 'joint')
+        self.ctrl_type = getattr(self.config, 'ctrl_type', 'abs')
+        self.camera_ids = getattr(self.config, 'camera_ids', [0])
+        # 统一使用 image_size；同时用于 primary 与 wrist
+        image_size = getattr(self.config, 'image_size', [640, 480])
+        if isinstance(image_size, int):
+            width, height = image_size, image_size
+        elif isinstance(image_size, (list, tuple)):
+            # assume [w, h] or (w, h)
+            width, height = image_size
+        else:
+            raise ValueError("image_size should be list [width, height] or int")
         self.image_size_primary = (width, height)
-        image_size_wrist = eval(self.config.image_size_wrist)
-        width, height = image_size_wrist if isinstance(image_size_primary, tuple) else (image_size_primary, image_size_primary)
         self.image_size_wrist = (width, height)
         env = self.create_env()
         super().__init__(env)

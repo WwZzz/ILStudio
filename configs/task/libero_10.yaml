@@ -1,0 +1,5 @@
+dataset_dir:
+  - "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero/libero_10/h5"
+episode_len: 400
+camera_names:
+  - primary

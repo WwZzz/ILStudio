@@ -1,0 +1,7 @@
+type: libero
+task: libero_object_10
+max_timesteps: 400
+ctrl_space: ee
+image_size: [480, 640]
+camera_ids: [0, 1]
+

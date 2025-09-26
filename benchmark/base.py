@@ -2,6 +2,7 @@ import numpy as np
 from dataclasses import dataclass, field, fields, asdict
 from collections import deque
 import torch
+from .utils import resize_with_pad
 
 @dataclass
 class MetaAction:
@@ -83,7 +84,7 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, chunk_size:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
+    def __init__(self, policy, chunk_size:int, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta', img_size=None):
         self.policy = policy
         self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
@@ -91,6 +92,7 @@ class MetaPolicy:
         self.action_queue = deque(maxlen=chunk_size)
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
+        self.img_size = img_size
     
     def meta2obs(self, mobs: MetaObs):
         # convert MetaObs into policy-specific obs
@@ -114,9 +116,12 @@ class MetaPolicy:
 
     def inference(self, mobs: MetaObs):
         normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
-        # 转换MetaObs
+        # try resize image
+        if self.img_size is not None:
+            normed_mobs.image = resize_with_pad(normed_mobs.image, self.img_size[0], self.img_size[1])
+        # convert MetaObs to policy-specific obs
         policy_obs = self.meta2obs(normed_mobs)
-        # 推理动作
+        # inference action
         action_chunk = self.policy.select_action(policy_obs)
         # (B, chunk_size, action_dim)
         macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
@@ -126,7 +131,7 @@ class MetaPolicy:
         ac_dim = action_chunk.shape[-1]
         if is_chunked:
             macts.action = action_chunk.reshape(-1, ac_dim)
-        # 反归一化动作
+        # denormalize action
         macts = self.action_normalizer.denormalize_metaact(macts)
         if is_chunked:
             macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
@@ -137,13 +142,13 @@ class MetaPolicy:
         return mact_list
 
     def select_action(self, mobs: MetaObs, t:int, return_all=False):
-        # Normalzing Obs and Actions
+        # normalizing Obs and Actions
         if t % self.chunk_size == 0 or len(self.action_queue)==0:
             mact_list = self.inference(mobs)
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
             self.action_queue.extend(mact_list)
-        # 从队列里拿动作
+        # get action from queue
         if return_all:
             all_macts = []
             while len(self.action_queue) > 0:

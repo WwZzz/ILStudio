@@ -1,0 +1,19 @@
+target: deploy.teleoperator.tk_slider.SliderTeleop
+
+# Controller settings
+shm_name: "ilstd_teleop_controller"
+action_dim: 9
+action_dtype: "float64"
+freq: 100.0
+
+# Device-specific settings
+slider_ranges:
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [-2.0, 2.0]
+  - [0.0, 0.04]   # Example for gripper
+  - [0.0, 0.04]   # Example for gripper

@@ -19,7 +19,7 @@ class AbstractActionManager(ABC):
     def put(self, chunk: np.ndarray, timestamp: float=None):
         """Put action chunk into local cache"""
         pass
-    
+
     @abstractmethod
     def get(self, timestamp: float=None):
         """Get one-step action from local cache"""
@@ -38,7 +38,7 @@ class BasicActionManager(AbstractActionManager):
         with self._lock:
             self._chunk_buffer = chunk
             self.current_step = 0
-    
+
     def get(self, timestamp: float=None):
         with self._lock:
             if self._chunk_buffer is None or self.current_step>=len(self._chunk_buffer):
@@ -46,13 +46,13 @@ class BasicActionManager(AbstractActionManager):
             action = self._chunk_buffer[self.current_step]
             self.current_step += 1
             return action
-        
+
 class OlderFirstManager(BasicActionManager):
     """Refuse newly coming chunks unless the last chunk ends x%"""
     def __init__(self, config):
         super().__init__(config)
         self.coef = getattr(config, 'manager_coef', 1.0)
-    
+
     def put(self, chunk, timestamp:float=None):
         if self._chunk_buffer is None:
             super().put(chunk, timestamp)
@@ -84,14 +84,14 @@ class TemporalAggManager(BasicActionManager):
                         chunk[idx]['action'] = (1.-self.coef) * chunk[idx]['action'] + self.coef*self._chunk_buffer[idx+prev_step]['action']
                 self._chunk_buffer = chunk
                 self.current_step = 0
-                    
+
 
 class TemporalOlderManager(TemporalAggManager):
     """Refuse newly coming chunks until the last chunk ends x%"""
     def __init__(self, config):
         super().__init__(config)
         self.older_coef = 0.75
-    
+
     def put(self, chunk, timestamp:float=None):
         if self._chunk_buffer is None:
             with self._lock:
@@ -108,8 +108,8 @@ class DelayFreeManager(BasicActionManager):
     def __init__(self, config):
         super().__init__(config)
         self.duration = getattr(config, 'manager_coef', 0.05)
-        
-    
+
+
     def put(self, chunk, timestamp:float=None):
         if self._chunk_buffer is None: 
             super().put(chunk, timestamp)
@@ -123,10 +123,3 @@ class DelayFreeManager(BasicActionManager):
                 with self._lock:
                     self._chunk_buffer = chunk
                     self.current_step = 0
-
-
-    
-                 
-    
-    
-        
