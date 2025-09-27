@@ -45,7 +45,21 @@ class ConfigLoader:
         return self.load_yaml_config('task', name_or_path)
 
     def load_policy(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
-        return self.load_yaml_config('policy', name_or_path)
+        cfg, path = self.load_yaml_config('policy', name_or_path)
+        
+        # Flatten model_args to top level for easier command line access
+        # This allows --policy.camera_names, --policy.chunk_size, etc.
+        if 'model_args' in cfg and isinstance(cfg['model_args'], dict):
+            model_args = cfg['model_args']
+            # Create a flattened copy while preserving the original model_args
+            flattened_cfg = cfg.copy()
+            for key, value in model_args.items():
+                # Only add to top level if not already present at top level
+                if key not in flattened_cfg:
+                    flattened_cfg[key] = value
+            cfg = flattened_cfg
+        
+        return cfg, path
 
     def load_robot(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         return self.load_yaml_config('robot', name_or_path)
@@ -95,40 +109,31 @@ class ConfigLoader:
             'use_prev_subtask': task_config.get('use_prev_subtask', False)
         }
 
+        # Extract model_args and pretrained_config
         model_args = policy_config.get('model_args', {})
         pretrained_config = policy_config.get('pretrained_config', {})
 
-        model_params = {
-            'lora_enable': model_args.get('lora_enable', False),
-            'lora_module': model_args.get('lora_module', 'all'),
-            'lora_task_type': model_args.get('lora_task_type', 'CAUSAL_LM'),
-            'lora_r': model_args.get('lora_r', 16),
-            'lora_alpha': model_args.get('lora_alpha', 32),
-            'lora_dropout': model_args.get('lora_dropout', 0.1),
-            'lora_weight_path': model_args.get('lora_weight_path', None),
-            'lora_bias': model_args.get('lora_bias', 'none'),
-            'lora_lr': model_args.get('lora_lr', 0.0002),
-            'use_quantization': model_args.get('use_quantization', False),
-            'bits': model_args.get('bits', 4),
-            'double_quant': model_args.get('double_quant', True),
-            'quant_type': model_args.get('quant_type', 'nf4'),
-            'model_name_or_path': pretrained_config.get('model_name_or_path', model_args.get('model_name_or_path', None)),
-            'is_pretrained': pretrained_config.get('is_pretrained', model_args.get('is_pretrained', False)),
-            'using_ema': model_args.get('using_ema', False),
-            'cache_dir': model_args.get('cache_dir', None),
-            'flash_attn': model_args.get('flash_attn', False),
-            'freeze_vision_tower': model_args.get('freeze_vision_tower', False),
-            'freeze_backbone': model_args.get('freeze_backbone', False),
-            'tune_mm_mlp_adapter': model_args.get('tune_mm_mlp_adapter', False),
-            'llm_loss_weight': model_args.get('llm_loss_weight', 1.0),
-            'load_pretrain': model_args.get('load_pretrain', False),
-            'lazy_preprocess': model_args.get('lazy_preprocess', False),
-            'select_seg_token_mask': model_args.get('select_seg_token_mask', False),
-            'is_multimodal': model_args.get('is_multimodal', True),
-            'image_aspect_ratio': model_args.get('image_aspect_ratio', 'square'),
-            'skip_mirrored_data': model_args.get('skip_mirrored_data', False),
-            'history_images_length': model_args.get('history_images_length', 1),
-        }
+        # Dynamically extract all model parameters from policy config
+        # This includes both model_args and any flattened parameters from command line overrides
+        model_params = {}
+        
+        # First add pretrained_config parameters
+        if pretrained_config:
+            model_params.update(pretrained_config)
+        
+        # Then add all model_args parameters
+        if model_args:
+            model_params.update(model_args)
+        
+        # Finally add any top-level parameters that were flattened (from command line overrides)
+        # Skip known non-model parameters like 'name', 'module_path', 'model_args', 'pretrained_config'
+        reserved_keys = {'name', 'module_path', 'model_args', 'pretrained_config', 'config_class', 'model_class', 'data_processor', 'data_collator', 'trainer_class'}
+        for key, value in policy_config.items():
+            if key not in reserved_keys and key not in model_params:
+                model_params[key] = value
+            elif key not in reserved_keys and key in model_params:
+                # Top-level overrides win (command line overrides)
+                model_params[key] = value
 
         training_params = {
             'preload_data': training_config.preload_data,
@@ -153,17 +158,33 @@ class ConfigLoader:
         }
 
         cfg_params = policy_config.get('config_params', {}) if isinstance(policy_config, dict) else {}
-        model_args = policy_config.get('model_args', {}) if isinstance(policy_config, dict) else {}
-        preferred_chunk_size = cfg_params.get('chunk_size', model_args.get('chunk_size', task_config.get('chunk_size', 16)))
-        preferred_action_norm = cfg_params.get('action_normalize', model_args.get('action_normalize', task_config.get('action_normalize', 'minmax')))
-        preferred_state_norm = cfg_params.get('state_normalize', model_args.get('state_normalize', task_config.get('state_normalize', 'minmax')))
+        # Check top-level first (command line overrides), then model_args, then config_params, then task_config
+        preferred_chunk_size = (policy_config.get('chunk_size') or 
+                              model_args.get('chunk_size') or 
+                              cfg_params.get('chunk_size') or 
+                              task_config.get('chunk_size', 16))
+        preferred_action_norm = (policy_config.get('action_normalize') or 
+                               model_args.get('action_normalize') or 
+                               cfg_params.get('action_normalize') or 
+                               task_config.get('action_normalize', 'minmax'))
+        preferred_state_norm = (policy_config.get('state_normalize') or 
+                              model_args.get('state_normalize') or 
+                              cfg_params.get('state_normalize') or 
+                              task_config.get('state_normalize', 'minmax'))
+        preferred_camera_names = (policy_config.get('camera_names') or 
+                                model_args.get('camera_names') or 
+                                task_config.get('camera_names', ['primary']))
 
         all_params = {**task_params, **model_params, **training_params}
         all_params.update({
             'chunk_size': preferred_chunk_size,
             'action_normalize': preferred_action_norm,
             'state_normalize': preferred_state_norm,
+            'camera_names': preferred_camera_names,  # Allow policy to override camera_names
         })
+        
+        # Remove None values to avoid overriding existing values with None
+        all_params = {k: v for k, v in all_params.items() if v is not None}
 
         if args is not None:
             for key, value in all_params.items():

@@ -276,8 +276,23 @@ class PolicyLoader:
         if not hasattr(model_module, 'load_model'):
             raise AttributeError(f"Module {policy_config.module_path} must provide 'load_model' function")
         
-        # Call the module's load_model function
-        model_components = model_module.load_model(args)
+        # Create a copy of args and apply model_args from YAML config
+        import copy
+        enhanced_args = copy.deepcopy(args)
+        
+        # Apply model_args from YAML configuration
+        if policy_config.model_args:
+            for key, value in policy_config.model_args.items():
+                # Only set if the attribute doesn't exist or is None
+                # This allows command line arguments to override YAML config
+                if not hasattr(enhanced_args, key) or getattr(enhanced_args, key) is None:
+                    setattr(enhanced_args, key, value)
+        
+        # Also set model_args as an attribute for backward compatibility
+        setattr(enhanced_args, 'model_args', policy_config.model_args or {})
+        
+        # Call the module's load_model function with enhanced args
+        model_components = model_module.load_model(enhanced_args)
         
         return model_components
     
