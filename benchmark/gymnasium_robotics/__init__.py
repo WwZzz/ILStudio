@@ -19,7 +19,7 @@ class GymRoboticsEnv(MetaEnv):
         self.use_camera = getattr(self.config, 'use_camera', True)
         self.render_mode = getattr(self.config, 'render_mode', 'rgb_array')
         self.use_dense_reward = getattr(self.config, 'use_dense_reward', False)
-        self.raw_lang = self.config.task[5:] # remove 'Panda' from task name
+        self.raw_lang = self.config.task
         env = self.create_env()
         super().__init__(env)
     
@@ -30,13 +30,13 @@ class GymRoboticsEnv(MetaEnv):
         
     def meta2act(self, maction: MetaAction):
         # MetaAct to action of libero
-        assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
-        assert maction['ctrl_type']==self.ctrl_type, "Action must be abs action for PandaGym"
+        # assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
+        # assert maction['ctrl_type']==self.ctrl_type, "Action must be abs action for PandaGym"
         actions = maction['action'] # (action_dim, )
         return actions
         
     def obs2meta(self, obs):
-        state = obs['observation']        
+        state = obs.astype(np.float32)    
         if self.use_camera:
             # PandaGym only has one camera view from env.render()
             image = self.env.render()
@@ -51,14 +51,17 @@ class GymRoboticsEnv(MetaEnv):
         return MetaObs(state=state, image=image, raw_lang=self.raw_lang)
 
     def step(self, *args, **kwargs):
-        observation, reward, terminated, truncated, info = super().step(*args, **kwargs)
-        done = bool(info['is_success'])
+        action = args[0]['action']
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        obs = self.obs2meta(observation)
+        done = info['success']
         info['terminated'] = terminated
         info['truncated'] = truncated
-        return observation, reward, done, info
+        return obs, reward, done, info
     
     def reset(self):
         pid = current_process().pid  # 获取当前进程 ID
         seed = (pid * 1000 + time.time_ns()) % (2**32)  # 基于时间戳生成种子
         np.random.seed(seed)
-        return super().reset()
+        obs = self.env.reset()
+        return self.obs2meta(obs[0])

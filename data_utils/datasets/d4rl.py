@@ -29,7 +29,7 @@ class D4RLDataset(EpisodicDataset):
     
     def initialize(self):
         import minari
-        datasets = [minari.load_dataset(di) for di in self.dataset_path_list]
+        datasets = [minari.load_dataset(di, download=True) for di in self.dataset_path_list]
         self._languages = [self.get_raw_lang(di) for di in self.dataset_path_list]
         all_episodes = []
         for dataset in datasets:

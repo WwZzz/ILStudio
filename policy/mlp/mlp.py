@@ -129,10 +129,12 @@ class MLPPolicy(PreTrainedModel):
         
         # Forward through MLP
         action_flat = self.mlp(input_tensor)
-        
         # Reshape to (batch_size, chunk_size, action_dim)
         batch_size = action_flat.shape[0]
         pred_action = action_flat.view(batch_size, self.config.chunk_size, self.config.action_dim)
+        if action is None:
+            # infer Phase
+            return {'action':pred_action}
         loss =  F.mse_loss(action, pred_action, reduction='none')
         # all_l1 = F.l1_loss(action, pred_action, reduction='none')
         loss = (loss * ~is_pad.unsqueeze(-1)).mean()
