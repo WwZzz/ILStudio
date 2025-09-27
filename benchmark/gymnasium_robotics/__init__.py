@@ -60,8 +60,5 @@ class GymRoboticsEnv(MetaEnv):
         return obs, reward, done, info
     
     def reset(self):
-        pid = current_process().pid  # 获取当前进程 ID
-        seed = (pid * 1000 + time.time_ns()) % (2**32)  # 基于时间戳生成种子
-        np.random.seed(seed)
         obs = self.env.reset()
         return self.obs2meta(obs[0])
