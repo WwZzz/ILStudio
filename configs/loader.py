@@ -171,9 +171,11 @@ class ConfigLoader:
                               model_args.get('state_normalize') or 
                               cfg_params.get('state_normalize') or 
                               task_config.get('state_normalize', 'minmax'))
-        preferred_camera_names = (policy_config.get('camera_names') or 
-                                model_args.get('camera_names') or 
-                                task_config.get('camera_names', ['primary']))
+        preferred_camera_names = policy_config.get('camera_names', None) 
+        if preferred_camera_names is None:
+            preferred_camera_names = model_args.get('camera_names', None) 
+            if preferred_camera_names is None:
+                preferred_camera_names =task_config.get('camera_names', [])
 
         all_params = {**task_params, **model_params, **training_params}
         all_params.update({
