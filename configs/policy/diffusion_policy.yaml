@@ -20,5 +20,4 @@ model_args:
   action_decoder_kwargs: {}
   use_pretrained_weights: true
   pretrained_model_path: null
-  # Image sizes will be set from task config
-  image_sizes: null
+  # Image size will be set from task config

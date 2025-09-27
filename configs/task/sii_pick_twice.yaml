@@ -11,8 +11,7 @@ ctrl_space: joint
 # Task-specific parameters that will override policy configs
 action_dim: 14
 state_dim: 14
-image_size_primary: "(256, 256)"
-image_size_wrist: "(256, 256)"
+image_size: [256, 256]
 action_normalize: "zscore"
 state_normalize: "zscore"
 chunk_size: 100

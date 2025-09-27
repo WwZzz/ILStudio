@@ -94,17 +94,25 @@ class ConfigLoader:
 
     # ===== Parameter merging (moved from parameter_merger.py) =====
     @staticmethod
-    def calculate_image_sizes(camera_names: list, image_size_primary: str, image_size_wrist: str) -> list:
-        return [image_size_primary if 'primary' in cam else image_size_wrist for cam in camera_names]
+    def calculate_image_sizes(camera_names: list, image_size: list) -> list:
+        """Calculate image sizes for each camera using unified image_size.
+        
+        Args:
+            camera_names: List of camera names
+            image_size: Unified image size as [width, height]
+            
+        Returns:
+            List of image sizes, one per camera (all the same now)
+        """
+        return [image_size for _ in camera_names]
 
     @staticmethod
     def merge_all_parameters(task_config: Dict[str, Any], policy_config: Dict[str, Any], training_config: Any, args: Optional[Any] = None) -> Dict[str, Any]:
         task_params = {
             'action_dim': task_config.get('action_dim', 7),
             'state_dim': task_config.get('state_dim', 7),
-            'camera_names': task_config.get('camera_names', []),
-            'image_size_primary': task_config.get('image_size_primary', '(256, 256)'),
-            'image_size_wrist': task_config.get('image_size_wrist', '(256, 256)'),
+            'camera_names': task_config.get('camera_names', ['primary']),
+            'image_size': task_config.get('image_size', [256, 256]),
             'use_reasoning': task_config.get('use_reasoning', False),
             'use_prev_subtask': task_config.get('use_prev_subtask', False)
         }
@@ -191,7 +199,8 @@ class ConfigLoader:
         if args is not None:
             for key, value in all_params.items():
                 setattr(args, key, value)
-        args.image_sizes = self.calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
+            # Generate image_sizes for backward compatibility with policies that still use it
+            args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
         return all_params
 
 
