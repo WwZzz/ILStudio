@@ -75,21 +75,15 @@ def main(args, training_args):
     # Merge all parameters using unified loader
     ConfigLoader.merge_all_parameters(task_config, policy_config, training_config, args)
     
-    # Calculate image sizes for backward compatibility
-    args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
-    
-    # Save policy metadata early (before training starts)
-    policy_metadata = {
-        'policy_module': policy_config['module_path'],
-        'policy_name': policy_config['name'],
-    }
+    # Save policy metadata to output dir
     metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
     with open(metadata_path, 'w') as f:
-        json.dump(policy_metadata, f, indent=2)
-    print(f"Saved policy metadata early to {metadata_path}")
+        json.dump({
+                'policy_module': policy_config['module_path'],
+                'policy_name': policy_config['name'],
+            }, f, indent=2)
     
-    # Load model - using new policy loader
-    # Load model - using new policy loader, pass task_config
+    # Load model 
     print(f"Loading policy config: {policy_cfg_path}")
     model_components = load_policy_model_for_training(policy_cfg_path, args, task_config)
     model = model_components['model']

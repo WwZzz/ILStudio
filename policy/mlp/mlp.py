@@ -21,7 +21,6 @@ class MLPPolicyConfig(PretrainedConfig):
         image_dim=None,  # Flattened image dimension (H*W*C)
         
         # Training parameters
-        learning_rate=1e-3,
         chunk_size=1,  # For consistency with other policies
         
         **kwargs,
@@ -37,7 +36,6 @@ class MLPPolicyConfig(PretrainedConfig):
         self.dropout = dropout
         self.use_camera = use_camera
         self.image_dim = image_dim
-        self.learning_rate = learning_rate
         self.chunk_size = chunk_size
         
         # Calculate input dimension
@@ -124,7 +122,7 @@ class MLPPolicy(PreTrainedModel):
         if self.config.use_camera and image is not None:
             # Flatten image and concatenate with state
             batch_size = state.shape[0]
-            image_flat = image.view(batch_size, -1)  # Flatten image
+            image_flat = image.reshape(batch_size, -1)  # Flatten image
             input_tensor = torch.cat([state, image_flat], dim=-1)
         else:
             input_tensor = state

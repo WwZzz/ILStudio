@@ -191,6 +191,7 @@ class ConfigLoader:
         if args is not None:
             for key, value in all_params.items():
                 setattr(args, key, value)
+        args.image_sizes = self.calculate_image_sizes(args.camera_names, args.image_size_primary, args.image_size_wrist)
         return all_params
 
 

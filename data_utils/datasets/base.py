@@ -22,8 +22,6 @@ import copy
 from concurrent.futures import ThreadPoolExecutor
 import warnings
 
-
-
 class EpisodicDataset(torch.utils.data.Dataset):
     """
     Base class for episodic datasets.

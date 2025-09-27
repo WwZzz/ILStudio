@@ -49,7 +49,6 @@ def load_model(args):
             dropout=getattr(args, 'dropout', 0.0),
             use_camera=getattr(args, 'use_camera', False),
             image_dim=image_dim,
-            learning_rate=getattr(args, 'learning_rate', 1e-3),
             chunk_size=getattr(args, 'chunk_size', 1),
             **model_args
         )

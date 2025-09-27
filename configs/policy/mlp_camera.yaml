@@ -19,5 +19,4 @@ model_args:
   use_camera: true       # Use both state and image modality
   image_dim: null        # Flattened image dimension (calculated automatically)
   # Training parameters
-  learning_rate: 5e-4    # Lower learning rate for larger model
-  chunk_size: 1          # Chunk size (number of action steps to predict)
+  chunk_size: 16          # Chunk size (number of action steps to predict)

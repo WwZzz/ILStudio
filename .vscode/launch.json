@@ -11,11 +11,19 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--policy", "dp_d4rl",
-                "--task", "d4rl_debug",
-                "--output_dir", "ckpt/d4rl_debug8",
+                "--policy", "mlp_camera",
+                "--task", "transfer_cube_top",
+                "--output_dir", "ckpt/mlp_debug",
                 "--training_config", "mlp",
+                "--training.per_device_train_batch_size", "8",
+                "--training.dataloader_num_workers", "1"
             ],
+            // "args": [
+            //     "--policy", "dp_d4rl",
+            //     "--task", "d4rl_debug",
+            //     "--output_dir", "ckpt/d4rl_debug8",
+            //     "--training_config", "mlp",
+            // ],
             // "args": [
             //     "--robot_config",               "configs/robot/koch_follower.yaml",
             //     "--publish_rate",              "10",
