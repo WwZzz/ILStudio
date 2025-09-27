@@ -102,7 +102,7 @@ class ConfigLoader:
         task_params = {
             'action_dim': task_config.get('action_dim', 7),
             'state_dim': task_config.get('state_dim', 7),
-            'camera_names': task_config.get('camera_names', ['primary']),
+            'camera_names': task_config.get('camera_names', []),
             'image_size_primary': task_config.get('image_size_primary', '(256, 256)'),
             'image_size_wrist': task_config.get('image_size_wrist', '(256, 256)'),
             'use_reasoning': task_config.get('use_reasoning', False),
