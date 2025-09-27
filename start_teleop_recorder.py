@@ -42,7 +42,7 @@ def parse_param():
                        help='Recording frequency in Hz')
     parser.add_argument('--observation_frequency', "-ofreq", type=int, default=50,
                     help='Recording frequency in Hz')
-    parser.add_argument('--save_dir', type=str, default='data/teleop_recordings',
+    parser.add_argument('--output_dir', type=str, default='data/teleop_recordings',
                        help='Directory to save recorded episodes')
     parser.add_argument('--start_idx', type=int, default=0,
                        help='Starting episode index')
@@ -53,10 +53,10 @@ def parse_param():
     args.unknown_overrides = cfg_loader._overrides
     return args
 
-def save_episode_to_hdf5(save_dir, episode_id, observations, actions):
+def save_episode_to_hdf5(output_dir, episode_id, observations, actions):
     """Save episode data to HDF5 file."""
-    os.makedirs(save_dir, exist_ok=True)
-    file_path = os.path.join(save_dir, f'episode_{episode_id:04d}.hdf5')
+    os.makedirs(output_dir, exist_ok=True)
+    file_path = os.path.join(output_dir, f'episode_{episode_id:04d}.hdf5')
     
     def write_group(group, data_list, key_prefix=None):
         # data_list: list of dict or value
@@ -305,13 +305,13 @@ class SimpleMultiThreadTeleopRecorder:
         if observations:
             if hasattr(self.robot, 'save_episode'):
                 self.robot.save_episode(
-                    os.path.join(self.args.save_dir, f'episode_{self.episode_count:04d}.hdf5'), 
+                    os.path.join(self.args.output_dir, f'episode_{self.episode_count:04d}.hdf5'), 
                     observations, 
                     actions
                 )
             else:
-                save_episode_to_hdf5(self.args.save_dir, self.episode_count, observations, actions)
-            print(f"Episode {self.episode_count} was successfully saved to {self.args.save_dir}.")
+                save_episode_to_hdf5(self.args.output_dir, self.episode_count, observations, actions)
+            print(f"Episode {self.episode_count} was successfully saved to {self.args.output_dir}.")
             self.episode_count += 1
         else:
             print("No data collected, skipping save.")
