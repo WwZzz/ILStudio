@@ -131,9 +131,9 @@ class DirectPolicyLoader:
         if 'camera_names' in config:
             args.camera_names = config['camera_names']
         if 'image_size_primary' in config:
-            args.image_size_primary = config['image_size_primary']
+            args.image_size = config['image_size_primary']
         if 'image_size_wrist' in config:
-            args.image_size_wrist = config['image_size_wrist']
+            args.image_size = config['image_size_wrist']
         if 'action_dim' in config:
             args.action_dim = config['action_dim']
         if 'state_dim' in config:

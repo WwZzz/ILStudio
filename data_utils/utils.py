@@ -190,7 +190,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         image_dict = dict()
         for cam_name in self.camera_names:
             image_dict[cam_name] = root[f'/observations/image/{cam_name}'][start_ts]
-            img_size = self.data_args.image_size_primary if 'primary' in cam_name else self.data_args.image_size_wrist
+            img_size = self.data_args.image_size if 'primary' in cam_name else self.data_args.image_size
             image_dict[cam_name] = cv2.resize(image_dict[cam_name], eval(img_size))
             
         # 加载推理信息
@@ -244,7 +244,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 image_dict = dict()
                 for cam_name in self.camera_names:
                     image_dict[cam_name] = root[f'/observations/image/{cam_name}'][()]
-                    # img_size = self.data_args.image_size_primary if 'primary' in cam_name else self.data_args.image_size_wrist
+                    # img_size = self.data_args.image_size if 'primary' in cam_name else self.data_args.image_size
                     # image_dict[cam_name] = cv2.resize(image_dict[cam_name], eval(img_size))
                 data_dict['image'] = image_dict
             reasoning = ""

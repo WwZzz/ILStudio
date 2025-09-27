@@ -59,7 +59,7 @@ class KochDataset(EpisodicDataset):
             raise NotImplementedError("relative action was not implemented")
         # Load images
         image_dict = dict(
-            primary=cv2.resize(root[f'/observations/front_camera'][start_ts], eval(self.data_args.image_size_primary)),
+            primary=cv2.resize(root[f'/observations/front_camera'][start_ts], self.data_args.image_size),
         )
         # Load reasoning information
         reasoning = ""
@@ -108,7 +108,7 @@ class KochDataset(EpisodicDataset):
                 img_bytes = root[f'/observations/front_camera'][()]
                 image_dict.update(
                     dict(
-                        primary=np.stack([cv2.resize(img_byte, eval(self.data_args.image_size_primary)) for img_byte in img_bytes]),
+                        primary=np.stack([cv2.resize(img_byte, self.data_args.image_size) for img_byte in img_bytes]),
                     )
                 )
             if len(image_dict) > 0: 

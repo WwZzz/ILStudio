@@ -31,10 +31,11 @@ def load_model(args):
         if getattr(args, 'use_camera', False):
             # Calculate flattened image dimension
             # This should be set based on the actual image dimensions from the environment
-            image_shapes = getattr(args, 'image_shapes', None)
+            image_shapes = getattr(args, 'image_sizes', None)
+            image_channels = getattr(args, 'image_channels', 3)
             if image_shapes:
                 # Sum up all camera image dimensions
-                image_dim = sum(np.prod(shape) for shape in image_shapes)
+                image_dim = int(sum(np.prod(shape) for shape in image_shapes)) * image_channels
             else:
                 # Default assumption for debugging (can be overridden)
                 image_dim = 3 * 224 * 224  # Default RGB image

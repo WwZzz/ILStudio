@@ -60,15 +60,17 @@ class AlohaSimDataset(EpisodicDataset):
         elif self.ctrl_type == 'rel':
             raise NotImplementedError("relative action was not implemented")
         # Load images
-        image_dict = dict(primary=cv2.resize(root['/observations/images/top'][start_ts], eval(self.data_args.image_size_primary)))
-        if '/observations/images/left_wrist' in root:
-            image_dict.update(
-                dict(wrist_left=cv2.resize(root['/observations/images/left_wrist'][start_ts], eval(self.data_args.image_size_wrist)))
-            )
-        if '/observations/images/right_wrist' in root:
-            image_dict.update(
-                dict(wrist_right=cv2.resize(root['/observations/images/right_wrist'][start_ts], eval(self.data_args.image_size_wrist)))
-            )
+        image_dict = dict(primary=cv2.resize(root['/observations/images/top'][start_ts], self.data_args.image_size))
+        if 'left_wrist' in self.data_args.camera_names:
+            if '/observations/images/left_wrist' in root:
+                image_dict.update(
+                    dict(wrist_left=cv2.resize(root['/observations/images/left_wrist'][start_ts], self.data_args.image_size))
+                )
+        if 'right_wrist' in self.data_args.camera_names:
+            if '/observations/images/right_wrist' in root:
+                image_dict.update(
+                    dict(wrist_right=cv2.resize(root['/observations/images/right_wrist'][start_ts], self.data_args.image_size))
+                )
         # Load reasoning information
         reasoning = ""
         if self.loaded_data is None: 
@@ -108,13 +110,13 @@ class AlohaSimDataset(EpisodicDataset):
                     raise NotImplementedError("relative action was not implemented")
             if 'image' in feats or len(feats) == 0:  # Load images
                 all_images = root[f'/observations/images/top'][()]
-                image_dict = dict(primary=[cv2.resize(all_images[i], eval(self.data_args.image_size_primary)) for i in range(all_images.shape[0])])
+                image_dict = dict(primary=[cv2.resize(all_images[i], self.data_args.image_size) for i in range(all_images.shape[0])])
                 data_dict['image'] = image_dict
             if 'image' in feats or 'image_wrist' in feats or len(feats) == 0:
                 all_left_images = root[f'/observations/images/left_wrist'][()]
-                left_dict = dict(wrist_left=[cv2.resize(all_left_images[i], eval(self.data_args.image_size_wrist)) for i in range(all_left_images.shape[0])])
+                left_dict = dict(wrist_left=[cv2.resize(all_left_images[i], self.data_args.image_size) for i in range(all_left_images.shape[0])])
                 all_right_images = root[f'/observations/images/right_wrist'][()]
-                right_dict = dict(wrist_right=[cv2.resize(all_right_images[i], eval(self.data_args.image_size_wrist)) for i in range(all_right_images.shape[0])])
+                right_dict = dict(wrist_right=[cv2.resize(all_right_images[i], self.data_args.image_size) for i in range(all_right_images.shape[0])])
                 data_dict['image'].update(left_dict)
                 data_dict['image'].update(right_dict)
         return data_dict

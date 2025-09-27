@@ -60,7 +60,7 @@ class DataTransform:
     
 
 # def get_data_processor(args, model_components):
-#     img_size = eval(args.image_size_primary)
+#     img_size = eval(args.image_size)
 #     return DataTransform(img_size, 0.95)
 
 def StateToQposProcessor(dataset, args, model_components):

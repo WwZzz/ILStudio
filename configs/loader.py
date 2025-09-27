@@ -104,7 +104,7 @@ class ConfigLoader:
         Returns:
             List of image sizes, one per camera (all the same now)
         """
-        return [image_size for _ in camera_names]
+        return [[int(i) for i in image_size] for _ in camera_names]
 
     @staticmethod
     def merge_all_parameters(task_config: Dict[str, Any], policy_config: Dict[str, Any], training_config: Any, args: Optional[Any] = None) -> Dict[str, Any]:
