@@ -60,17 +60,17 @@ def main(args, training_args):
     """
     # Init task config
     set_seed(1)
-    # Resolve and load task config via ConfigLoader (with overrides)
+    
+    # Use the existing ConfigLoader instance that was created in parse_param()
+    # Don't create new instances - reuse the one with correct overrides
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
+    
+    # Load all configurations using the same loader
     task_config, task_cfg_path = cfg_loader.load_task(args.task)
-    
-    # Load configurations
-    
-    training_config = load_training_config(getattr(args, 'training_cfg_path', args.training_config))
-    
-    # Load policy config
-    cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
     policy_config, policy_cfg_path = cfg_loader.load_policy(args.policy)
+    
+    # Load training config using the same loader instead of separate function
+    training_config, _, training_cfg_path = cfg_loader.load_training(getattr(args, 'training_cfg_path', args.training_config), hyper_args=args)
     
     # Merge all parameters using unified loader
     ConfigLoader.merge_all_parameters(task_config, policy_config, training_config, args)

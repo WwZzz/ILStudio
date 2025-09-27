@@ -83,7 +83,11 @@ class PolicyLoader:
             raise ImportError(f"Failed to import module {policy_config.module_path}: {e}")
     
     def create_config_instance(self, policy_config: PolicyConfig, args=None, task_config=None, phase='training'):
-        """Create a config instance using parameters from YAML, task config, and args."""
+        """Create a config instance using parameters from args.
+        
+        NOTE: This method is deprecated. Parameter processing should be done by ConfigLoader.
+        This method is kept only for backward compatibility.
+        """
         # Load the module to get access to the config class
         model_module = self.load_model_module(policy_config)
         
@@ -97,152 +101,27 @@ class PolicyLoader:
         
         config_class = getattr(model_module, policy_config.config_class)
         
-        # Prepare parameters for config initialization
+        # ConfigLoader should have already processed all parameters and put them in args
+        # Extract config parameters from args
         config_kwargs = {}
         
-        # Prefer model_args as the single source of truth
-        if policy_config.model_args:
-            config_kwargs.update(policy_config.model_args)
-        # Backward compatibility: also merge config_params if present
-        if policy_config.config_params:
-            config_kwargs.update(policy_config.config_params)
-        
-        # For training phase: Override with task config parameters if provided
-        if phase == 'training' and task_config:
-            # Map task config parameters to config parameters
-            task_mapping = {
-                'action_dim': 'action_dim',
-                'state_dim': 'state_dim',
-                'chunk_size': 'chunk_size',
-                'camera_names': 'camera_names',
-                'image_size_primary': 'image_size_primary',
-                'image_size_wrist': 'image_size_wrist',
-                'action_normalize': 'action_normalize',
-                'state_normalize': 'state_normalize'
-            }
-            
-            for task_name, config_name in task_mapping.items():
-                if task_name in task_config:
-                    value = task_config[task_name]
-                    # Special handling for camera_names - convert string to list if needed
-                    if config_name == 'camera_names' and isinstance(value, str):
-                        import ast
-                        value = ast.literal_eval(value)
-                    config_kwargs[config_name] = value
-            
-            # Special handling for image_sizes - convert image_size_primary and image_size_wrist to image_sizes list
-            if 'image_size_primary' in task_config and 'image_size_wrist' in task_config and 'camera_names' in task_config:
-                image_sizes = []
-                for cam_name in task_config['camera_names']:
-                    if 'primary' in cam_name:
-                        image_sizes.append(task_config['image_size_primary'])
-                    else:
-                        image_sizes.append(task_config['image_size_wrist'])
-                config_kwargs['image_sizes'] = image_sizes
-            
-            # Special handling for prediction_horizon - map chunk_size to prediction_horizon
-            if 'chunk_size' in task_config:
-                config_kwargs['prediction_horizon'] = task_config['chunk_size']
-        
-        # For evaluation phase: Load from saved model config if available
-        elif phase == 'evaluation' and hasattr(args, 'model_name_or_path') and args.model_name_or_path:
-            saved_config_path = os.path.join(args.model_name_or_path, 'config.json')
-            if os.path.exists(saved_config_path):
-                try:
-                    import json
-                    with open(saved_config_path, 'r') as f:
-                        saved_config = json.load(f)
-                    
-                    # Map saved config parameters to config parameters
-                    saved_mapping = {
-                        'action_dim': 'action_dim',
-                        'state_dim': 'state_dim',
-                        'chunk_size': 'chunk_size',
-                        'camera_names': 'camera_names',
-                        'image_size_primary': 'image_size_primary',
-                        'image_size_wrist': 'image_size_wrist',
-                        'action_normalize': 'action_normalize',
-                        'state_normalize': 'state_normalize',
-                        'lr_backbone': 'lr_backbone',
-                        'kl_weight': 'kl_weight',
-                        'backbone': 'backbone',
-                        'hidden_dim': 'hidden_dim',
-                        'enc_layers': 'enc_layers',
-                        'dec_layers': 'dec_layers',
-                        'dim_feedforward': 'dim_feedforward',
-                        'dropout': 'dropout',
-                        'nheads': 'nheads',
-                        'pre_norm': 'pre_norm',
-                        'masks': 'masks',
-                        'dilation': 'dilation',
-                        'position_embedding': 'position_embedding'
-                    }
-                    
-                    for saved_name, config_name in saved_mapping.items():
-                        if saved_name in saved_config:
-                            value = saved_config[saved_name]
-                            # Special handling for camera_names - convert string to list if needed
-                            if config_name == 'camera_names' and isinstance(value, str):
-                                import ast
-                                value = ast.literal_eval(value)
-                            config_kwargs[config_name] = value
-                    
-                    # Also set parameters in args for backward compatibility
-                    eval_params = {
-                        'action_dim': saved_config.get('action_dim', 7),
-                        'state_dim': saved_config.get('state_dim', 7),
-                        'chunk_size': saved_config.get('chunk_size', 50),
-                        'camera_names': saved_config.get('camera_names', ['primary']),
-                        'image_size_primary': saved_config.get('image_size_primary', "(640, 480)"),
-                        'image_size_wrist': saved_config.get('image_size_wrist', "(640, 480)"),
-                        'action_normalize': saved_config.get('action_normalize', 'minmax'),
-                        'state_normalize': saved_config.get('state_normalize', 'minmax')
-                    }
-                    
-                    # Set evaluation parameters in args for backward compatibility
-                    for key, value in eval_params.items():
-                        setattr(args, key, value)
-                    
-                    print(f"Loaded parameters from saved config: {saved_config_path}")
-                except Exception as e:
-                    print(f"Warning: Could not load saved config from {saved_config_path}: {e}")
-                    print("Falling back to YAML config parameters")
-        
-        # Override with args if provided (highest priority)
+        # Get all attributes from args that could be config parameters
         if args:
-            # Map common args to config parameters
-            arg_mapping = {
-                'state_dim': 'state_dim',
-                'action_dim': 'action_dim', 
-                'chunk_size': 'chunk_size',
-                'camera_names': 'camera_names',
-                'image_size_primary': 'image_size_primary',
-                'image_size_wrist': 'image_size_wrist',
-                'action_normalize': 'action_normalize',
-                'state_normalize': 'state_normalize',
-                'lr_backbone': 'lr_backbone',
-                'kl_weight': 'kl_weight',
-                'backbone': 'backbone',
-                'hidden_dim': 'hidden_dim',
-                'enc_layers': 'enc_layers',
-                'dec_layers': 'dec_layers',
-                'dim_feedforward': 'dim_feedforward',
-                'dropout': 'dropout',
-                'nheads': 'nheads',
-                'pre_norm': 'pre_norm',
-                'masks': 'masks',
-                'dilation': 'dilation',
-                'position_embedding': 'position_embedding'
-            }
-            
-            for arg_name, config_name in arg_mapping.items():
-                if hasattr(args, arg_name):
-                    value = getattr(args, arg_name)
-                    # Special handling for camera_names - convert string to list
-                    if config_name == 'camera_names' and isinstance(value, str):
-                        import ast
-                        value = ast.literal_eval(value)
-                    config_kwargs[config_name] = value
+            for attr_name in dir(args):
+                if not attr_name.startswith('_'):  # Skip private attributes
+                    value = getattr(args, attr_name)
+                    if value is not None:
+                        config_kwargs[attr_name] = value
+        
+        # Filter to only include parameters that the config class actually accepts
+        import inspect
+        try:
+            sig = inspect.signature(config_class.__init__)
+            valid_params = set(sig.parameters.keys()) - {'self'}
+            config_kwargs = {k: v for k, v in config_kwargs.items() if k in valid_params}
+        except Exception:
+            # If we can't inspect the signature, just try with all parameters
+            pass
         
         # Create and return the config instance
         try:
@@ -252,20 +131,23 @@ class PolicyLoader:
             raise ValueError(f"Failed to create config instance with parameters {config_kwargs}: {e}")
     
     def load_model_with_config(self, policy_name_or_path: str, args, task_config=None, phase='training') -> Dict[str, Any]:
-        """Load model using policy configuration - always uses the module's load_model function."""
-        # Always use the direct load_model approach for consistency
+        """Load model using policy configuration - simplified to use direct load_model."""
         return self.load_model(policy_name_or_path, args)
     
     def load_model_for_training(self, policy_name_or_path: str, args, task_config=None) -> Dict[str, Any]:
-        """Load model for training phase - uses task config parameters."""
-        return self.load_model_with_config(policy_name_or_path, args, task_config, phase='training')
+        """Load model for training phase - parameter processing should be done by ConfigLoader."""
+        return self.load_model(policy_name_or_path, args)
     
     def load_model_for_evaluation(self, policy_name_or_path: str, args) -> Dict[str, Any]:
-        """Load model for evaluation phase - uses saved model config parameters."""
-        return self.load_model_with_config(policy_name_or_path, args, task_config=None, phase='evaluation')
+        """Load model for evaluation phase - parameter processing should be done by ConfigLoader."""
+        return self.load_model(policy_name_or_path, args)
     
     def load_model(self, policy_name_or_path: str, args) -> Dict[str, Any]:
-        """Load model using policy configuration."""
+        """Load model using policy configuration.
+        
+        Note: All parameter processing should be done by ConfigLoader before calling this method.
+        This method should only load the module and call its load_model function.
+        """
         # Load policy configuration
         policy_config = self.load_policy_config(policy_name_or_path)
         
@@ -276,23 +158,9 @@ class PolicyLoader:
         if not hasattr(model_module, 'load_model'):
             raise AttributeError(f"Module {policy_config.module_path} must provide 'load_model' function")
         
-        # Create a copy of args and apply model_args from YAML config
-        import copy
-        enhanced_args = copy.deepcopy(args)
-        
-        # Apply model_args from YAML configuration
-        if policy_config.model_args:
-            for key, value in policy_config.model_args.items():
-                # Only set if the attribute doesn't exist or is None
-                # This allows command line arguments to override YAML config
-                if not hasattr(enhanced_args, key) or getattr(enhanced_args, key) is None:
-                    setattr(enhanced_args, key, value)
-        
-        # Also set model_args as an attribute for backward compatibility
-        setattr(enhanced_args, 'model_args', policy_config.model_args or {})
-        
-        # Call the module's load_model function with enhanced args
-        model_components = model_module.load_model(enhanced_args)
+        # Call the module's load_model function directly with processed args
+        # All parameter processing should have been done by ConfigLoader already
+        model_components = model_module.load_model(args)
         
         return model_components
     

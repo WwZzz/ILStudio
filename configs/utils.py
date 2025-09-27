@@ -46,25 +46,52 @@ def _set_nested(obj, keys, value):
 
 
 def parse_overrides(unknown_args):
+    """Parse command line overrides with support for arbitrary nesting depth.
+    
+    Supports patterns like:
+    - --policy.camera_names ["primary", "wrist"]
+    - --policy.model_args.backbone resnet50
+    - --training.optimizer.lr_scheduler.type cosine
+    - --task.env.simulation.physics.timestep 0.01
+    
+    Args:
+        unknown_args: List of unknown command line arguments
+        
+    Returns:
+        Dict with structure: {category: {nested_path: value, ...}, ...}
+        where nested_path can be arbitrarily deep (e.g., "model_args.backbone.layers")
+    """
     overrides = { 'task': {}, 'training': {}, 'policy': {}, 'teleop': {}, 'robot': {}, 'env': {} }
+    supported_roots = tuple(overrides.keys())
+    
     i = 0
     while i < len(unknown_args):
         token = unknown_args[i]
         if not token.startswith('--'):
             i += 1
             continue
+            
         key = token[2:]
         value = None
+        
+        # Handle --key=value syntax
         if '=' in key:
             key, value = key.split('=', 1)
         else:
+            # Handle --key value syntax
             if i + 1 < len(unknown_args) and not unknown_args[i+1].startswith('--'):
                 value = unknown_args[i+1]
                 i += 1
-        roots = ('task.', 'training.', 'policy.', 'teleop.', 'robot.', 'env.')
-        if key.startswith(roots):
-            root, subpath = key.split('.', 1)
-            overrides[root][subpath] = value
+        
+        # Check if key starts with any of our supported root categories
+        key_parts = key.split('.')
+        if len(key_parts) >= 2 and key_parts[0] in supported_roots:
+            root = key_parts[0]
+            # Join all remaining parts as the nested path
+            # This supports arbitrary depth: policy.model_args.backbone.layers
+            nested_path = '.'.join(key_parts[1:])
+            overrides[root][nested_path] = value
+        
         i += 1
     return overrides
 
