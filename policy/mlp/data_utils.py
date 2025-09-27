@@ -25,7 +25,7 @@ def data_collator(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
     ]
     
     # Only process relevant keys for MLP
-    relevant_keys = ['state', 'action', 'image']
+    relevant_keys = ['state', 'action', 'image', 'is_pad']
     batched = {}
     
     for key in relevant_keys:
@@ -34,20 +34,18 @@ def data_collator(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
             
         # Collect all values for this key
         values = [sample[key] for sample in batch if key in sample]
-        
         if not values:  # Skip if no values found
             continue
             
         # Handle different data types
-        if key in ['state', 'action']:
+        if key in ['state', 'action', 'is_pad']:
             # Convert to tensors and stack
             if isinstance(values[0], np.ndarray):
                 values = [torch.FloatTensor(v) for v in values]
             elif isinstance(values[0], (int, float)):
                 values = [torch.FloatTensor([v]) for v in values]
             else:
-                continue  # Skip unsupported types
-            
+                values = values
             # Stack all tensors
             batched[key] = torch.stack(values)
             
@@ -87,7 +85,6 @@ class MLPDataProcessor:
         
         # Start with empty processed sample
         processed_sample = {}
-        
         # Ensure state is in the right format
         if 'state' not in sample:
             raise ValueError("Sample must contain 'state' key")
@@ -144,72 +141,5 @@ class MLPDataProcessor:
         
         # Explicitly ignore text modalities - they are not added to processed_sample
         # This ensures MLP only gets the data it needs
-        
+        processed_sample['is_pad'] = sample['is_pad']
         return processed_sample
-
-
-def get_dummy_data(batch_size=4, state_dim=14, action_dim=14, include_text=True):
-    """
-    Generate dummy data for testing.
-    
-    Args:
-        batch_size: Number of samples in the batch
-        state_dim: Dimension of state vector
-        action_dim: Dimension of action vector
-        include_text: Whether to include text modalities (for testing ignore functionality)
-        
-    Returns:
-        List of sample dictionaries
-    """
-    batch = []
-    for i in range(batch_size):
-        sample = {
-            'state': np.random.randn(state_dim).astype(np.float32),
-            'action': np.random.randn(action_dim).astype(np.float32),
-        }
-        
-        # Add text modalities that should be ignored by MLP
-        if include_text:
-            sample.update({
-                'raw_lang': f'Instruction {i}',
-                'task': f'task_{i}',
-                'episode_id': f'episode_{i}',
-                'trajectory_id': f'traj_{i}',
-                'instruction': f'Do something {i}',
-            })
-        
-        batch.append(sample)
-    
-    return batch
-
-
-if __name__ == "__main__":
-    # Test the data utilities
-    print("Testing MLP data utilities...")
-    
-    # Generate dummy data with text modalities
-    batch = get_dummy_data(batch_size=4, state_dim=14, action_dim=14, include_text=True)
-    print(f"Generated batch with {len(batch)} samples")
-    print(f"Sample keys before processing: {list(batch[0].keys())}")
-    
-    # Test data processor
-    processor = MLPDataProcessor(state_dim=14)
-    processed_batch = [processor(sample) for sample in batch]
-    print(f"Sample keys after processing: {list(processed_batch[0].keys())}")
-    print("✅ Data processing successful - text modalities ignored")
-    
-    # Test data collator
-    collated = data_collator(processed_batch)
-    print(f"Collated data keys: {list(collated.keys())}")
-    print(f"State shape: {collated['state'].shape}")
-    print(f"Action shape: {collated['action'].shape}")
-    
-    # Verify text modalities are not in final batch
-    text_keys = ['raw_lang', 'task', 'episode_id', 'instruction', 'trajectory_id']
-    found_text = any(key in collated for key in text_keys)
-    if not found_text:
-        print("✅ Text modalities successfully ignored in batch!")
-    else:
-        print("❌ Some text modalities found in batch!")
-    
-    print("All tests passed!")

@@ -10,7 +10,7 @@ pretrained_config:
   is_pretrained: false
 model_args:
   # Model architecture parameters
-  state_dim: 28          # Input state dimension
+  state_dim: 39          # Input state dimension
   action_dim: 28         # Output action dimension  
   num_layers: 3          # Number of layers in the MLP
   hidden_dim: 256        # Hidden layer dimension
@@ -20,4 +20,4 @@ model_args:
   image_dim: null        # Flattened image dimension (calculated automatically)
   # Training parameters
   learning_rate: 1e-3    # Learning rate for optimizer
-  chunk_size: 1          # Chunk size (number of action steps to predict)
+  chunk_size: 16          # Chunk size (number of action steps to predict)

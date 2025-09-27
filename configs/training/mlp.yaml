@@ -1,0 +1,89 @@
+# Default Training Configuration
+# This file contains core training process parameters that are typically set once
+# Command-line suitable parameters (like output_dir, learning_rate, max_steps) 
+# are kept in HyperArguments for easy command-line override
+
+# =============================================================================
+# CORE TRAINING PROCESS PARAMETERS
+# =============================================================================
+# These parameters are typically set once and don't change between runs
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION
+# =============================================================================
+# Data processing parameters that are related to training process
+# Note: Model-specific data processing parameters are now in configs/model/default.yaml
+
+# Data loading (training process related)
+preload_data: false
+
+# =============================================================================
+# OPTIMIZER CONFIGURATION
+# =============================================================================
+# Core optimizer settings that are typically set once per training setup
+
+# Learning rate and scheduling
+learning_rate: 3e-5
+weight_decay: 0.0001
+warmup_steps: 0
+warmup_ratio: 0.0
+lr_scheduler_type: "constant"
+
+# Optimizer settings
+optim: "adamw_torch"
+adam_beta1: 0.95
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+
+# Note: Model architecture, LoRA, and quantization settings are now in configs/model/default.yaml
+
+# =============================================================================
+# LOGGING AND SAVING CONFIGURATION
+# =============================================================================
+# Logging and saving settings that are typically set once
+
+# Logging settings
+logging_strategy: "steps"
+logging_steps: 100
+report_to: "tensorboard"
+
+# Saving settings
+save_strategy: "steps"
+save_steps: 1000
+save_total_limit: 50
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION (TrainingArguments)
+# =============================================================================
+# Data processing settings for the training process
+
+# DataLoader settings
+dataloader_num_workers: 8
+dataloader_pin_memory: false
+remove_unused_columns: false
+
+# Evaluation settings
+do_eval: false
+eval_steps: 200
+
+# System settings
+seed: 0
+
+# =============================================================================
+# CORE TRAINING PARAMETERS
+# =============================================================================
+# Basic training settings that are typically set once per experiment
+
+# Training duration
+num_train_epochs: 3
+max_steps: 500000
+
+# Batch sizes (typically determined by hardware)
+per_device_train_batch_size: 256
+per_device_eval_batch_size: 32
+
+# Logging directory (often derived from output_dir)
+logging_dir: "./logs"
+
+# Checkpoint resuming (often handled automatically)
+resume_from_checkpoint: True

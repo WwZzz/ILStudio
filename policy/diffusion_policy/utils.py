@@ -29,7 +29,7 @@ def data_collator(instances):
         actions = torch.stack([instance['action'] for instance in instances])
         states = torch.stack([instance['state'] for instance in instances])
     is_pad_all = torch.stack([instance['is_pad'] for instance in instances])
-    images = torch.stack([instance['image'] for instance in instances])/255.0
+    images = torch.stack([instance['image'] for instance in instances])/255.0 if instances[0]['image'] is not None else None
     batch = dict(
         image=images,
         actions=actions,

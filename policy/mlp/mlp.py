@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
 import numpy as np
-
+from torch.nn import functional as F
 
 class MLPPolicyConfig(PretrainedConfig):
     """
@@ -104,7 +104,7 @@ class MLPPolicy(PreTrainedModel):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
     
-    def forward(self, state, image=None, **kwargs):
+    def forward(self, state, image=None, action=None, is_pad=None, **kwargs):
         """
         Forward pass of the MLP policy.
         
@@ -134,9 +134,11 @@ class MLPPolicy(PreTrainedModel):
         
         # Reshape to (batch_size, chunk_size, action_dim)
         batch_size = action_flat.shape[0]
-        action = action_flat.view(batch_size, self.config.chunk_size, self.config.action_dim)
-        
-        return {"action": action}
+        pred_action = action_flat.view(batch_size, self.config.chunk_size, self.config.action_dim)
+        loss =  F.mse_loss(action, pred_action, reduction='none')
+        # all_l1 = F.l1_loss(action, pred_action, reduction='none')
+        loss = (loss * ~is_pad.unsqueeze(-1)).mean()
+        return {"loss": loss}
     
     def select_action(self, obs):
         """

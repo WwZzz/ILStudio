@@ -15,7 +15,7 @@ model_args:
   hidden_dim: 512
   dropout: 0.1
   nheads: 8
-  chunk_size: 400
+  chunk_size: 100
   pre_norm: false
   masks: false
   # Training parameters

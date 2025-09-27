@@ -1,0 +1,16 @@
+dataset_dir:
+  - 'D4RL/door/expert-v2'
+episode_len: 200
+dataset_class: D4RLDataset
+ctrl_type: abs
+ctrl_space: joint
+
+# Task-specific parameters that will override policy configs
+action_dim: 28
+state_dim: 39
+action_normalize: "zscore"
+state_normalize: "zscore"
+chunk_size: 1
+is_h5: False
+
+# Data processing parameters moved to training config

@@ -11,6 +11,7 @@ from .aloha_sii import AlohaSIIDataset
 from .aloha_sii_v2 import AlohaSIIv2Dataset
 from .robomimic import RobomimicDataset
 from .koch_dataset import KochDataset
+from .d4rl import D4RLDataset
 
 __all__ = [
     'EpisodicDataset',
@@ -19,4 +20,5 @@ __all__ = [
     'AlohaSIIv2Dataset',
     'RobomimicDataset',
     'KochDataset',
+    'D4RLDataset'
 ]

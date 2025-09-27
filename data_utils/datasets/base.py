@@ -261,7 +261,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
         all_cam_images = []
         for cam_name in self.camera_names:
             all_cam_images.append(image_dict[cam_name])
-        all_cam_images = np.stack(all_cam_images, axis=0)  # Stack images into array
+        if len(self.camera_names)>0:
+            all_cam_images = np.stack(all_cam_images, axis=0)  # Stack images into array
+        else:
+            all_cam_images = None
         # Normalize data
         action_normalizer = self.action_normalizers.get(self.get_dataset_dir(), None)
         if action_normalizer is not None:
@@ -276,11 +279,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
             state_data = state
             warnings.warn("No Normalization being applied to states during training")
         # Construct observations, convert arrays to tensors
-        image_data = torch.from_numpy(all_cam_images)
+        if all_cam_images is not None:
+            image_data = torch.from_numpy(all_cam_images)
+            image_data = torch.einsum('k h w c -> k c h w', image_data)  # Swap image channels
+        else:
+            image_data = None
         state_data = torch.from_numpy(state_data).float()
         action_data = torch.from_numpy(action_data).float()
         is_pad = torch.from_numpy(is_pad).bool()
-        image_data = torch.einsum('k h w c -> k c h w', image_data)  # Swap image channels
         sample = {
             'image': image_data,
             'state': state_data,

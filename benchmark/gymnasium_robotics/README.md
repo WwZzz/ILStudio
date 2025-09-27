@@ -9,3 +9,21 @@ for error `mujoco.FatalError: an OpenGL platform library has not been loaded int
 ```shell
 export MUJOCO_GL=egl
 ```
+
+# Data Preparation
+```shell
+# install minari
+pip install minari
+
+# download dataset
+minari download D4RL/door/human-v2 # data will be stored at ~/.minari/datasets/D4RL/door/human-v2
+minari download D4RL/door/expert-v2
+minari download D4RL/door/clone-v2
+
+# view dataset
+minari show D4RL/door/human-v2
+
+# 
+
+
+```

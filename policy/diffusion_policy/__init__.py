@@ -58,14 +58,14 @@ class DataTransform:
         ])
     
     def __call__(self, sample):
+        # if 'image' in sample and sample['image'] is not None:
         sample['image'] = sample['image']/255.0
-        # sample['image'] = self.transformations(sample['image'])
         return sample
     
 
-def get_data_processor(args, model_components):
-    img_size = eval(args.image_size_primary)
-    return DataTransform(img_size, 0.95)
+# def get_data_processor(args, model_components):
+#     img_size = eval(args.image_size_primary)
+#     return DataTransform(img_size, 0.95)
 
 def StateToQposProcessor(dataset, args, model_components):
     """Data processor that maps 'state' to 'qpos' for diffusion policy compatibility."""

@@ -142,8 +142,9 @@ class DiffusionPolicyModel(PreTrainedModel):
         # qpos = qpos.to(device)
         # image = image.to(device)
         # actions = actions.to(device)
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        image = normalize(image)
+        if image is not None:
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            image = normalize(image)
         B = qpos.shape[0]
         nets = self.nets
 
@@ -156,8 +157,10 @@ class DiffusionPolicyModel(PreTrainedModel):
             pool_features = torch.flatten(pool_features, start_dim=1)
             out_features = nets['policy']['linears'][cam_id](pool_features)
             all_features.append(out_features)
-
-        obs_cond = torch.cat(all_features + [qpos.squeeze(1)], dim=1)
+        if len(all_features)>0:
+            obs_cond = torch.cat(all_features + [qpos.squeeze(1)], dim=1)
+        else:
+            obs_cond = qpos.squeeze(1)
 
         if actions is not None:  # 训练模式
             # 添加噪声

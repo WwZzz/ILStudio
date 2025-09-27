@@ -11,14 +11,10 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--task", "debug",
-                "--policy", "smolvla",
-                "--training_config", "default",
-                "--output_dir", "ckpt/debug_smolvla",
-                "--training.logging_dir", "logs/log_debug_smolvla",
-                "--training.batch_size", "2",
-                "--training.max_steps", "50000",
-                "--training.save_steps", "1000"
+                "--policy", "dp_d4rl",
+                "--task", "d4rl_debug",
+                "--output_dir", "ckpt/d4rl_debug8",
+                "--training_config", "mlp",
             ],
             // "args": [
             //     "--robot_config",               "configs/robot/koch_follower.yaml",

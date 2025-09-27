@@ -406,12 +406,13 @@ def load_data(args, task_config, save_norm=True):
     set_seed(0)
     dataset_dir_l = task_config['dataset_dir']
     # episode_len = task_config['episode_len']
-    camera_names = task_config['camera_names']
+    camera_names = task_config.get('camera_names', [])
     sample_weights = task_config.get('sample_weights', None)
     train_ratio = task_config.get('train_ratio', 1.0)
     ctrl_space = task_config.get('ctrl_space', 'ee')
     ctrl_type = task_config.get('ctrl_type', 'delta')
     data_class = task_config.get('dataset_class', 'EpisodicDataset')
+    is_h5 = task_config.get('is_h5', True)
     action_normtype = args.action_normalize
     state_normtype = args.state_normalize
     if type(dataset_dir_l) == str: dataset_dir_l = [dataset_dir_l]
@@ -421,8 +422,11 @@ def load_data(args, task_config, save_norm=True):
     else:
         data_class = getattr(importlib.import_module('data_utils.datasets'), data_class)
     # 以数据集为维度，计算统计量
-    datasets = [data_class(find_all_hdf5(dataset_dir, True), camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
-        # 获取normalizer class
+    if is_h5:
+        datasets = [data_class(find_all_hdf5(dataset_dir, True), camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
+    else:
+        datasets = [data_class([dataset_dir], camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
+    # 获取normalizer class
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
     # 计算数据集的统计量, 数据集内部可以根据h5文件所在dataset_dir来选择normalizer
