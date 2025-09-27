@@ -200,6 +200,10 @@ class ConfigLoader:
             for key, value in all_params.items():
                 setattr(args, key, value)
             # Generate image_sizes for backward compatibility with policies that still use it
+            if isinstance(args.image_size, str):
+                args.image_size = eval(args.image_size)
+            elif isinstance(args.image_size, int):
+                args.image_size = [args.image_size, args.image_size]
             args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
         return all_params
 
