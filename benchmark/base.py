@@ -157,7 +157,10 @@ class MetaPolicy:
         mact = self.action_queue.popleft()
         return mact
     
-    
+    def reset(self):
+        if hasattr(self.policy, 'reset'):
+            self.policy.reset()
+        self.action_queue.clear()
     
     
     
