@@ -1,76 +1,33 @@
-name: "smolvla"
-module_path: "policy.smolvla"
-config_class: "SmolVLAConfig"
-model_class: "SmolVLAPolicy"
-data_processor: "get_data_processor"
-data_collator: "get_data_collator"
-trainer_class: "SmolVLATrainer"
-
-# Model parameters
+name: smolvla
+module_path: policy.smolvla
+config_class: SmolVLAPolicyConfig
+model_class: SmolVLAPolicy
+data_processor: get_data_processor
+data_collator: get_data_collator
+trainer_class: null  # Use framework default trainer
+pretrained_config:
+  model_name_or_path: null
+  is_pretrained: false
 model_args:
-  state_dim: 14
-  action_dim: 14
-  camera_names: ["primary"]
-  chunk_size: 50
-  n_action_steps: 50
-  vlm_model_name: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-  freeze_vision_encoder: true
-  train_expert_only: true
-  train_state_proj: true
-  
-# Training parameters
-config_params:
-  # Input / output structure
+  # Model architecture parameters
+  model_type: "smolvla_policy"
   n_obs_steps: 1
   chunk_size: 50
   n_action_steps: 50
-  
-  # Normalization mapping
-  normalization_mapping:
-    VISUAL: "identity"
-    STATE: "mean_std"
-    ACTION: "mean_std"
-  
-  # Padding dimensions
   max_state_dim: 32
   max_action_dim: 32
-  
-  # Image preprocessing
   resize_imgs_with_padding: [512, 512]
-  
-  # Empty cameras
   empty_cameras: 0
-  
-  # Aloha adaptation
   adapt_to_pi_aloha: false
   use_delta_joint_actions_aloha: false
-  
-  # Tokenizer
   tokenizer_max_length: 48
-  
-  # Decoding
   num_steps: 10
-  
-  # Attention utils
   use_cache: true
-  
-  # Finetuning settings
   freeze_vision_encoder: true
   train_expert_only: true
   train_state_proj: true
   
-  # Training presets
-  optimizer_lr: 0.0001
-  optimizer_betas: [0.9, 0.95]
-  optimizer_eps: 1e-08
-  optimizer_weight_decay: 1e-10
-  optimizer_grad_clip_norm: 10
-  
-  scheduler_warmup_steps: 1000
-  scheduler_decay_steps: 30000
-  scheduler_decay_lr: 2.5e-06
-  
-  # Model parameters
+  # VLM model configuration
   vlm_model_name: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
   load_vlm_weights: false
   add_image_special_tokens: false
@@ -83,3 +40,22 @@ config_params:
   expert_width_multiplier: 0.75
   min_period: 0.004
   max_period: 4.0
+  
+  # Optimizer configuration
+  optimizer_lr: 0.0001
+  optimizer_betas: [0.9, 0.95]
+  optimizer_eps: 0.00000001
+  optimizer_weight_decay: 0.0000000001
+  optimizer_grad_clip_norm: 10.0
+  
+  # Scheduler configuration
+  scheduler_warmup_steps: 1000
+  scheduler_decay_steps: 30000
+  scheduler_decay_lr: 0.0000025
+  
+  # Task-specific parameters (will be overridden by args if provided)
+  state_dim: 14
+  action_dim: 14
+  camera_names: ["primary"]
+  history_len: 1
+  prediction_len: 50
