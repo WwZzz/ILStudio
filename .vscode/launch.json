@@ -14,21 +14,26 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "MUJOCO_GL": "egl"
+                "MUJOCO_GL": "glfw"
             },
+            "args": [
+                "--model_name_or_path", "/home/noematrix/Desktop/IL-Studio/ckpt/smolvla_debug/checkpoint-11000",
+                "--use_spawn"
+            ],
+
+            // "args": [
+            //     "--policy", "smolvla",
+            //     "--task", "sim_transfer_cube_scripted",
+            //     "--output_dir", "ckpt/smolvla_debug2",
+            //     "--training_config", "smolvla",
+            //     "--training.per_device_train_batch_size", "2",
+            //     "--training.dataloader_num_workers", "1"
+            // ],
             // "args": [
             //     "--output_dir", "results/test_d4rl",
             //     "--model_name_or_path", "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/debug12", 
             //     "--env", "d4rl_door"
             // ],
-            "args": [
-                "--policy", "smolvla",
-                "--task", "sim_transfer_cube_scripted",
-                "--output_dir", "ckpt/smolvla_debug",
-                "--training_config", "smolvla",
-                "--training.per_device_train_batch_size", "2",
-                "--training.dataloader_num_workers", "1"
-            ],
             // "args": [
             //     "--policy", "dp_d4rl",
             //     "--task", "d4rl_debug",

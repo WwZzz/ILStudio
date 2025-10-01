@@ -4,6 +4,8 @@ from transformers.configuration_utils import PretrainedConfig
 from lerobot.utils.constants import ACTION
 from collections import deque
 from torch import Tensor
+import torch
+import numpy as np
 
 class SmolVLAPolicyConfig(PretrainedConfig):
     def __init__(self, 
@@ -11,6 +13,8 @@ class SmolVLAPolicyConfig(PretrainedConfig):
             n_obs_steps: int = 1,
             chunk_size: int = 50,
             n_action_steps: int = 50,
+            action_dim: int = 14,
+            state_dim: int = 14,
             max_state_dim: int = 32,
             max_action_dim: int = 32,
             resize_imgs_with_padding: tuple[int, int] = (512, 512),
@@ -50,6 +54,8 @@ class SmolVLAPolicyConfig(PretrainedConfig):
         self.n_obs_steps = n_obs_steps
         self.chunk_size = chunk_size
         self.n_action_steps = n_action_steps
+        self.action_dim = action_dim
+        self.state_dim = state_dim
         self.max_state_dim = max_state_dim
         self.max_action_dim = max_action_dim
         self.resize_imgs_with_padding = resize_imgs_with_padding
@@ -105,3 +111,22 @@ class SmolVLAPolicy(PreTrainedModel):
         loss_dict = {}
         loss_dict["loss"] = loss
         return loss_dict
+    
+    def select_action(self, obs):
+        num_samples = obs['state'].shape[0]
+        samples = [
+            {'state': obs['state'][i], 
+            'image': obs['image'][i], 
+            'raw_lang': obs['raw_lang'][i],
+            } for i in range(num_samples)]
+        processed_samples = [self.data_processor(sample) for sample in samples]
+        batch_obs = self.data_collator(processed_samples)
+        device = next(self.parameters()).device
+        for k,v in batch_obs.items():
+            if isinstance(v, torch.Tensor):
+                batch_obs[k] = v.to(device)
+            elif isinstance(v, list):
+                batch_obs[k] = [v.to(device) for v in v]
+        action = self.forward(**batch_obs)
+        action = action['action'][:,:,:self.model.config.action_dim]
+        return action

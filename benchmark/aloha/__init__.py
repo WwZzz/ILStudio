@@ -61,7 +61,7 @@ import cv2
 from multiprocessing import current_process
 
 TASK_PROMPT = {
-    'sim_transfer_cube_scripted': 'Transfer the red cube to the other arm.',
+    'sim_transfer_cube_scripted': 'Transfer the red cube from the right arm to the left arm.',
     'sim_insertion_scripted': 'Insert the red peg into the blue socket.'
 }
 

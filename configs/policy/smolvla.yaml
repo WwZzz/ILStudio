@@ -14,6 +14,8 @@ model_args:
   n_obs_steps: 1
   chunk_size: 50
   n_action_steps: 50
+  action_dim: 14
+  state_dim: 14
   max_state_dim: 32
   max_action_dim: 32
   resize_imgs_with_padding: [512, 512]
@@ -41,21 +43,7 @@ model_args:
   min_period: 0.004
   max_period: 4.0
   
-  # Optimizer configuration
-  optimizer_lr: 0.0001
-  optimizer_betas: [0.9, 0.95]
-  optimizer_eps: 0.00000001
-  optimizer_weight_decay: 0.0000000001
-  optimizer_grad_clip_norm: 10.0
-  
-  # Scheduler configuration
-  scheduler_warmup_steps: 1000
-  scheduler_decay_steps: 30000
-  scheduler_decay_lr: 0.0000025
-  
   # Task-specific parameters (will be overridden by args if provided)
-  state_dim: 14
-  action_dim: 14
   camera_names: ["primary"]
   history_len: 1
   prediction_len: 50

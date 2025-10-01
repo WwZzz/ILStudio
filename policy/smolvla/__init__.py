@@ -5,12 +5,18 @@ from transformers import AutoTokenizer
 def load_model(args):
     if args.is_pretrained:
         model = SmolVLAPolicy.from_pretrained(args.model_name_or_path)
+        tokenizer = AutoTokenizer.from_pretrained(model.config.vlm_model_name)
+        data_processor = SmolVLAProcess(tokenizer=tokenizer, max_length=model.config.tokenizer_max_length, padding=model.config.pad_language_to)
+        data_collator = SmolVLADataCollator(max_state_dim=model.config.max_state_dim, max_action_dim=model.config.max_action_dim, resize_imgs_with_padding=model.config.resize_imgs_with_padding)
+        model.data_processor = data_processor
+        model.data_collator = data_collator
+        model.tokenizer = tokenizer
     else:
         model_args = getattr(args, 'model_args', {})
-        config = SmolVLAPolicyConfig() 
+        config = SmolVLAPolicyConfig(**model_args) 
         model = SmolVLAPolicy(config=config)
+        tokenizer = AutoTokenizer.from_pretrained(args.vlm_model_name)
     model.to('cuda')
-    tokenizer = AutoTokenizer.from_pretrained(args.vlm_model_name)
     return {'model': model, 'tokenizer': tokenizer}
 
 def get_data_processor(args, model_components):

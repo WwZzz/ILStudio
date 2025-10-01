@@ -23,7 +23,7 @@ class SmolVLAProcess:
             padding_side=self.padding_side,
             return_tensors="pt",
         )
-        image_data = sample['image'] / 255.0 # k,c,h,w
+        image_data = sample['image'].astype(np.float32) / 255.0 # k,c,h,w
         # organize data
         data_dict = {}
         data_dict['state'] = sample.get('state', None)
@@ -32,6 +32,9 @@ class SmolVLAProcess:
         data_dict['image'] = image_data
         for k, v in tokenized_prompt.items():
             data_dict[k] = v
+        for k, v in data_dict.items():
+            if isinstance(v, np.ndarray):
+                data_dict[k] = torch.from_numpy(v)
         return data_dict
 
 class SmolVLADataCollator:
@@ -76,15 +79,21 @@ class SmolVLADataCollator:
 
     def __call__(self, instances):
         # process state and action
-        if not isinstance(instances[0]['action'], torch.Tensor):
-            actions = torch.tensor(np.array([instance['action'] for instance in instances]))
+        if not isinstance(instances[0]['state'], torch.Tensor):
             states = torch.tensor(np.array([instance['state'] for instance in instances]))
         else:
-            actions = torch.stack([instance['action'] for instance in instances])
             states = torch.stack([instance['state'] for instance in instances])
         states = self.pad_vector(states, self.max_state_dim)
-        actions = self.pad_vector(actions, self.max_action_dim)
-        is_pad_all = torch.stack([instance['is_pad'] for instance in instances])
+        if instances[0]['action'] is not None:
+            if not isinstance(instances[0]['action'], torch.Tensor):
+                actions = torch.tensor(np.array([instance['action'] for instance in instances]))
+            else:
+                actions = torch.stack([instance['action'] for instance in instances])
+            actions = self.pad_vector(actions, self.max_action_dim)
+            is_pad_all = torch.stack([instance['is_pad'] for instance in instances])
+        else:
+            actions = None
+            is_pad_all = None
         
         # process image
         num_images = instances[0]['image'].shape[0]

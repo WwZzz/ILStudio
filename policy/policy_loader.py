@@ -157,7 +157,7 @@ class PolicyLoader:
         # Verify required methods exist
         if not hasattr(model_module, 'load_model'):
             raise AttributeError(f"Module {policy_config.module_path} must provide 'load_model' function")
-        
+        args.model_args = policy_config.model_args
         # Call the module's load_model function directly with processed args
         # All parameter processing should have been done by ConfigLoader already
         model_components = model_module.load_model(args)

@@ -28,7 +28,7 @@ class AlohaSimDataset(EpisodicDataset):
         """
         task_name = os.path.split(self.get_dataset_dir())[-1]
         if 'transfer' in task_name:
-            return 'Transfer the red cube to the other arm.'
+            return 'Transfer the red cube from the right arm to the left arm.'
         elif 'insert' in task_name:
             return 'Insert the red peg into the blue socket.'
         else:
