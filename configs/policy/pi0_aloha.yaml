@@ -16,4 +16,7 @@ model_args:
   # Task parameters (will be overridden by args if provided)
   state_dim: 14
   discrete_state_input: False
+  pytorch_weight_path: /root/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim_pytorch
   # action_dim: 14
+action_normalize: "minmax"
+state_normalize: "minmax"

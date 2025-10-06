@@ -16,17 +16,17 @@
             "env": {
                 "MUJOCO_GL": "glfw"
             },
-            // "args": [
-            //     "--output_dir", "results/test_pi",
-            //     "--model_name_or_path", "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/pi_debug/checkpoint-100", "--use_spawn"
-            //     // "--env", "d4rl_door"
-            // ],
             "args": [
-                "--policy", "pi0_aloha",
-                "--task", "transfer_cube_top",
-                "--output_dir", "ckpt/pi_debug3",
-                "--training_config", "debug",
+                "--output_dir", "results/test_pi2",
+                "--model_name_or_path", "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/pi_debug4", "--use_spawn"
+                // "--env", "d4rl_door"
             ],
+            // "args": [
+            //     "--policy", "pi0_aloha",
+            //     "--task", "transfer_cube_top",
+            //     "--output_dir", "ckpt/pi_debug4",
+            //     "--training_config", "debug",
+            // ],
             // "args": [
             //     "--model_name_or_path", "/home/noematrix/Desktop/IL-Studio/ckpt/smolvla_debug/checkpoint-11000",
             //     "--use_spawn"
