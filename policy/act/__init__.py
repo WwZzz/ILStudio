@@ -10,7 +10,7 @@ def load_model(args):
         model.to('cuda')
     else:
         model_args = getattr(args, 'model_args', {})
-        config = ACTPolicyConfig(camera_names=args.camera_names, history_len=1, state_dim = args.state_dim, action_dim=args.action_dim, prediction_len=args.chunk_size, chunk_size=args.chunk_size, num_queries=args.chunk_size, **model_args) 
+        config = ACTPolicyConfig(**model_args) 
         model = ACTPolicy(config=config)
     # model.to(dtype=torch.float32, device=args.device)
     return {'model': model}

@@ -37,7 +37,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         Initialize the episodic dataset.
         
         Args:
-            dataset_path_list: List of paths to dataset files
+            dataset_path_list: List containing a single dataset directory path, or list of .h5 file paths (for backward compatibility)
             camera_names: List of camera names to use
             action_normalizers: Dictionary of action normalizers per dataset
             state_normalizers: Dictionary of state normalizers per dataset
@@ -47,8 +47,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
             ctrl_type: Control type ('abs', 'rel', 'delta')
         """
         super(EpisodicDataset).__init__()
-        self.episode_ids = np.arange(len(dataset_path_list))
-        self.dataset_path_list = dataset_path_list
+        
+        # Check if dataset_path_list contains a directory or file paths
+        if len(dataset_path_list) == 1:
+            # New behavior: dataset_path_list contains a single directory path
+            self.dataset_dir = dataset_path_list[0]
+            os.makedirs(self.dataset_dir, exist_ok=True)
+            self.dataset_path_list = self._find_all_hdf5(self.dataset_dir)
+        else:
+            # Backward compatibility: dataset_path_list contains file paths
+            self.dataset_path_list = dataset_path_list
+            self.dataset_dir = os.path.dirname(dataset_path_list[0]) if len(dataset_path_list) > 0 else ""
+        
+        self.episode_ids = np.arange(len(self.dataset_path_list))
         self.action_normalizers = action_normalizers
         self.state_normalizers = state_normalizers
         self.chunk_size = chunk_size
@@ -59,6 +70,26 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.freq = -1
         self.max_workers = 8
         self.initialize()
+    
+    def _find_all_hdf5(self, dataset_dir):
+        """
+        Find all HDF5 files in the dataset directory.
+        
+        Args:
+            dataset_dir: Directory containing HDF5 files
+            
+        Returns:
+            List of HDF5 file paths
+        """
+        hdf5_files = []
+        for root, dirs, files in os.walk(dataset_dir):
+            if 'pointcloud' in root: 
+                continue
+            for filename in fnmatch.filter(files, '*.hdf5'):
+                if 'features' in filename: 
+                    continue
+                hdf5_files.append(os.path.join(root, filename))
+        return hdf5_files
     
     def initialize(self):
         """Initialize the dataset by loading data and computing episode lengths."""
@@ -189,7 +220,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
     
     def get_dataset_dir(self):
         """Get the dataset directory path."""
-        return os.path.dirname(self.dataset_path_list[0])
+        return self.dataset_dir
 
     def get_freq(self):
         """Get the dataset frequency."""

@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 import h5py
 import os
+import warnings
 from .base import EpisodicDataset
 
 
@@ -17,8 +18,61 @@ class AlohaSimDataset(EpisodicDataset):
     
     This class handles loading and processing of ALOHA simulation datasets,
     including transfer and insertion tasks.
-    """
+    """ 
+    def _download_dataset_if_needed(self):
+        """
+        Download dataset from HuggingFace if dataset_dir is empty or doesn't exist.
+        
+        Returns:
+            Updated dataset_dir path
+        """
+        num_episodes = len(self._find_all_hdf5(self.dataset_dir))
+        if num_episodes >= 50:
+            return self.dataset_dir
+        task_name = self.dataset_dir
+        # Determine which HuggingFace repo to download from based on task name
+        repo_id = None
+        if 'transfer' in task_name.lower() and 'scripted' in task_name.lower():
+            repo_id = "cadene/aloha_sim_transfer_cube_scripted_raw"
+        elif 'transfer' in task_name.lower() and 'human' in task_name.lower():
+            repo_id = "cadene/aloha_sim_transfer_cube_human_raw"
+        elif 'insertion' in task_name.lower() and 'scripted' in task_name.lower():
+            repo_id = "cadene/aloha_sim_insertion_scripted_raw"
+        elif 'insertion' in task_name.lower() and 'human' in task_name.lower():
+            repo_id = "cadene/aloha_sim_insertion_human_raw"
+        else:
+            return self.dataset_dir
+        
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError:
+            raise ImportError(
+                "huggingface_hub is required to download datasets. "
+                "Please install it with: pip install huggingface_hub"
+            )
+        
+        # Download the dataset using HuggingFace's default cache
+        downloaded_path = snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=self.dataset_dir if self.dataset_dir else None,
+            local_dir_use_symlinks=False
+        )
+        # Update dataset_dir with the downloaded path
+        if not self.dataset_dir:
+            self.dataset_dir = downloaded_path
+        return self.dataset_dir
     
+    def initialize(self):
+        """Initialize the dataset with automatic download if needed"""
+        # Download dataset if needed
+        self.dataset_dir = self._download_dataset_if_needed()
+        # Re-scan for HDF5 files after potential download
+        if hasattr(self, 'dataset_path_list') and len(self.dataset_path_list) == 0:
+            self.dataset_path_list = self._find_all_hdf5(self.dataset_dir)
+            self.episode_ids = np.arange(len(self.dataset_path_list))
+        super().initialize()
+
     def get_language_instruction(self):
         """
         Get language instruction based on the task name.

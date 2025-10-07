@@ -1,0 +1,3 @@
+[submodule "policy/openpi/openpi"]
+	path = policy/openpi/openpi
+	url = https://github.com/Physical-Intelligence/openpi.git

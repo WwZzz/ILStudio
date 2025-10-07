@@ -92,14 +92,16 @@ import warnings
 def str2hash(s: str):
     return str(hashlib.md5(s.encode()).hexdigest())
 
-def find_all_hdf5(dataset_dir, skip_mirrored_data):
+def find_all_hdf5(dataset_dir):
+    """
+    Find all HDF5 files in the dataset directory.
+    Note: This function is deprecated. Use dataset class internal method instead.
+    """
     hdf5_files = []
     for root, dirs, files in os.walk(dataset_dir):
         if 'pointcloud' in root: continue
         for filename in fnmatch.filter(files, '*.hdf5'):
             if 'features' in filename: continue
-            if skip_mirrored_data and 'mirror' in filename:
-                continue
             hdf5_files.append(os.path.join(root, filename))
     return hdf5_files
 

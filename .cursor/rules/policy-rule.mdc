@@ -1,9 +1,7 @@
 ---
 description: 项目强制级规则
-globs:
-alwaysApply: true
+alwaysApply: false
 ---
-
 # 代码规则
 - 每个policy应该提供3个接口函数：load_model, get_data_collator, get_data_processor
 - load_model提供两个功能：1）直接加载原始模型；2）加载经过框架训练过的checkpoint模型。
