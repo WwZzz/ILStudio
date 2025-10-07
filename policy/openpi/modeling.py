@@ -17,10 +17,11 @@ import os
 import shutil
 import numpy as np
 import sentencepiece
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, AutoModel, AutoConfig
 from huggingface_hub import hf_hub_download
 
 class OpenPiPolicyConfig(PretrainedConfig):
+    model_type = "openpi_policy"
     def __init__(self, 
             pytorch_training_precision: str='bfloat16',
             max_action_dim: int=32,
@@ -107,4 +108,5 @@ class OpenPiPolicy(PreTrainedModel):
         return self.model.paligemma_with_expert.paligemma.language_model.embed_tokens
         
         
-        
+AutoConfig.register("openpi_policy", OpenPiPolicyConfig)
+AutoModel.register(OpenPiPolicyConfig, OpenPiPolicy)

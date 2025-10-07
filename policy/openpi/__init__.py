@@ -3,6 +3,7 @@ import openpi.models.tokenizer as _tokenizer
 from .data_utils import OpenPiProcessor, OpenPiCollator
 from peft import LoraConfig, get_peft_model, PeftModel, PeftConfig, TaskType
 import torch
+from .trainer import Trainer
 
 def find_all_linear_names(model, lora_module=[]):
     cls = torch.nn.Linear
