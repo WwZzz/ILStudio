@@ -27,7 +27,7 @@ model_args:
   # Model Architecture
   using_ema: false
   cache_dir: null
-  flash_attn: false
+  flash_attn: true
   freeze_vision_tower: false
   freeze_backbone: false
   tune_mm_mlp_adapter: false
