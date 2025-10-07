@@ -20,35 +20,32 @@
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
 # Installation
+
+### uv
+We recommend using [uv](https://docs.astral.sh/uv/) to manage Python dependencies. See the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/) to set it up. Once uv is installed, you can set up the environment.
+
+
+This will install the core dependencies for the main `IL-Studio` project.
+
 ```shell
-pip install -r requirements.txt
+# Navigate to the project root
+cd /path/to/IL-Studio
+# install uv by 'pip install uv' before running the command below
+uv sync
 ```
 
-# TODO
-- rewrite evaluation pipeline
-- add octo
-- add roboflamingo
-- add CALVIN benchmark
-- add Installation Description
-- add deploy module 
-- ...
+### pip
+If `uv` is not preferred, just use `pip install -r requirements.txt` to use this repo.
 
-# Usage
+# Quick Start
 
-## Policy Configuration System
+## ACT on AlohaSim
 
 ```shell
-# Use policy_config to load from YAML file path
-python train.py --policy_config configs/policy/act.yaml --task_name example_tasks --output_dir output_dir_path 
-
-# Available policies: configs/policy/act.yaml, configs/policy/qwen2dp.yaml, etc.
-python train.py --policy_config configs/policy/qwen2dp.yaml --task_name example_tasks --output_dir output_dir_path
+uv run python train.py --policy act --task sim_transfer_cube_scripted --output_dir ckpt/act_aloha_sim_transfer
 
 # Evaluation
-python eval.py --policy_config configs/policy/act.yaml --env_name aloha --task sim_transfer_cube_scripted
-
-# Real-world evaluation
-python eval_real.py --policy_config configs/policy/act.yaml --robot_config configs/robots/dummy.yaml --task sim_transfer_cube_scripted 
+un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
 
 # Overview
