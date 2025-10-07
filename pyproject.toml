@@ -36,6 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openvla = [
+    "timm>=0.9.10",
+]
 
 [tool.uv.sources]
 lerobot = { git = "https://github.com/huggingface/lerobot", rev = "0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" }
