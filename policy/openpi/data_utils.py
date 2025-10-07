@@ -135,9 +135,9 @@ class OpenPiCollator:
         # process language
         tokenized_prompt = torch.from_numpy(np.stack([instance["tokenized_prompt"] for instance in instances]))
         tokenized_prompt_mask = torch.from_numpy(np.stack([instance["tokenized_prompt_mask"] for instance in instances]))
-        observation = openpi.models.model.Observation(
-            images=images,
-            image_masks=image_masks, 
+        observation = dict(
+            image=images,
+            image_mask=image_masks, 
             state=states.to(torch.float64), 
             tokenized_prompt=tokenized_prompt, 
             tokenized_prompt_mask=tokenized_prompt_mask,

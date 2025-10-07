@@ -3,6 +3,7 @@ import openpi.models_pytorch.pi0_pytorch
 import openpi.shared.normalize as _normalize
 import openpi.training.config as _config
 import openpi.training.data_loader as _data
+import openpi.models.model as _model
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from collections import deque
@@ -26,7 +27,7 @@ class OpenPiPolicyConfig(PretrainedConfig):
             pytorch_training_precision: str='bfloat16',
             max_action_dim: int=32,
             action_dim: int=14,
-            action_horizon: int=50,
+            chunk_size: int=50,
             max_token_len: int=48,
             paligemma_variant: str="gemma_2b",
             action_expert_variant: str="gemma_300m",
@@ -43,7 +44,7 @@ class OpenPiPolicyConfig(PretrainedConfig):
         self.pytorch_training_precision = pytorch_training_precision
         self.action_dim = action_dim
         self.max_action_dim = max_action_dim
-        self.action_horizon = action_horizon
+        self.action_horizon = chunk_size
         self.max_token_len = max_token_len
         self.paligemma_variant = paligemma_variant
         self.action_expert_variant = action_expert_variant
@@ -84,15 +85,14 @@ class OpenPiPolicy(PreTrainedModel):
             logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
     
     def forward(self, observation, actions=None):
+        observation = _model.Observation.from_dict(observation)
+        dev = 'cuda'
+        observation = jax.tree.map(lambda x: x.to(dev), observation)
         if actions is not None:
-            dev = next(self.model.parameters()).device
-            observation = jax.tree.map(lambda x: x.to(dev), observation)
             actions = actions.to(dev)
             losses = self.model(observation, actions)
             return {'loss': losses.mean()}
         else:
-            dev = next(self.model.parameters()).device
-            observation = jax.tree.map(lambda x: x.to(dev), observation)
             action = self.model.sample_actions(dev, observation)
             return action
         

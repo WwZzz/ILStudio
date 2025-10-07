@@ -8,7 +8,7 @@ model_args:
   pytorch_training_precision: bfloat16
   action_dim: 14
   max_action_dim: 32
-  action_horizon: 50
+  chunk_size: 50
   max_token_len: 48
   paligemma_variant: gemma_2b
   action_expert_variant: gemma_300m
@@ -16,8 +16,7 @@ model_args:
   # Task parameters (will be overridden by args if provided)
   state_dim: 14
   discrete_state_input: False
-  pytorch_weight_path: /root/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim_pytorch
-  # action_dim: 14
+  pytorch_weight_path: null
 action_normalize: "minmax"
 state_normalize: "minmax"
 trainer_class: Trainer

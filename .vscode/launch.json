@@ -14,13 +14,19 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "MUJOCO_GL": "glfw"
+                "MUJOCO_GL": "glfw",
+                "CUDA_VISIBLE_DEVICES": "0"
             },
             // "args": [
-            //     "--output_dir", "results/test_pi6",
-            //     "--model_name_or_path", "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/pi_debug7/checkpoint-50", "--use_spawn"
-            //     // "--env", "d4rl_door"
+            //     "--policy", "pi0_aloha",
+            //     "--task", "sim_transfer_cube_scripted",
+            //     "--output_dir", "ckpt/pi0_debug",
+            //     "--training_config", "debug"
             // ],
+            "args": [
+                "--output_dir", "results/test_pi",
+                "--model_name_or_path", "ckpt/pi0_debug/checkpoint-80", "--use_spawn"
+            ],
             // "args": [
             //     "--policy", "pi0_aloha",
             //     "--task", "transfer_cube_top",
@@ -67,12 +73,12 @@
             //     "--max_timesteps",          "400",
             //     "--use_spawn"
             // ],
-            "args": [
-                "--task_name","sim_transfer_cube_scripted",
-                "--policy","act",
-                "--training_config","debug",
-                "--output_dir","ckpt/debug",
-            ],
+            // "args": [
+            //     "--task_name","sim_transfer_cube_scripted",
+            //     "--policy","act",
+            //     "--training_config","debug",
+            //     "--output_dir","ckpt/debug",
+            // ],
             // "args": [
             //     "--model_name_or_path",
             //     "/inspire/hdd/project/robot-action/wangzheng-240308120196/IL-Studio/ckpt/act_transfer_cube_top_zscore_long2/checkpoint-700",
