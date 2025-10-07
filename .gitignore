@@ -19,3 +19,4 @@ lerobot/
 .cursor/
 num2words/
 .venv/
+uv.lock
