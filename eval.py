@@ -37,7 +37,7 @@ def parse_param():
     import argparse
     
     parser = argparse.ArgumentParser(description='Evaluate a policy model')
-    parser.add_argument('--output_dir', type=str, default='results/dp_aloha_transer-official-ema-freq50-dnoise10-aug',
+    parser.add_argument('-o', '--output_dir', type=str, default='results/dp_aloha_transer-official-ema-freq50-dnoise10-aug',
                     help='Directory to save results')
     # Model arguments
     parser.add_argument('--is_pretrained', action='store_true', default=True,
@@ -45,13 +45,13 @@ def parse_param():
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use for evaluation')
     # Direct checkpoint loading
-    parser.add_argument('--model_name_or_path', type=str, 
+    parser.add_argument('-m', '--model_name_or_path', type=str, 
                        default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
                        help='Path to the model checkpoint (directory or specific checkpoint)')
     parser.add_argument('--dataset_dir', type=str, default='',
                        help='Dataset directory')
     # Simulator arguments
-    parser.add_argument('--env', type=str, default='aloha',
+    parser.add_argument('-e', '--env', type=str, default='aloha',
                        help='Env config (name under configs/env or absolute path to yaml)')
     # task/max_timesteps come from env config; override via --env.task / --env.max_timesteps if needed
     parser.add_argument('--fps', type=int, default=50,

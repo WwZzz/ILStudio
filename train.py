@@ -27,13 +27,13 @@ def parse_param():
     parser = argparse.ArgumentParser(description='Train a policy model')
     
     # Essential arguments
-    parser.add_argument('--policy', type=str, default='act',
+    parser.add_argument('-p', '--policy', type=str, default='act',
                        help='Policy config (name under configs/policy or absolute path to yaml)')
-    parser.add_argument('--task', type=str, default='sim_transfer_cube_scripted',
+    parser.add_argument('-t', '--task', type=str, default='sim_transfer_cube_scripted',
                        help='Task config (name under configs/task or absolute path to yaml)')
-    parser.add_argument('--training_config', type=str, default='default',
+    parser.add_argument('-c', '--training_config', type=str, default='default',
                        help='Training config (name under configs/training or absolute path to yaml)')
-    parser.add_argument('--output_dir', type=str, default='ckpt/training_output',
+    parser.add_argument('-o', '--output_dir', type=str, default='ckpt/training_output',
                        help='Output directory for checkpoints')
     
     # Parse arguments (allow unknown for dotted overrides)

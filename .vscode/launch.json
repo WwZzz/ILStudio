@@ -17,16 +17,32 @@
                 "MUJOCO_GL": "glfw",
                 "CUDA_VISIBLE_DEVICES": "0"
             },
+            "args": [
+                "--output_dir", "results/test_openvla",
+                "--model_name_or_path", "ckpt/openvla_debug/checkpoint-200", "--use_spawn"
+            ],
+            // "args": [
+            //     "--policy", "openvla_full",
+            //     "--task", "sim_transfer_cube_scripted",
+            //     "--output_dir", "ckpt/openvla_full",
+            //     "--training_config", "debug"
+            // ],
+            // "args": [
+            //     "--policy", "openvla",
+            //     "--task", "sim_transfer_cube_scripted",
+            //     "--output_dir", "ckpt/openvla_debug",
+            //     "--training_config", "debug"
+            // ],
             // "args": [
             //     "--policy", "pi0_aloha",
             //     "--task", "sim_transfer_cube_scripted",
             //     "--output_dir", "ckpt/pi0_debug",
             //     "--training_config", "debug"
             // ],
-            "args": [
-                "--output_dir", "results/test_pi",
-                "--model_name_or_path", "ckpt/pi0_debug/checkpoint-80", "--use_spawn"
-            ],
+            // "args": [
+            //     "--output_dir", "results/test_pi",
+            //     "--model_name_or_path", "ckpt/pi0_debug/checkpoint-80", "--use_spawn"
+            // ],
             // "args": [
             //     "--policy", "pi0_aloha",
             //     "--task", "transfer_cube_top",

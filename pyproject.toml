@@ -38,6 +38,8 @@ dependencies = [
 [project.optional-dependencies]
 openvla = [
     "timm>=0.9.10",
+    "draccus",
+    "tensorflow_graphics",
 ]
 
 [tool.uv.sources]

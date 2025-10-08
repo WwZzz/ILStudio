@@ -542,6 +542,11 @@ dependencies = [
     { name = "transformers" },
 ]
 
+[package.optional-dependencies]
+openvla = [
+    { name = "timm" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate" },
@@ -563,11 +568,13 @@ requires-dist = [
     { name = "tensorflow-datasets" },
     { name = "tf-keras", specifier = "==2.18.0" },
     { name = "tianshou", specifier = "==0.2.0" },
+    { name = "timm", marker = "extra == 'openvla'", specifier = ">=0.9.10" },
     { name = "torch", specifier = "==2.4.0" },
     { name = "torchaudio", specifier = "==2.4.0" },
     { name = "torchvision", specifier = "==0.19.0" },
     { name = "transformers", specifier = "<=4.45.2" },
 ]
+provides-extras = ["openvla"]
 
 [[package]]
 name = "imageio"
@@ -1702,6 +1709,22 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/8d/b0ef1641de3f51cd61b0d1e67da9c52be9a419b3cb0649115b6fa3e1d2cc/tianshou-0.2.0-py3-none-any.whl", hash = "sha256:bd9b994513160fd8156a9ef5b54f1248f711be745fde1d7543252fd338ffba58", size = 24426, upload-time = "2020-03-25T10:17:06.899Z" },
+]
+
+[[package]]
+name = "timm"
+version = "1.0.20"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "pyyaml" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/ba/6f5d96622a4a9fc315da53f58b3ca224c66015efe40aa191df0d523ede7c/timm-1.0.20.tar.gz", hash = "sha256:7468d32a410c359181c1ef961f49c7e213286e0c342bfb898b99534a4221fc54", size = 2360052, upload-time = "2025-09-21T17:26:35.492Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/74/5573615570bf010f788e977ac57c4b49db0aaf6d634134f6a9212d8dcdfd/timm-1.0.20-py3-none-any.whl", hash = "sha256:f6e62f780358476691996c47aa49de87b95cc507edf923c3042f74a07e45b7fe", size = 2504047, upload-time = "2025-09-21T17:26:33.487Z" },
 ]
 
 [[package]]
