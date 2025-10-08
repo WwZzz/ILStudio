@@ -47,6 +47,28 @@ uv run python train.py --policy act --task sim_transfer_cube_scripted --output_d
 # Evaluation
 un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
+# Policy Gallery:
+- ACT
+- Diffusion Policy
+- Qwen2VL+DP
+- Qwen2.5VL+DP
+- DiVLA
+- OpenVLA
+- Pi0
+- MLP
+- ResNet+MLP
+- SMolVLA
+
+# Benchmark Gallery
+- aloha_sim
+- gymnasium_robotics
+- libero
+- metaworld
+- pandagym
+- robomimic
+- simplerenv
+- robotwn
+
 
 # Overview
 We show the architecture as below:
@@ -62,13 +84,8 @@ important APIs from each `policy.algo_name.__init__`
 The model returned by `load_model` should implement:
 - `def select_action(self, obs) -> action`
 
-## Currently available algorithms:
-- ACT
-- Diffusion Policy
-- Qwen2VL+DP
-- Qwen2.5VL+DP
-- DiVLA
-- OpenVLA
+
+
 
 # Dataset
 Each dataset refers to a dictionary containing 
@@ -136,14 +153,6 @@ ctrl_type: abs
 ctrl_space: joint
 ```
 
-## Data Preparation
-
-| Name   | Download | Remark|
-|----------|-----------|-------------|
-| Aloha   | [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O)  |   |
-| VLA-OS | [link](https://huggingface.co/datasets/Linslab/VLA-OS-Dataset)  |   |
-| Open-X | [link](https://github.com/google-deepmind/open_x_embodiment)  |    |
-
 
 # TroubleShooting
 
@@ -154,39 +163,3 @@ if the platform is headless, please use the command below to solve this issue:
 export MUJOCO_GL=egl
 ```
 
-
-# Quick Start Step by Step
-## Simulation Data Preparation
-There are three ways to download the generated datasets.
-- 1) Download from the official repo [link](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O?usp=share_link)
-- 2) Download from the third-party huggingface `huggingface-cli download --repo-type dataset cadene/aloha_sim_transfer_cube_human_raw --local-dir ./data/sim_transfer_cube_scripted`
-- 3) Generate the data by following the guidence in [link](https://github.com/tonyzhaozh/act)
-
-## Add the dataset to configuration
-```python
-
-## Add the dataset to configuration
-
-Create a YAML file in `configs/task/` (e.g., `sim_transfer_cube_scripted.yaml`) with the following content:
-
-```yaml
-dataset_dir:
-    - /path/to/sim_transfer_cube_scripted
-episode_len: 400
-camera_names:
-    - primary
-dataset_class: AlohaSimDataset
-ctrl_type: abs
-ctrl_space: joint
-```
-
-```
-## Train
-```shell
-bash scripts/example_train.sh
-```
-
-## Eval
-```shell
-bash scripts/example_eval.sh
-```
