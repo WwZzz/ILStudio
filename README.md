@@ -168,8 +168,19 @@ if the platform is headless, please use the command below to solve this issue:
 export MUJOCO_GL=egl
 ```
 # Acknowledge
-This repo is built on the open source codebases below. Thanks to the authors' contributions.
+This repo is built on the open source codebases below. Thanks to the authors' wonderful contributions.
 
+- [Lerobot](https://github.com/huggingface/lerobot/tree/main)
+
+- [ACT](https://github.com/MarkFzp/act-plus-plus/)
+
+- [Octo-pytorch](https://github.com/emb-ai/octo-pytorch/)
+
+- [Openpi](https://github.com/Physical-Intelligence/openpi)
+
+- [OpenVLA](https://github.com/openvla/openvla/)
+
+- [DiVLA](https://diffusion-vla.github.io/)
 
 # Citation
 
