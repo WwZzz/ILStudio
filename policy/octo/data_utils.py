@@ -1,18 +1,20 @@
 import numpy as np
 import torch
-
+from benchmark.utils import resize_with_pad
 class OctoDataProcessor:
-    def __init__(self, text_processor, use_wrist=False):
+    def __init__(self, text_processor, use_wrist=False, image_size=(256,256)):
         self.text_processor = text_processor
         self.use_wrist = use_wrist
+        self.image_size = image_size
     
     def _np2pt(self, data, dtype=None):
         """Transform dictionary with numpy arrays to torch tensors.
         Trnsform images to channel-first format: NHWC -> NCHW, NTHWC -> NTCHW
-
         """
         if isinstance(data, dict):
             return {key: self._np2pt(val) for key, val in data.items()}
+        if isinstance(data, torch.Tensor):
+            return data
         t = torch.from_numpy(data)
         return t
     
@@ -27,11 +29,11 @@ class OctoDataProcessor:
         data_dict['task'] = task 
         # observation
         obs = {}
-        obs['proprio'] = sample['state'] # T*D
-        obs['timestep'] = np.array(sample['timestamp'])
+        obs['proprio'] = sample['state'][np.newaxis,:] # T*D
+        obs['timestep'] = np.array([sample['timestamp']])
         obs['timestep_pad_mask'] = np.array([True])
-        obs['task_completed'] = np.array([False for _ in range(sample['action'].shape[0])]) # (1 ,chunk_size)
-        images = sample['image']
+        obs['task_completed'] = np.array([False for _ in range(sample['action'].shape[0])])[np.newaxis,:] # (1 ,chunk_size)
+        sample['image'] = resize_with_pad(sample['image'], self.image_size[0], self.image_size[1])
         obs['image_primary'] = sample['image'][0:1,:] # k c h w -> k h w c
         obs['pad_mask_dict'] = {
             'image_primary': np.array([True]),
@@ -45,12 +47,26 @@ class OctoDataProcessor:
         data_dict['observation'] = obs
         # action
         data_dict['action'] = sample['action'][np.newaxis,:]
-        data_dict['action_pad_mask'] = (1.-np.tile(sample['is_pad'][:, None], (1, data_dict['action'].shape[-1]))[np.newaxis,:]).bool()
+        is_pad = sample['is_pad'][:, None]                 # (k,1)
+        mask = 1.0 - np.tile(is_pad, (1, data_dict['action'].shape[-1]))  # (k,d)
+        mask = mask.astype(bool)                           # 或 np.bool_
+        mask = mask[np.newaxis, :]        
+        data_dict['action_pad_mask'] = mask
         data_dict = self._np2pt(data_dict)
         return data_dict
 
+class OctoCollator:
+    def recursive_stack(self, items):
+        if isinstance(items[0], dict):
+            return {key: self.recursive_stack([item[key] for item in items]) for key in items[0].keys()}
+        else:
+            return torch.stack(items)
         
-        
+    def __call__(self, instances):
+        # recursively stack tensors in a dictionary for each instance
+        batch = self.recursive_stack(instances)
+        batch["task"]["pad_mask_dict"]['language_instruction'] = batch["task"]["pad_mask_dict"]['language_instruction'][:, 0]
+        return batch        
         
         
         

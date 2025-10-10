@@ -8,7 +8,7 @@ from octo.model.components.action_heads_pt import L1ActionHeadPt
 from octo.model.components.tokenizers_pt import LowdimObsTokenizerPt, ImageTokenizerPt, LanguageTokenizerPt
 from octo.model.octo_model_pt import OctoModelPt, _np2pt
 from octo.utils.spec import ModuleSpec
-
+from typing import Tuple, List, Dict, Any
 class OctoConfig(PretrainedConfig):
     def __init__(
         self, 
@@ -19,6 +19,8 @@ class OctoConfig(PretrainedConfig):
         use_wrist: bool = False,
         use_proprio: bool = True,
         last_hidden_dim: int = 384,
+        image_size: List[int] = [256, 256],
+        num_language_tokens: int = 16,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -29,27 +31,34 @@ class OctoConfig(PretrainedConfig):
         self.use_wrist = use_wrist
         self.use_proprio = use_proprio
         self.input_dim = last_hidden_dim 
-
+        self.image_size = image_size
+        self.num_language_tokens = num_language_tokens
+        
 class OctoPolicy(PreTrainedModel):
     config_class = OctoConfig
     
     def __init__(self, config: OctoConfig):
         super().__init__(config)       
         self.model, self.text_processor = self.init_model()
+        self._eval_task = None
         
     def init_model(self): 
         meta = OctoModelPt.load_config_and_meta_from_jax(self.config.jax_checkpoint)
         text_processor = meta['text_processor']
         bs = 1
-        num_tokens_dict = {'primary': 256, 'wrist': 256, 'language': 16, 'action': 1}
+        h,w = self.config.image_size
+        num_tokens_dict = {'primary': h, 'wrist': h, 'language': self.config.num_language_tokens, 'action': 1}
         pad_mask_dict = {k:torch.ones(bs,1).bool() for k in ['timestep', 'image_primary', 'image_wrist', 'proprio']}
-        meta['example_batch']['observation']['image_primary'] = torch.randint(0, 255, (bs, 1, 3, 256, 256))
+        meta['example_batch']['observation']['image_primary'] = torch.randint(0, 255, (bs, 1, 3, h, w))
         meta['example_batch']['observation']['timestep'] = torch.randint(0, 1000, (bs, 1))
         meta['example_batch']['observation']['timestep_pad_mask'] = torch.ones(bs,1).bool()
         meta['example_batch']['observation']['task_completed'] = torch.zeros(bs, 1, self.config.action_horizon).bool()
         meta['example_batch']['task']['language_instruction']['input_ids'] = meta['example_batch']['task']['language_instruction']['input_ids'].long()
         meta['example_batch']['task']['language_instruction']['attention_mask'] = meta['example_batch']['task']['language_instruction']['attention_mask'].long()
-        meta['example_batch']['task']['pad_mask_dict'] = {'lanugage_instruction': torch.ones(bs,1).bool()} 
+        meta['example_batch']['task']['pad_mask_dict'] = {'language_instruction': torch.ones(bs,1).bool()} 
+        if 'image_primary' in meta['example_batch']['task']: meta['example_batch']['task'].pop('image_primary')
+        if 'image_wrist' in meta['example_batch']['task']: meta['example_batch']['task'].pop('image_wrist')
+        if 'timestep' in meta['example_batch']['task']: meta['example_batch']['task'].pop('timestep')
         meta['example_batch']['action'] = torch.randn(bs, 1, self.config.action_horizon, self.config.action_dim)
         meta['example_batch']['action_pad_mask'] = torch.ones_like(meta['example_batch']['action']).bool()
         if not self.config.use_wrist:
@@ -58,7 +67,7 @@ class OctoPolicy(PreTrainedModel):
             del meta['example_batch']['observation']['image_wrist']
             pad_mask_dict.pop('image_wrist')
         else:
-            meta['example_batch']['observation']['image_wrist'] = torch.randint(0, 255, (bs, 1, 3, 256, 256))
+            meta['example_batch']['observation']['image_wrist'] = torch.randint(0, 255, (bs, 1, 3, h, w))
         if self.config.use_proprio:
             meta["config"]["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
                 LowdimObsTokenizerPt,
@@ -95,21 +104,28 @@ class OctoPolicy(PreTrainedModel):
         )
         return model, text_processor
     
-    def forward(self, observation, task, timestep_pad_mask, actions=None, is_pad=None):
+    def forward(self, observation, task, action=None,  action_pad_mask=None):
         _, head_outputs = self.model(
             observations=observation, 
             tasks=task, 
-            timestep_pad_mask=timestep_pad_mask, 
-            action_pad_mask=is_pad,
-            gt_actions=actions,
+            timestep_pad_mask=observation['timestep_pad_mask'], 
+            action_pad_mask=action_pad_mask,
+            gt_actions=action,
             train=True, 
             verbose=False,
             save_attention_mask=True,
         )
         loss = head_outputs['action'][0]
         return {'loss': loss}
-        
+    
+    def select_action(self, obs, **kwargs):
+        device = next(self.parameters()).device
+        if self._eval_task is None:
+            self._eval_task = self.model.create_tasks(texts=obs['raw_lang'][0], device=device)
+        return
 
+    def reset(self):
+        self._eval_task = None
         
         
         

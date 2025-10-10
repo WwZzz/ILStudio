@@ -1,6 +1,7 @@
-# Installation
-uv pip install draccus
-uv pip install tensorflow_graphics
-uv pip install 'git+https://github.com/kvablack/dlimp@5edaa4691567873d495633f2708982b42edf1972'
 
 # Example
+```shell
+# working directory is IL-Studio
+# openvla corresponds to configs/policy/openvla.yaml
+python train.py -p openvla -t sim_transfer_cube_scripted -c debug -
+```
