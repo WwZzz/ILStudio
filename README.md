@@ -57,12 +57,12 @@ un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_nam
 | Qwen2VL+DP            | [[3]](https://arxiv.org/abs/2308.12966) + [[2]](https://arxiv.org/abs/2303.04137)                          |
 | Qwen2.5VL+DP          | [[3]](https://arxiv.org/abs/2308.12966) + [[2]](https://arxiv.org/abs/2303.04137)                          |
 | DiVLA                 | [[4]](https://arxiv.org/html/2412.03293v1)                                                                |
-| OpenVLA               | [[5]](https://openvla.github.io/assets/paper.pdf)                                                      |
+| OpenVLA               | [[5]](https://arxiv.org/abs/2406.09246)                                                      |
 | Pi0                   | [[6]](https://arxiv.org/html/2410.24164v1)                                                             |
 | MLP                   | -                                                                                                      |
 | ResNet                | [[7]](https://arxiv.org/abs/1512.03385)                                                                |
 | SMolVLA               | [[8]](https://arxiv.org/abs/2506.01844)                                                                |
-| Octo                  | [[9]](https://octo-models.github.io/octo.pdf)    
+| Octo                  | [[9]](https://octo-models.github.io/)    
 
 # Benchmark Gallery
 - aloha_sim
