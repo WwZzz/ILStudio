@@ -122,6 +122,14 @@ class OctoPolicy(PreTrainedModel):
         device = next(self.parameters()).device
         if self._eval_task is None:
             self._eval_task = self.model.create_tasks(texts=obs['raw_lang'][0], device=device)
+        # modify obs
+        
+        self.model.sample_actions(
+            obs, 
+            self._eval_task, 
+            unnormalization_statistics=None,
+            generator=torch.Generator(device).manual_seed(0),    
+        )
         return
 
     def reset(self):

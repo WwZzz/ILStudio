@@ -33,8 +33,9 @@ def resize_with_pad(img, width, height, pad_value=-1, interpolation=cv2.INTER_LI
     arr = img.detach().cpu().numpy() if is_torch else img
     if arr.ndim != 4:
         raise ValueError(f"(n,c,h,w) expected, but {tuple(arr.shape)}")
-
+    
     n, c, h, w = arr.shape
+    if h==height and w==width: return img
     out_list = []
     for i in range(n):
         chw = arr[i]

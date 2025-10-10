@@ -1,0 +1,14 @@
+dataset_dir:
+  - lerobot/aloha_mobile_cabinet
+dataset_class: WrappedLerobotDataset
+ctrl_type: abs
+ctrl_space: joint
+
+# Task-specific parameters
+action_dim: 14
+state_dim: 14
+image_size: [640, 480]
+action_normalize: "zscore"
+state_normalize: "zscore"
+chunk_size: 64
+
