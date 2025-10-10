@@ -55,7 +55,7 @@ class OctoPolicy(PreTrainedModel):
         meta['example_batch']['observation']['task_completed'] = torch.zeros(bs, 1, self.config.action_horizon).bool()
         meta['example_batch']['task']['language_instruction']['input_ids'] = meta['example_batch']['task']['language_instruction']['input_ids'].long()
         meta['example_batch']['task']['language_instruction']['attention_mask'] = meta['example_batch']['task']['language_instruction']['attention_mask'].long()
-        meta['example_batch']['task']['pad_mask_dict'] = {'language_instruction': torch.ones(bs,1).bool()} 
+        meta['example_batch']['task']['pad_mask_dict'] = {'language_instruction': torch.ones(bs,).bool()} 
         if 'image_primary' in meta['example_batch']['task']: meta['example_batch']['task'].pop('image_primary')
         if 'image_wrist' in meta['example_batch']['task']: meta['example_batch']['task'].pop('image_wrist')
         if 'timestep' in meta['example_batch']['task']: meta['example_batch']['task'].pop('timestep')
