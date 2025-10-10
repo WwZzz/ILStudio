@@ -174,12 +174,21 @@ This repo is built on the open source codebases below. Thanks to the authors' co
 # Citation
 
 [1] Zhong, C., et al. (2023). "ACT: Action-aware RoI-based Transformers for Egocentric Action Detection." arXiv preprint arXiv:2304.10390.
+
 [2] Chi, C., et al. (2023). "Diffusion Policy: Visuomotor Policy Learning with Action Diffusion." arXiv preprint arXiv:2303.04137.
+
 [3] Qwen Team (2024). "Qwen2-VL Technical Report." arXiv preprint arXiv:2406.17852.
+
 [4] Liu, S., et al. (2024). "DiVLA: A General-Purpose Vision-Language Agent with Software and Text." arXiv preprint arXiv:2405.00398.
+
 [5] OpenVLA Team (2024). "OpenVLA: An Open-Source Vision-Language-Action Model."
+
 [6] Shafiullah, N. M., et al. (2024). "Pi0: A Human-in-the-Loop Imitation Learning Framework for Robot Manipulation." arXiv preprint arXiv:2409.11714.
+
 [7] Goodfellow, I., Bengio, Y., & Courville, A. (2016). "Deep Learning." MIT Press.
+
 [8] He, K., et al. (2015). "Deep Residual Learning for Image Recognition." arXiv preprint arXiv:1512.03385.
+
 [9] Shukor, M., et al. (2025). "SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics." arXiv preprint arXiv:2506.01844.
+
 [10] Octo Team (2024). "Octo: An Open-Source Generalist Robot Policy."
