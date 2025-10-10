@@ -322,7 +322,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
             'action': action_data,
             'is_pad': is_pad,
             'raw_lang': raw_lang,
-            'reasoning': reasoning
+            'reasoning': reasoning,
+            'timestamp': start_ts,  
+            'episode_id': episode_id,
         }  # Construct sample dict
         assert raw_lang is not None, ""
         del image_data

@@ -125,12 +125,6 @@ class OpenPolicy(PreTrainedModel):
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
     
-    def get_openvla_prompt(self, instruction: str, openvla_path) -> str:
-        if "v01" in openvla_path:
-            return f"{SYSTEM_PROMPT} USER: What action should the robot take to {instruction.lower()}? ASSISTANT:"
-        else:
-            return f"In: What action should the robot take to {instruction.lower()}?\nOut:"
-     
     def select_action(
         self,
         obs,

@@ -18,9 +18,15 @@
                 "CUDA_VISIBLE_DEVICES": "0"
             },
             "args": [
-                "--output_dir", "results/test_openvla",
-                "--model_name_or_path", "ckpt/openvla_debug/checkpoint-200", "--use_spawn"
+                "--policy", "octo_aloha",
+                "--task", "sim_transfer_cube_scripted",
+                "--output_dir", "ckpt/debug_octo",
+                "--training_config", "debug"
             ],
+            // "args": [
+            //     "--output_dir", "results/test_openvla",
+            //     "--model_name_or_path", "ckpt/openvla_debug/checkpoint-200", "--use_spawn"
+            // ],
             // "args": [
             //     "--policy", "openvla_full",
             //     "--task", "sim_transfer_cube_scripted",

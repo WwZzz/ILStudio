@@ -7,7 +7,7 @@ GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 cd ../../..
 source policy/openpi/openpi/.venv/bin/activate
-uv pip install peft tensorflow==2.18.0 tf-keras tensorflow_datasets tianshou==0.2.0 robosuite=1.4.0
+uv pip install peft tensorflow==2.18.0 tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0
 ```
 
 
@@ -52,7 +52,7 @@ model_args:
   # Task parameters (will be overridden by args if provided)
   state_dim: 14
   discrete_state_input: False
-  pytorch_weight_path: /path/to/converted/pytorch/checkpoint
+  pytorch_weight_path: /path/to/converted/pytorch/checkpoint # This line should be replaced
 action_normalize: "minmax"
 state_normalize: "minmax"
 trainer_class: Trainer
