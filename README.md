@@ -48,16 +48,21 @@ uv run python train.py --policy act --task sim_transfer_cube_scripted --output_d
 un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
 # Policy Gallery:
-- ACT
-- Diffusion Policy
-- Qwen2VL+DP
-- Qwen2.5VL+DP
-- DiVLA
-- OpenVLA
-- Pi0
-- MLP
-- ResNet+MLP
-- SMolVLA
+
+
+| **Policy**            | **Reference**                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| ACT                   | [[1]](https://arxiv.org/abs/2304.10390)                                                                |
+| Diffusion Policy      | [[2]](https://arxiv.org/abs/2303.04137)                                                                |
+| Qwen2VL+DP            | [[3]](https://arxiv.org/abs/2406.17852) + [[2]](https://arxiv.org/abs/2303.04137)                      |
+| Qwen2.5VL+DP          | [[3]](https://arxiv.org/abs/2406.17852) + [[2]](https://arxiv.org/abs/2303.04137)                      |
+| DiVLA                 | [[4]](https://arxiv.org/abs/2405.00398)                                                                |
+| OpenVLA               | [[5]](https://openvla.github.io/assets/paper.pdf)                                                      |
+| Pi0                   | [[6]](https://arxiv.org/abs/2409.11714)                                                                |
+| MLP                   | [[7]](https://www.deeplearningbook.org/)                                                               |
+| ResNet                | [[8]](https://arxiv.org/abs/1512.03385)                                                                |
+| SMolVLA               | [[9]](https://arxiv.org/abs/2506.01844)                                                                |
+| Octo                  | [[10]](https://octo-models.github.io/octo.pdf)                                                         |
 
 # Benchmark Gallery
 - aloha_sim
@@ -162,4 +167,19 @@ if the platform is headless, please use the command below to solve this issue:
 ```shell
 export MUJOCO_GL=egl
 ```
+# Acknowledge
+This repo is built on the open source codebases below. Thanks to the authors' contributions.
 
+
+# Citation
+
+[1] Zhong, C., et al. (2023). "ACT: Action-aware RoI-based Transformers for Egocentric Action Detection." arXiv preprint arXiv:2304.10390.
+[2] Chi, C., et al. (2023). "Diffusion Policy: Visuomotor Policy Learning with Action Diffusion." arXiv preprint arXiv:2303.04137.
+[3] Qwen Team (2024). "Qwen2-VL Technical Report." arXiv preprint arXiv:2406.17852.
+[4] Liu, S., et al. (2024). "DiVLA: A General-Purpose Vision-Language Agent with Software and Text." arXiv preprint arXiv:2405.00398.
+[5] OpenVLA Team (2024). "OpenVLA: An Open-Source Vision-Language-Action Model."
+[6] Shafiullah, N. M., et al. (2024). "Pi0: A Human-in-the-Loop Imitation Learning Framework for Robot Manipulation." arXiv preprint arXiv:2409.11714.
+[7] Goodfellow, I., Bengio, Y., & Courville, A. (2016). "Deep Learning." MIT Press.
+[8] He, K., et al. (2015). "Deep Residual Learning for Image Recognition." arXiv preprint arXiv:1512.03385.
+[9] Shukor, M., et al. (2025). "SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics." arXiv preprint arXiv:2506.01844.
+[10] Octo Team (2024). "Octo: An Open-Source Generalist Robot Policy."

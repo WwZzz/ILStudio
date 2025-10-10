@@ -9,7 +9,8 @@ cd ../../..
 ```
 
 # Example
-
+### Train
 ```shell
 uv run python train.py -p octo_aloha -t sim_transfer_cube_scripted -c debug -o ckpt/octo_debug 
 ```
+### Eval
