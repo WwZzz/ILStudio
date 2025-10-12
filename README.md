@@ -47,6 +47,24 @@ uv run python train.py --policy act --task sim_transfer_cube_scripted --output_d
 # Evaluation
 un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
+
+## DP on AlohaSim
+
+```shell
+# You can use --training.xxx to update the training parameters
+uv run python train.py --policy diffusion_policy --task sim_transfer_cube_scripted --output_dir ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000
+
+# Evaluation
+un run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
+```
+
+## Octo on AlohaSim
+```shell
+# Install Octo env following the policy/octo/README.md before running this command
+# i.e., -p = --policy, -t = --task, -c = --trianing_config, -o = --output_dir
+uv run python train.py -p octo_aloha -t sim_transfer_cube_scripted -c default -o ckpt/octo_test
+```
+
 # Policy Gallery:
 
 

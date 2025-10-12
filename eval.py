@@ -124,6 +124,7 @@ if __name__=='__main__':
         eval_result = evaluate(args, policy, env, video_writer=video_writer)
         print(eval_result)
         all_eval_results.append(eval_result)
+        policy.reset()
     
     eval_result = {
         'total_success': sum(eri['total_success'] for eri in all_eval_results),
