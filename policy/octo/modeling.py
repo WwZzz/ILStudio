@@ -121,16 +121,21 @@ class OctoPolicy(PreTrainedModel):
     def select_action(self, obs, **kwargs):
         device = next(self.parameters()).device
         if self._eval_task is None:
-            self._eval_task = self.model.create_tasks(texts=obs['raw_lang'][0], device=device)
+            self._eval_task = self.model.create_tasks(texts=obs['raw_lang'], device=device)
         # modify obs
-        
-        self.model.sample_actions(
-            obs, 
+        num_obs = obs['state'].shape[0]
+        instances = [{'state': obs['state'][i], 'image': obs['image'][i], 'timestamp': obs['timestep'][i].item()} for i in range(num_obs)]
+        processed_obs = [self.data_processor(instance) for instance in instances]
+        batch_obs = self.data_collator(processed_obs)['observation']
+        batch_obs = self.data_processor._pt2dev(batch_obs, device)
+        # obs to device
+        actions = self.model.sample_actions(
+            batch_obs, 
             self._eval_task, 
             unnormalization_statistics=None,
             generator=torch.Generator(device).manual_seed(0),    
         )
-        return
+        return actions
 
     def reset(self):
         self._eval_task = None

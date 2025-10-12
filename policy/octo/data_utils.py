@@ -18,21 +18,34 @@ class OctoDataProcessor:
         t = torch.from_numpy(data)
         return t
     
+    def _pt2dev(self, data, dev):
+        """Transform dictionary with numpy arrays to torch tensors.
+        Trnsform images to channel-first format: NHWC -> NCHW, NTHWC -> NTCHW
+        """
+        if isinstance(data, dict):
+            return {key: self._pt2dev(val, dev) for key, val in data.items()}
+        if isinstance(data, torch.Tensor):
+            return data.to(dev)
+        else:
+            return data
+    
     def __call__(self, sample):
         data_dict = {}
         # task
-        task = {}
-        task["language_instruction"] = self.text_processor.encode([s.decode("utf-8") for s in np.array([sample['raw_lang'].encode()])])
-        task["pad_mask_dict"] = {"language_instruction": np.array([True])}
-        task["language_instruction"]['input_ids'] = task["language_instruction"]['input_ids'][0]
-        task["language_instruction"]['attention_mask'] = task["language_instruction"]['attention_mask'][0]
-        data_dict['task'] = task 
+        if 'raw_lang' in sample:
+            task = {}
+            task["language_instruction"] = self.text_processor.encode([s.decode("utf-8") for s in np.array([sample['raw_lang'].encode()])])
+            task["pad_mask_dict"] = {"language_instruction": np.array([True])}
+            task["language_instruction"]['input_ids'] = task["language_instruction"]['input_ids'][0]
+            task["language_instruction"]['attention_mask'] = task["language_instruction"]['attention_mask'][0]
+            data_dict['task'] = task 
         # observation
         obs = {}
         obs['proprio'] = sample['state'][np.newaxis,:] # T*D
         obs['timestep'] = np.array([sample['timestamp']])
         obs['timestep_pad_mask'] = np.array([True])
-        obs['task_completed'] = np.array([False for _ in range(sample['action'].shape[0])])[np.newaxis,:] # (1 ,chunk_size)
+        if 'action' in sample:
+            obs['task_completed'] = np.array([False for _ in range(sample['action'].shape[0])])[np.newaxis,:] # (1 ,chunk_size)
         sample['image'] = resize_with_pad(sample['image'], self.image_size[0], self.image_size[1])
         obs['image_primary'] = sample['image'][0:1,:] # k c h w -> k h w c
         obs['pad_mask_dict'] = {
@@ -46,12 +59,13 @@ class OctoDataProcessor:
             obs['pad_mask_dict']['image_wrist'] = np.array([True])
         data_dict['observation'] = obs
         # action
-        data_dict['action'] = sample['action'][np.newaxis,:]
-        is_pad = sample['is_pad'][:, None]                 # (k,1)
-        mask = 1.0 - np.tile(is_pad, (1, data_dict['action'].shape[-1]))  # (k,d)
-        mask = mask.astype(bool)                           # 或 np.bool_
-        mask = mask[np.newaxis, :]        
-        data_dict['action_pad_mask'] = mask
+        if 'action' in sample:
+            data_dict['action'] = sample['action'][np.newaxis,:]
+            is_pad = sample['is_pad'][:, None]                 # (k,1)
+            mask = 1.0 - np.tile(is_pad, (1, data_dict['action'].shape[-1]))  # (k,d)
+            mask = mask.astype(bool)                           # 或 np.bool_
+            mask = mask[np.newaxis, :]        
+            data_dict['action_pad_mask'] = mask
         data_dict = self._np2pt(data_dict)
         return data_dict
 
@@ -65,7 +79,8 @@ class OctoCollator:
     def __call__(self, instances):
         # recursively stack tensors in a dictionary for each instance
         batch = self.recursive_stack(instances)
-        batch["task"]["pad_mask_dict"]['language_instruction'] = batch["task"]["pad_mask_dict"]['language_instruction'][:, 0]
+        if 'task' in batch:
+            batch["task"]["pad_mask_dict"]['language_instruction'] = batch["task"]["pad_mask_dict"]['language_instruction'][:, 0]
         return batch        
         
         

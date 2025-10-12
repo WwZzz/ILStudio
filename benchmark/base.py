@@ -34,12 +34,13 @@ class MetaObs:
     depth: np.ndarray = None # (K, H, W)
     pc: np.array = None # (n, 3)
     raw_lang: str = ''
+    timestep: int = -1
     
     def __getitem__(self, key):
         return getattr(self, key)
 
     def to_batch(self):
-        all_keys = ['state', 'state_ee', 'state_joint', 'state_obj', 'image', 'depth', 'pc' ]
+        all_keys = ['state', 'state_ee', 'state_joint', 'state_obj', 'image', 'depth', 'pc', 'timestep']
         for k in all_keys:
             if self[k] is not None:
                 setattr(self, k, self[k][np.newaxis, :])
@@ -144,6 +145,7 @@ class MetaPolicy:
     def select_action(self, mobs: MetaObs, t:int, return_all=False):
         # normalizing Obs and Actions
         if t % self.chunk_size == 0 or len(self.action_queue)==0:
+            mobs.timestep = np.array([[t] for _ in range(mobs.state.shape[0])])
             mact_list = self.inference(mobs)
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
