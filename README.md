@@ -84,7 +84,7 @@ un run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name
 - pandagym
 - robomimic
 - simplerenv
-- robotwn
+- robotwin (Under Development)
 
 
 # Overview
