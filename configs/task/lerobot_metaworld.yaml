@@ -1,0 +1,14 @@
+dataset_dir:
+  - lerobot/metaworld_mt50
+dataset_class: WrappedLerobotDataset
+ctrl_type: abs
+ctrl_space: ee
+
+# Task-specific parameters
+action_dim: 4
+state_dim: 4
+image_size: [480, 480]
+action_normalize: "zscore"
+state_normalize: "zscore"
+chunk_size: 64
+
