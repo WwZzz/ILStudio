@@ -8,6 +8,7 @@ data/
 data
 __pycache__/
 scripts/*
+tmp_scripts/*
 !scripts/visualize/
 !scripts/*example*.sh
 logs/
