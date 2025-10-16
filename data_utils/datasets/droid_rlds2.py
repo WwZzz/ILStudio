@@ -10,25 +10,18 @@ from enum import auto
 import json
 import logging
 from pathlib import Path
-import concurrent.futures
-import logging
-import os
-import pathlib
-import re
-import shutil
-import stat
-import time
-import urllib.parse
-import filelock
-import fsspec
-import fsspec.generic
-from tqdm import tqdm
+
+import tqdm
+
+import openpi.shared.download as download
+
 
 class DroidActionSpace(Enum):
     """Action space for DROID dataset."""
 
     JOINT_POSITION = auto()
     JOINT_VELOCITY = auto()
+
 
 class DroidRldsDataset:
     def __init__(
@@ -46,8 +39,8 @@ class DroidRldsDataset:
         num_parallel_reads: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         num_parallel_calls: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         filter_dict_path=None,  # Path to json file with indices to sample during training
-        data_processor: callable = None,  # Optional function to apply to each data sample
-        data_collator: callable = None,  # Optional function to collate a batch of data samples
+        sample_transform=None,  # Function to transform individual samples
+        collator=None,  # Function to collate batches
     ):
         # Import tensorflow here to not make it mandatory in case RLDS data loader is not used.
         import dlimp as dl
@@ -56,6 +49,10 @@ class DroidRldsDataset:
 
         # Configure Tensorflow with *no GPU devices* (to prevent clobber with PyTorch / JAX)
         tf.config.set_visible_devices([], "GPU")
+        
+        # Store transform functions
+        self.sample_transform = sample_transform
+        self.collator = collator
 
         builder = tfds.builder("droid", data_dir=data_dir, version="1.0.1")
         dataset = dl.DLataset.from_rlds(builder, split="train", shuffle=shuffle, num_parallel_reads=num_parallel_reads)
@@ -78,7 +75,7 @@ class DroidRldsDataset:
         # }
         # means keep frames 0-99 and 200-299).
         if filter_dict_path is not None:
-            cached_filter_dict_path = self.download(filter_dict_path, cache_dir=data_dir)
+            cached_filter_dict_path = download.maybe_download(filter_dict_path)
             with Path(cached_filter_dict_path).open("r") as f:
                 filter_dict = json.load(f)
 
@@ -87,7 +84,7 @@ class DroidRldsDataset:
             keys_tensor = []
             values_tensor = []
 
-            for episode_key, ranges in tqdm(filter_dict.items(), desc="Creating idle filter hash table..."):
+            for episode_key, ranges in tqdm.tqdm(filter_dict.items(), desc="Creating idle filter hash table..."):
                 for start, end in ranges:
                     for t in range(start, end):
                         frame_key = f"{episode_key}--{t}"
@@ -159,35 +156,30 @@ class DroidRldsDataset:
             }
 
         dataset = dataset.traj_map(restructure, num_parallel_calls)
-        
-        def chunk_actions(traj):
-            """
-            Splits episode into action chunks and adds a corresponding padding mask.
-            
-            Args:
-                traj (dict): A dictionary containing at least the key "actions".
-                action_chunk_size (int): The size of the action chunks.
 
-            Returns:
-                dict: The modified trajectory dictionary with chunked "actions" and
-                    a new "action_is_pad" boolean mask.
-            """
+        def chunk_actions(traj):
+            """Splits episode into action chunks."""
             traj_len = tf.shape(traj["actions"])[0]
-            original_indices = tf.broadcast_to(
-                tf.range(action_chunk_size, dtype=tf.int32)[None],
+
+            # For each step in the trajectory, construct indices for the next n actions
+            action_chunk_indices = tf.broadcast_to(
+                tf.range(action_chunk_size)[None],
                 [traj_len, action_chunk_size],
             ) + tf.broadcast_to(
-                tf.range(traj_len, dtype=tf.int32)[:, None],
+                tf.range(traj_len)[:, None],
                 [traj_len, action_chunk_size],
             )
-            action_is_pad = original_indices >= traj_len
-            traj["action_is_pad"] = action_is_pad
-            action_chunk_indices = tf.minimum(original_indices, traj_len - 1)
+
+            # Cap to length of the sequence --> final chunks will repeat the last action
+            # This makes sense, since we are using absolute joint + gripper position actions
+            action_chunk_indices = tf.minimum(action_chunk_indices, traj_len - 1)
+
+            # Gather the actions for each chunk
             traj["actions"] = tf.gather(traj["actions"], action_chunk_indices)
             return traj
 
         dataset = dataset.traj_map(chunk_actions, num_parallel_calls)
-        self.traj_dataset = dataset
+
         # Flatten: map from trajectory dataset to dataset of individual action chunks
         dataset = dataset.flatten(num_parallel_calls=num_parallel_calls)
 
@@ -216,25 +208,36 @@ class DroidRldsDataset:
 
         dataset = dataset.frame_map(decode_images, num_parallel_calls)
 
-        def format_convert(frame):
-            # Convert int64 to int32 for PyTorch compatibility
-            data_dict = {}
-            obs = frame["observation"]
-            jp = tf.cast(obs["joint_position"], tf.float32)
-            gp = tf.cast(obs["gripper_position"], tf.float32)
-            data_dict["state"] = tf.concat([jp, gp], axis=-1) 
-            data_dict["actions"] = tf.cast(frame["actions"], tf.float32)
-            data_dict["raw_lang"] = frame["prompt"]
-            data_dict["is_pad"] = frame["action_is_pad"]
-            data_dict["image"] = tf.stack([obs["image"], obs["wrist_image"]], axis=0)  # (2, H, W, C)
-            step_id =  tf.strings.split(frame['step_id'], sep="--")
-            data_dict["episode_id"] = step_id[0] + "--" + step_id[1]
-            data_dict["timestamp"] = tf.strings.to_number(step_id[2], out_type=tf.int32)
-            # create empty dict as reasoning 
-            data_dict["reasoning"] = {}
-            return data_dict
-        
-        dataset = dataset.map(format_convert, num_parallel_calls)
+        # Apply sample-level transform if provided
+        if self.sample_transform is not None:
+            def apply_sample_transform(frame):
+                # Convert TensorFlow tensors to numpy for the transform function
+                frame_np = {}
+                for key, value in frame.items():
+                    if isinstance(value, dict):
+                        frame_np[key] = {}
+                        for subkey, subvalue in value.items():
+                            frame_np[key][subkey] = subvalue.numpy() if hasattr(subvalue, 'numpy') else subvalue
+                    else:
+                        frame_np[key] = value.numpy() if hasattr(value, 'numpy') else value
+                
+                # Apply the transform
+                transformed_frame = self.sample_transform(frame_np)
+                
+                # Convert back to TensorFlow tensors
+                frame_tf = {}
+                for key, value in transformed_frame.items():
+                    if isinstance(value, dict):
+                        frame_tf[key] = {}
+                        for subkey, subvalue in value.items():
+                            frame_tf[key][subkey] = tf.convert_to_tensor(subvalue)
+                    else:
+                        frame_tf[key] = tf.convert_to_tensor(value)
+                
+                return frame_tf
+            
+            dataset = dataset.frame_map(apply_sample_transform, num_parallel_calls)
+
         # Shuffle, batch
         dataset = dataset.shuffle(shuffle_buffer_size)
         dataset = dataset.batch(batch_size)
@@ -245,65 +248,16 @@ class DroidRldsDataset:
         self.batch_size = batch_size
         self.shuffle = shuffle
 
-    
     def __iter__(self):
-        yield from self.dataset.as_numpy_iterator()
+        if self.collator is not None:
+            # Apply collator function to each batch
+            for batch in self.dataset.as_numpy_iterator():
+                yield self.collator(batch)
+        else:
+            yield from self.dataset.as_numpy_iterator()
 
     def __len__(self):
         # This is the approximate number of samples in DROID after filtering.
         # Easier to hardcode than to iterate through the dataset and compute it.
         return 20_000_000
 
-    def download(self, url: str, cache_dir: str, force_download: bool = False, **kwargs) -> pathlib.Path:
-        # Don't use fsspec to parse the url to avoid unnecessary connection to the remote filesystem.
-        parsed = urllib.parse.urlparse(url)
-        # Short circuit if this is a local path.
-        if parsed.scheme == "":
-            path = pathlib.Path(url)
-            if not path.exists():
-                raise FileNotFoundError(f"File not found at {url}")
-            return path.resolve()
-        cache_dir = pathlib.Path(cache_dir)
-        local_path = cache_dir / parsed.netloc / parsed.path.strip("/")
-        local_path = local_path.resolve()
-        # Check if the cache should be invalidated.
-        invalidate_cache = False
-        if local_path.exists():
-            return local_path
-        try:
-            lock_path = local_path.with_suffix(".lock")
-            with filelock.FileLock(lock_path):
-                # Download the data to a local cache.
-                print(f"Downloading {url} to {local_path}")
-                scratch_path = local_path.with_suffix(".partial")
-                def _download_fsspec(url: str, local_path: pathlib.Path, **kwargs):
-                    """Download a file from a remote filesystem to the local cache, and return the local path."""
-                    fs, _ = fsspec.core.url_to_fs(url, **kwargs)
-                    info = fs.info(url)
-                    # Folders are represented by 0-byte objects with a trailing forward slash.
-                    if is_dir := (info["type"] == "directory" or (info["size"] == 0 and info["name"].endswith("/"))):
-                        total_size = fs.du(url)
-                    else:
-                        total_size = info["size"]
-                    with tqdm(total=total_size, unit="iB", unit_scale=True, unit_divisor=1024) as pbar:
-                        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                        future = executor.submit(fs.get, url, local_path, recursive=is_dir)
-                        while not future.done():
-                            current_size = sum(f.stat().st_size for f in [*local_path.rglob("*"), local_path] if f.is_file())
-                            pbar.update(current_size - pbar.n)
-                            time.sleep(1)
-                        pbar.update(total_size - pbar.n)
-                _download_fsspec(url, scratch_path, **kwargs)
-                shutil.move(scratch_path, local_path)
-        except PermissionError as e:
-            msg = (
-                f"Local file permission error was encountered while downloading {url}. "
-                f"Please try again after removing the cached data using: `rm -rf {local_path}*`"
-            )
-            raise PermissionError(msg) from e
-        return local_path
-    
-if __name__=='__main__':
-    ds = DroidRldsDataset(data_dir="/inspire/hdd/project/robot-action/public/data/droid", batch_size=2, shuffle_buffer_size=10000,filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json")
-    data = next(iter(ds))
-    print(data)

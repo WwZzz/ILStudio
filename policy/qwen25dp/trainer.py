@@ -14,6 +14,7 @@ from transformers.trainer import (
     has_length,
     ALL_LAYERNORM_LAYERS,
 )
+from policy.trainer import BaseTrainer
 
 # 忽略重复的 UserWarning，只让特定警告显示一次
 warnings.simplefilter("once", UserWarning)
@@ -31,7 +32,8 @@ def _full_nodecay_fn(name, param, decay_param_names):
     return ".lora_" not in name and name not in decay_param_names
 
 
-class Trainer(transformers.trainer.Trainer):
+class Trainer(BaseTrainer):
+
     
     EXTRA_FILE = "extra_trainable.safetensors"
     

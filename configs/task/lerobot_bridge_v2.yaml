@@ -1,0 +1,16 @@
+dataset_dir:
+  - ZibinDong/bridgedatav2_train
+dataset_class: WrappedLerobotDataset
+ctrl_type: abs
+ctrl_space: ee
+
+# Task-specific parameters
+action_dim: 4
+state_dim: 4
+image_size: [256, 256]
+action_normalize: "zscore"
+state_normalize: "zscore"
+chunk_size: 64
+
+
+
