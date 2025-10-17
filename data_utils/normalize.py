@@ -88,6 +88,10 @@ from typing import List
 import fnmatch
 import hashlib
 import warnings
+import torch.distributed as dist
+
+def is_distributed():
+    return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
 def str2hash(s: str):
     return str(hashlib.md5(s.encode()).hexdigest())
@@ -120,11 +124,15 @@ class BaseNormalizer:
         self.dataset_name = 'd' + str2hash(self.dataset_dir) if dataset_name is None else dataset_name
         self.gripper_indices = gripper_indices
         self.stats_filename = f"{self.dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
-        if self.is_stats_exist():
-            self.all_stats = self.load_stats()
-        else:
-            assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
-            self.all_stats = self.compute_and_save_stats()
+        rank = dist.get_rank() if is_distributed() else 0
+        if rank == 0:
+            if self.is_stats_exist():
+                self.all_stats = self.load_stats()
+            else:
+                assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
+                self.all_stats = self.compute_and_save_stats()
+        if is_distributed(): dist.barrier()
+        if rank != 0: self.all_stats = self.load_stats()
 
     @classmethod
     def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):

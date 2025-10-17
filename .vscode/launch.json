@@ -15,11 +15,15 @@
             "console": "integratedTerminal",
             "env": {
                 "MUJOCO_GL": "glfw",
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "0",
+                "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
             },
             "args": [
-                "--output_dir", "results/test_octo","--model_name_or_path","ckpt/debug_octo", "--use_spawn"
-            ]
+                "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_new_train_debug"
+            ],
+            // "args": [
+            //     "--output_dir", "results/test_octo","--model_name_or_path","ckpt/debug_octo", "--use_spawn"
+            // ]
             // "args": [
             //     "--policy", "octo_aloha",
             //     "--task", "sim_transfer_cube_scripted",

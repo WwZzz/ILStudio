@@ -18,6 +18,10 @@ from torchvision.transforms.functional import to_pil_image, to_tensor
 from .normalize import BaseNormalizer, MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
+import torch.distributed as dist
+
+def is_distributed():
+    return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
 # e = IPython.embed  # Removed to avoid unnecessary dependency
 
@@ -29,7 +33,36 @@ NORMTYPE2CLASS = {
     'identity': Identity,
 }
 
-
+def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
+    # Identify the type of the dataset: iter or map
+    is_iter_dataset = hasattr(train_dataset, '__iter__') and not hasattr(train_dataset, '__getitem__')
+    if not is_iter_dataset:
+        print(f"Train dataset size: {len(train_dataset)}")
+        if val_dataset is not None:
+            print(f"Validation dataset size: {len(val_dataset)}")
+        # Create DataLoader
+        wrapped_train_data = WrappedDataset(train_dataset, processor)
+        if is_distributed():
+            from torch.utils.data.distributed import DistributedSampler
+            print(f"Using DistributedSampler for distributed training")
+            sampler = DistributedSampler(wrapped_train_data) 
+        else:
+            sampler = None
+        train_loader = DataLoader(
+            wrapped_train_data,
+            batch_size=args.per_device_train_batch_size,
+            shuffle=(sampler is None),
+            sampler=sampler,
+            num_workers=args.dataloader_num_workers,
+            collate_fn=collator,
+            drop_last=True,
+            pin_memory=args.dataloader_pin_memory,
+        )
+        eval_loader = None
+        return train_loader, eval_loader
+    else:
+        raise NotImplementedError("Iterable dataset is not supported yet.")
+    
 
 def find_all_hdf5(dataset_dir):
     """
@@ -118,7 +151,6 @@ def load_normalizer_from_meta(dataset_dir:str='', norm_meta=None, src_dir=''):
     return {'state': state_normalizer, 'action': action_normalizer}
     
 def load_data(args, task_config, save_norm=True):
-    set_seed(0)
     dataset_dir_l = task_config['dataset_dir']
     # episode_len = task_config['episode_len']
     camera_names = task_config.get('camera_names', [])
@@ -138,7 +170,13 @@ def load_data(args, task_config, save_norm=True):
         data_class = getattr(importlib.import_module('data_utils.datasets'), data_class)
     # Compute statistics for each dataset
     # Pass directory path directly to dataset constructor, let dataset internally handle .h5 file traversal
-    datasets = [data_class([dataset_dir], camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
+    rank = dist.get_rank() if is_distributed() else 0
+    if rank == 0:
+        datasets = [data_class([dataset_dir], camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
+    if is_distributed():
+        dist.barrier()
+    if rank != 0:
+        datasets = [data_class([dataset_dir], camera_names, data_args=args, chunk_size=args.chunk_size, ctrl_space=ctrl_space, ctrl_type=ctrl_type) for dataset_dir in dataset_dir_l]
     # Get normalizer class
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
