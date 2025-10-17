@@ -19,30 +19,22 @@ import shutil
 import stat
 import time
 import urllib.parse
+import torch
 import filelock
 import fsspec
 import fsspec.generic
 from tqdm import tqdm
 
-class DroidActionSpace(Enum):
-    """Action space for DROID dataset."""
-
-    JOINT_POSITION = auto()
-    JOINT_VELOCITY = auto()
-
-class DroidRldsDataset:
+class DroidDataset:
     def __init__(
         self,
-        data_dir: str,
-        batch_size: int,
-        *,  # Force keyword-only arguments
+        dataset_dir: str,
+        batch_size: int = -1,
         shuffle: bool = True,
-        action_chunk_size: int = 16,
-        # We default to joint position actions, since they allow policy evaluation in simulation.
-        action_space: DroidActionSpace = DroidActionSpace.JOINT_POSITION,
-        max_loaded_steps_per_episode: int = 100,
-        # Reduce this if you are running out of memory, but careful -- below ~100k shuffling is not sufficiently random.
-        shuffle_buffer_size: int = 250_000,
+        chunk_size: int = 16,
+        ctrl_space: str = 'joint',
+        ctrl_type: str = 'abs', 
+        shuffle_buffer_size: int = 20_000,
         num_parallel_reads: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         num_parallel_calls: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         filter_dict_path=None,  # Path to json file with indices to sample during training
@@ -50,12 +42,44 @@ class DroidRldsDataset:
         data_collator: callable = None,  # Optional function to collate a batch of data samples
     ):
         # Import tensorflow here to not make it mandatory in case RLDS data loader is not used.
+        self.dataset_dir = dataset_dir
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.chunk_size = chunk_size
+        self.ctrl_space = ctrl_space
+        self.ctrl_type = ctrl_type
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self.num_parallel_reads = num_parallel_reads
+        self.num_parallel_calls = num_parallel_calls
+        self.filter_dict_path = filter_dict_path
+        self.data_processor = data_processor
+        self.data_collator = data_collator
+        # Load dataset
+        dataset = self.load_data()
+        # Shuffle, batch
+        dataset = dataset.shuffle(shuffle_buffer_size)
+        if self.batch_size>0:
+            dataset = dataset.batch(batch_size)
+        # Note =>> Seems to reduce memory usage without affecting speed?
+        dataset = dataset.with_ram_budget(1)
+        self.dataset = dataset
+
+
+    def load_data(self, *args, **kwargs):
+        data_dir=self.dataset_dir
+        batch_size=self.batch_size
+        shuffle=self.shuffle
+        action_chunk_size=self.chunk_size
+        action_space=self.ctrl_space
+        shuffle_buffer_size=self.shuffle_buffer_size
+        num_parallel_reads=self.num_parallel_reads
+        num_parallel_calls=self.num_parallel_calls
+        filter_dict_path=self.filter_dict_path
         import dlimp as dl
         import tensorflow as tf
         import tensorflow_datasets as tfds
-
-        # Configure Tensorflow with *no GPU devices* (to prevent clobber with PyTorch / JAX)
-        tf.config.set_visible_devices([], "GPU")
+        gpus = tf.config.list_physical_devices('GPU')   
+        tf.config.set_visible_devices(gpus[0] if gpus else [] , "GPU")
 
         builder = tfds.builder("droid", data_dir=data_dir, version="1.0.1")
         dataset = dl.DLataset.from_rlds(builder, split="train", shuffle=shuffle, num_parallel_reads=num_parallel_reads)
@@ -105,12 +129,15 @@ class DroidRldsDataset:
         def restructure(traj):
             """Reformat observation and action keys, sample language instruction."""
             # Important: we use joint *position* action space -- easier to simulate!
+            if action_space=='joint': action_key = "joint_position"
+            elif action_space=='ee': action_key = "cartesian"
+            elif action_space=='joint_vel': action_key = "joint_velocity"
+            elif action_space=='ee_vel': action_key = "cartesian_velocity"
+            else: raise ValueError(f"Invalid action space {action_space}")
             actions = tf.concat(
                 (
                     (
-                        traj["action_dict"]["joint_position"]
-                        if action_space == DroidActionSpace.JOINT_POSITION
-                        else traj["action_dict"]["joint_velocity"]
+                        traj["action_dict"][action_key]
                     ),
                     traj["action_dict"]["gripper_position"],
                 ),
@@ -223,7 +250,7 @@ class DroidRldsDataset:
             jp = tf.cast(obs["joint_position"], tf.float32)
             gp = tf.cast(obs["gripper_position"], tf.float32)
             data_dict["state"] = tf.concat([jp, gp], axis=-1) 
-            data_dict["actions"] = tf.cast(frame["actions"], tf.float32)
+            data_dict["action"] = tf.cast(frame["actions"], tf.float32)
             data_dict["raw_lang"] = frame["prompt"]
             data_dict["is_pad"] = frame["action_is_pad"]
             data_dict["image"] = tf.stack([obs["image"], obs["wrist_image"]], axis=0)  # (2, H, W, C)
@@ -235,24 +262,23 @@ class DroidRldsDataset:
             return data_dict
         
         dataset = dataset.map(format_convert, num_parallel_calls)
-        # Shuffle, batch
-        dataset = dataset.shuffle(shuffle_buffer_size)
-        dataset = dataset.batch(batch_size)
-        # Note =>> Seems to reduce memory usage without affecting speed?
-        dataset = dataset.with_ram_budget(1)
-
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-
-    
+        return dataset
+        
     def __iter__(self):
-        yield from self.dataset.as_numpy_iterator()
-
-    def __len__(self):
-        # This is the approximate number of samples in DROID after filtering.
-        # Easier to hardcode than to iterate through the dataset and compute it.
-        return 20_000_000
+        for data in self.dataset.as_numpy_iterator():
+            # process data here
+            if self.batch_size>0:
+                yield data
+            else:
+                data['raw_lang'] = data['raw_lang'].decode('utf-8')
+                data['episode_id'] = data['episode_id'].decode('utf-8')
+                data['image'] = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['image']))
+                data['state'] = torch.from_numpy(data['state']).float()
+                data['action'] = torch.from_numpy(data['action']).float()
+                data['is_pad'] = torch.from_numpy(data['is_pad']).bool()
+                if self.data_processor is not None:
+                    data = self.data_processor(data)
+                yield data
 
     def download(self, url: str, cache_dir: str, force_download: bool = False, **kwargs) -> pathlib.Path:
         # Don't use fsspec to parse the url to avoid unnecessary connection to the remote filesystem.
@@ -304,6 +330,6 @@ class DroidRldsDataset:
         return local_path
     
 if __name__=='__main__':
-    ds = DroidRldsDataset(data_dir="/inspire/hdd/project/robot-action/public/data/droid", batch_size=2, shuffle_buffer_size=10000,filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json")
+    ds = DroidDataset(dataset_dir="/inspire/hdd/project/robot-action/public/data/droid", shuffle_buffer_size=10000,filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json")
     data = next(iter(ds))
     print(data)
