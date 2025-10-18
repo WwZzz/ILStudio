@@ -21,69 +21,72 @@ NORMTYPE2CLASS = {
 }
 
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
-    # Identify the type of the dataset: iter or map
-    is_iter_dataset = hasattr(train_dataset, '__iter__') and (not hasattr(train_dataset, '__len__') or not hasattr(train_dataset, '__getitem__'))
-    
-    if not is_iter_dataset:
-        if val_dataset is not None:
-            print(f"Validation dataset size: {len(val_dataset)}")
-        
-        # Create DataLoader with WrappedDataset
-        wrapped_train_data = WrappedDataset(train_dataset, processor)
-        if is_distributed():
-            from torch.utils.data.distributed import DistributedSampler
-            print(f"Using DistributedSampler for distributed training")
-            sampler = DistributedSampler(wrapped_train_data) 
-        else:
-            sampler = None
-        
-        train_loader = DataLoader(
-            wrapped_train_data,
-            batch_size=args.per_device_train_batch_size,
-            shuffle=(sampler is None),
-            sampler=sampler,
-            num_workers=args.dataloader_num_workers,
-            collate_fn=collator,
-            drop_last=True,
-            pin_memory=args.dataloader_pin_memory,
-        )
-        eval_loader = None
-        return train_loader, eval_loader
-    
+    if isinstance(train_dataset, list):
+        raise NotImplementedError("List of datasets not supported in this function. Use ConcatDataset externally.")
     else:
-        # Wrap iterable dataset with processor
-        wrapped_train_data = WrappedIterableDataset(train_dataset, processor)
+        # Identify the type of the dataset: iter or map
+        is_iter_dataset = hasattr(train_dataset, '__iter__') and (not hasattr(train_dataset, '__len__') or not hasattr(train_dataset, '__getitem__'))
         
-        # For iterable datasets, we cannot use DistributedSampler
-        # Instead, we rely on the dataset itself to handle distributed training
-        if is_distributed():
-            print(f"Warning: Iterable datasets should handle distributed training internally")
-            print(f"Make sure your dataset splits data across workers properly")
+        if not is_iter_dataset:
+            if val_dataset is not None:
+                print(f"Validation dataset size: {len(val_dataset)}")
+            
+            # Create DataLoader with WrappedDataset
+            wrapped_train_data = WrappedDataset(train_dataset, processor)
+            if is_distributed():
+                from torch.utils.data.distributed import DistributedSampler
+                print(f"Using DistributedSampler for distributed training")
+                sampler = DistributedSampler(wrapped_train_data) 
+            else:
+                sampler = None
+            
+            train_loader = DataLoader(
+                wrapped_train_data,
+                batch_size=args.per_device_train_batch_size,
+                shuffle=(sampler is None),
+                sampler=sampler,
+                num_workers=args.dataloader_num_workers,
+                collate_fn=collator,
+                drop_last=True,
+                pin_memory=args.dataloader_pin_memory,
+            )
+            eval_loader = None
+            return train_loader, eval_loader
         
-        # Create DataLoader for iterable dataset
-        train_loader = DataLoader(
-            wrapped_train_data,
-            batch_size=args.per_device_train_batch_size,
-            num_workers=args.dataloader_num_workers,
-            collate_fn=collator,
-            drop_last=True,
-            pin_memory=args.dataloader_pin_memory,
-        )
-        
-        # Handle validation dataset if provided
-        eval_loader = None
-        if val_dataset is not None:
-            wrapped_val_data = WrappedIterableDataset(val_dataset, processor)
-            eval_loader = DataLoader(
-                wrapped_val_data,
+        else:
+            # Wrap iterable dataset with processor
+            wrapped_train_data = WrappedIterableDataset(train_dataset, processor)
+            
+            # For iterable datasets, we cannot use DistributedSampler
+            # Instead, we rely on the dataset itself to handle distributed training
+            if is_distributed():
+                print(f"Warning: Iterable datasets should handle distributed training internally")
+                print(f"Make sure your dataset splits data across workers properly")
+            
+            # Create DataLoader for iterable dataset
+            train_loader = DataLoader(
+                wrapped_train_data,
                 batch_size=args.per_device_train_batch_size,
                 num_workers=args.dataloader_num_workers,
                 collate_fn=collator,
-                drop_last=False,
+                drop_last=True,
                 pin_memory=args.dataloader_pin_memory,
             )
-        
-        return train_loader, eval_loader
+            
+            # Handle validation dataset if provided
+            eval_loader = None
+            if val_dataset is not None:
+                wrapped_val_data = WrappedIterableDataset(val_dataset, processor)
+                eval_loader = DataLoader(
+                    wrapped_val_data,
+                    batch_size=args.per_device_train_batch_size,
+                    num_workers=args.dataloader_num_workers,
+                    collate_fn=collator,
+                    drop_last=False,
+                    pin_memory=args.dataloader_pin_memory,
+                )
+            
+            return train_loader, eval_loader
     
 
 def find_all_hdf5(dataset_dir):
@@ -426,15 +429,8 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         wrapped_datasets.append(wrapped_dataset)
     
     # Create combined dataset
-    if len(wrapped_datasets) == 1:
-        train_dataset = wrapped_datasets[0]
-    else:
-        train_dataset = ConcatDataset(wrapped_datasets)
-    
-    # Test dataset
-    val_dataset = None
-    
-    return train_dataset, val_dataset
+    train_data = wrapped_datasets[0] if len(wrapped_datasets) == 1 else wrapped_datasets
+    return train_data, None
 
 def load_normalizers(args):
     """Load normalizers from saved metadata

@@ -36,6 +36,7 @@ class DroidDataset:
         filter_dict_path=None,  # Path to json file with indices to sample during training
         data_processor: callable = None,  # Optional function to apply to each data sample
         data_collator: callable = None,  # Optional function to collate a batch of data samples
+        gpu_for_dataset: List[int] = [],
     ):
         # Import tensorflow here to not make it mandatory in case RLDS data loader is not used.
         self.dataset_dir = dataset_dir
@@ -51,7 +52,7 @@ class DroidDataset:
         self.data_processor = data_processor
         self.data_collator = data_collator
         gpus = tf.config.list_physical_devices('GPU')   
-        tf.config.set_visible_devices(gpus[0] if gpus else [] , "GPU")
+        tf.config.set_visible_devices([gpus[i] for i in gpu_for_dataset] , "GPU")
         # Load dataset
         dataset = self.load_data()
         # Shuffle, batch
