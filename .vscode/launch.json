@@ -17,6 +17,8 @@
                 "MUJOCO_GL": "glfw",
                 "CUDA_VISIBLE_DEVICES": "0",
                 "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
+                "ILSTD_CACHE": "/mnt/model/ilstd",
+                "HF_ENDPOINT": "https://hf-mirror.com",
             },
             "args": [
                 "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_new_train_debug"
