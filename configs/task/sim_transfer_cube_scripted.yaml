@@ -6,9 +6,10 @@ datasets:
     args:
       dataset_path_list: ['data/sim_transfer_cube_scripted']
       camera_names: ['primary']
-      chunk_size: 64
+      chunk_size: 100
       ctrl_space: 'joint'
       ctrl_type: 'abs'
+      preload_data: True
 
 # 任务特定参数
 action_dim: 14

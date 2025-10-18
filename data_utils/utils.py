@@ -8,11 +8,12 @@ import importlib
 from torch.utils.data import DataLoader, ConcatDataset
 from .normalize import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 import torch.distributed as dist
-import torchdata.datapipes.iter as dp
+# import torchdata.datapipes.iter as dp
+# import torch.utils.data.datapipes.iter as dp
 
-# Import torchdata for mixed dataset support
+# # Import torchdata for mixed dataset support
 try:
-    from torchdata.datapipes.iter import IterableWrapper, Cycler, ShardingFilter, Shuffler, Batcher, Prefetcher
+    from torchdata.datapipes.iter import IterableWrapper, Cycler, ShardingFilter, Shuffler, Batcher, Prefetcher, Multiplexer, SampleMultiplexer
     TORCHDATA_AVAILABLE = True
 except ImportError:
     TORCHDATA_AVAILABLE = False
@@ -52,8 +53,6 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
     """
     if isinstance(train_dataset, list):
         # Multiple datasets - use torchdata for mixing
-        if not TORCHDATA_AVAILABLE:
-            raise RuntimeError("torchdata is required for multi-dataset mixing. Install with: pip install torchdata")
         
         print(f"Using mixed dataset pipeline with {len(train_dataset)} datasets")
         train_loader = _create_mixed_dataloader(train_dataset, processor, collator, args)
@@ -190,7 +189,7 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     pipelines = []
     for i, dataset in enumerate(iterable_datasets):
         # Wrap as IterableWrapper
-        pipe = IterableWrapper(dataset)
+        pipe = IterableWrapper(dataset, deepcopy=False)
         
         # Apply Cycle to prevent exhaustion
         pipe = pipe.cycle()
@@ -200,28 +199,27 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     
     # Step 3: Multiplex (mix) all pipelines
     # Use round-robin sampling from each pipeline
-    from torchdata.datapipes.iter import Multiplexer
     print(f"Multiplexing {len(pipelines)} pipelines")
     mixed_pipe = Multiplexer(*pipelines)
     
     # Step 4: Apply ShardingFilter for distributed training
     # print(f"Applying ShardingFilter for distributed training")
-    # mixed_pipe = mixed_pipe.sharding_filter()
+    mixed_pipe = mixed_pipe.sharding_filter()
     
     # Step 5: Apply Shuffler for randomization (if training)
     # if is_training:
-    #     buffer_size = getattr(args, 'shuffle_buffer_size', 100)
-    #     print(f"Applying Shuffler with buffer_size={buffer_size}")
-    #     mixed_pipe = mixed_pipe.shuffle(buffer_size=buffer_size)
+    buffer_size = getattr(args, 'shuffle_buffer_size', 1000)
+    # print(f"Applying Shuffler with buffer_size={buffer_size}")
+    mixed_pipe = mixed_pipe.shuffle(buffer_size=buffer_size)
     
     # Step 6: Batching is handled by DataLoader's batch_size parameter
     # We don't use Batcher here because collator might need custom logic
     batch_size = args.per_device_train_batch_size if is_training else args.per_device_eval_batch_size
-    mixed_pipe = mixed_pipe.batch(
-        batch_size=batch_size, 
-        drop_last=is_training
-    )
-    mixed_pipe = mixed_pipe.collate(collate_fn=collator)
+    # mixed_pipe = mixed_pipe.batch(
+    #     batch_size=batch_size, 
+    #     drop_last=is_training
+    # )
+    # mixed_pipe = mixed_pipe.collate(collate_fn=collator)
     
     # Step 7: Apply Prefetcher for performance
     prefetch_size = getattr(args, 'prefetch_size', 10)
@@ -232,11 +230,11 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     print(f"Creating DataLoader with batch_size={args.per_device_train_batch_size}")
     loader = DataLoader(
         mixed_pipe,
-        batch_size=None,  # **职责划分**: Batching 已在 pipeline 中完成
+        batch_size=batch_size,  # **职责划分**: Batching 已在 pipeline 中完成
         num_workers=args.dataloader_num_workers,
-        collate_fn=None, # **职责划分**: Collate 已在 pipeline 中完成
+        collate_fn=collator, # **职责划分**: Collate 已在 pipeline 中完成
         pin_memory=args.dataloader_pin_memory,
-        prefetch_factor=None # **职责划分**: Prefetch 已在 pipeline 中完成
+        persistent_workers=True,
     )
     
     return loader
@@ -293,31 +291,13 @@ class WrappedIterableDataset(torch.utils.data.IterableDataset):
 
 class MapToIterableDataset(torch.utils.data.IterableDataset):
     """Convert a map-style dataset to an iterable dataset with optional shuffling"""
-    def __init__(self, dataset, shuffle=True, seed=None):
+    def __init__(self, dataset,*args, **kwargs):
         super().__init__()
         self.dataset = dataset
-        self.shuffle = shuffle
-        self.seed = seed
     
     def __iter__(self):
-        indices = list(range(len(self.dataset)))
-        
-        if self.shuffle:
-            # Use worker info for different shuffling per worker
-            worker_info = torch.utils.data.get_worker_info()
-            if worker_info is not None:
-                # In multi-worker setting
-                worker_id = worker_info.id
-                seed = self.seed if self.seed is not None else 0
-                rng = np.random.RandomState(seed + worker_id)
-            else:
-                # Single worker
-                rng = np.random.RandomState(self.seed)
-            rng.shuffle(indices)
-        
-        for idx in indices:
+        for idx in range(len(self.dataset)):
             yield self.dataset[idx]
-
 
 def save_norm_meta_to_json(file_path: str, data: dict):
     """
