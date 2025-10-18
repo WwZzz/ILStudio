@@ -22,7 +22,7 @@
             },
             // train
             "args": [
-                "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_new_train_debug",
+                "-c", "default", "-t", "droid_mini", "-p", "act", "-o", "ckpt/act_droid",
                 "--training.save_steps", "100",
             ],
             // eval

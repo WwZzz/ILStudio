@@ -79,7 +79,6 @@
 
 import pickle
 import numpy as np
-import h5py
 import os
 from collections import defaultdict
 from benchmark.base import MetaAction, MetaObs  
@@ -195,22 +194,244 @@ class BaseNormalizer:
         }
     
     def compute_and_save_stats(self):
+        """Compute and save normalization statistics
+        
+        Supports multiple dataset types with flexible data extraction:
+        1. Episodic datasets with num_episodes and extract_from_episode
+        2. Datasets with extract_all() method
+        3. Map-style datasets with __len__ and __getitem__
+        4. Iterable datasets
+        """
         all_data = defaultdict(list)
-        for idx in range(self.dataset.num_episodes):
-            res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
-            for k in res_each: all_data[k].append(res_each[k])
-        #########################################################
+        num_trajectories = None
+        
+        # Method 1: Check if dataset has num_episodes and extract_from_episode
+        if hasattr(self.dataset, 'num_episodes') and hasattr(self.dataset, 'extract_from_episode'):
+            print(f"Using episodic extraction: {self.dataset.num_episodes} episodes")
+            num_trajectories = self.dataset.num_episodes
+            for idx in range(self.dataset.num_episodes):
+                res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
+                for k in res_each:
+                    all_data[k].append(res_each[k])
+        
+        # Method 2: Check if dataset has extract_all() method
+        elif hasattr(self.dataset, 'extract_all') and callable(getattr(self.dataset, 'extract_all')):
+            print("Using extract_all() method")
+            try:
+                extracted = self.dataset.extract_all(['state', 'action'])
+                for k, v in extracted.items():
+                    # Assume extract_all returns already concatenated arrays
+                    if isinstance(v, (list, tuple)):
+                        all_data[k] = [v]
+                    else:
+                        all_data[k] = [v]
+            except Exception as e:
+                print(f"extract_all() failed: {e}, falling back to iteration")
+                all_data = None
+        
+        # Method 3 & 4: Use DataLoader for map-style or iterable datasets
+        if not all_data or len(all_data) == 0:
+            from torch.utils.data import DataLoader
+            
+            # Determine if it's a map-style dataset
+            is_map_style = hasattr(self.dataset, '__len__') and hasattr(self.dataset, '__getitem__')
+            
+            # Try to detect if the dataset returns batched data
+            returns_batches = self._detect_if_returns_batches()
+            
+            if is_map_style:
+                print(f"Using DataLoader for map-style dataset: {len(self.dataset)} samples")
+                batch_size = 1 if returns_batches else 32
+                if returns_batches:
+                    print("  Detected: Dataset returns batches, using batch_size=1")
+                else:
+                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                
+                dataloader = DataLoader(
+                    self.dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    collate_fn=None if returns_batches else self._collate_for_stats
+                )
+            else:
+                print("Using DataLoader for iterable dataset")
+                batch_size = 1 if returns_batches else 32
+                if returns_batches:
+                    print("  Detected: Dataset returns batches, using batch_size=1")
+                else:
+                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                
+                dataloader = DataLoader(
+                    self.dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    collate_fn=None if returns_batches else self._collate_for_stats
+                )
+            
+            # Collect data from dataloader
+            batch_count = 0
+            for batch_or_sample in dataloader:
+                if batch_or_sample is None:
+                    continue
+                
+                # Handle both dict and tuple/list formats
+                if isinstance(batch_or_sample, dict):
+                    # Dict format
+                    for key in ['state', 'action']:
+                        if key in batch_or_sample:
+                            value = batch_or_sample[key]
+                            # Convert to numpy if needed
+                            if hasattr(value, 'cpu'):
+                                value = value.cpu().numpy()
+                            elif not isinstance(value, np.ndarray):
+                                value = np.array(value)
+                            all_data[key].append(value)
+                
+                elif isinstance(batch_or_sample, (tuple, list)) and len(batch_or_sample) >= 2:
+                    # Tuple/list format: (state, action, ...)
+                    state_val = batch_or_sample[0]
+                    action_val = batch_or_sample[1]
+                    
+                    # Convert to numpy
+                    if hasattr(state_val, 'cpu'):
+                        state_val = state_val.cpu().numpy()
+                    elif not isinstance(state_val, np.ndarray):
+                        state_val = np.array(state_val)
+                    
+                    if hasattr(action_val, 'cpu'):
+                        action_val = action_val.cpu().numpy()
+                    elif not isinstance(action_val, np.ndarray):
+                        action_val = np.array(action_val)
+                    
+                    all_data['state'].append(state_val)
+                    all_data['action'].append(action_val)
+                
+                batch_count += 1
+                if batch_count % 100 == 0:
+                    print(f"Processed {batch_count} batches...")
+            
+            print(f"Total batches processed: {batch_count}")
+        
+        # Concatenate all collected data
+        for k in all_data:
+            if len(all_data[k]) > 0:
+                all_data[k] = np.concatenate(all_data[k], axis=0)
+            else:
+                raise ValueError(f"No data collected for key '{k}'")
+        
+        # Compute statistics
         all_stats = {}
-        num_transitions = -1
-        all_stats['num_trajectories'] = self.dataset.num_episodes
-        for k in all_data: all_data[k] = np.concatenate(all_data[k])
+        if num_trajectories is not None:
+            all_stats['num_trajectories'] = num_trajectories
+        
         for k in all_data:
             data_k = all_data[k]
-            if 'num_transitions' not in all_stats: all_stats['num_transitions'] = data_k.shape[0]
+            if 'num_transitions' not in all_stats:
+                all_stats['num_transitions'] = data_k.shape[0]
             dict_k = {k.split('/')[-1]: self.compute_stats_for_array(data_k)}
             all_stats.update(dict_k)
+        
+        print(f"Statistics computed: {all_stats.get('num_transitions', 0)} transitions")
         self.save_stats(all_stats)
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
+    
+    def _detect_if_returns_batches(self):
+        """Detect if the dataset returns batches or individual samples
+        
+        This is important for correctly constructing the DataLoader:
+        - If returns batches: use batch_size=1, no collate_fn
+        - If returns samples: use batch_size=32, with collate_fn
+        
+        Detection rules:
+        1. Map-style datasets (__len__ + __getitem__) always return samples
+        2. Iterable datasets: check 'raw_lang' field
+           - If raw_lang is a list → returns batches
+           - If raw_lang is a string → returns samples
+        
+        Returns:
+            bool: True if dataset returns batches, False if returns samples
+        """
+        # Rule 1: Map-style datasets always return samples
+        if hasattr(self.dataset, '__len__') and hasattr(self.dataset, '__getitem__'):
+            print(f"    Map-style dataset always returns samples")
+            return False
+        
+        # Rule 2: For iterable datasets, check raw_lang field
+        # Strategy 1: Check for explicit attributes first
+        if hasattr(self.dataset, 'returns_batches'):
+            result = bool(self.dataset.returns_batches)
+            print(f"    Explicit attribute returns_batches={result}")
+            return result
+        
+        # Strategy 2: Peek at the first item and check raw_lang
+        try:
+            # For iterable datasets
+            if hasattr(self.dataset, '__iter__'):
+                iterator = iter(self.dataset)
+                sample = next(iterator)
+            else:
+                # Can't detect, assume returns samples
+                print(f"    Cannot iterate dataset, assuming samples")
+                return False
+            
+            # Check raw_lang field
+            if isinstance(sample, dict) and 'raw_lang' in sample:
+                raw_lang = sample['raw_lang']
+                if isinstance(raw_lang, list):
+                    print(f"    Detected batch: raw_lang is a list (length={len(raw_lang)})")
+                    return True
+                elif isinstance(raw_lang, str):
+                    print(f"    Detected sample: raw_lang is a string")
+                    return False
+            
+            # If no raw_lang field, assume returns samples
+            print(f"    No raw_lang field found, assuming samples")
+            return False
+            
+        except Exception as e:
+            # If peek fails, assume returns samples (safer default)
+            print(f"    Could not detect batch/sample format ({e}), assuming samples")
+            return False
+    
+    def _collate_for_stats(self, batch):
+        """Collate function for DataLoader to extract state and action"""
+        if not batch:
+            return None
+        
+        # Handle different batch formats
+        collated = {}
+        
+        # Check if batch items are dictionaries
+        if isinstance(batch[0], dict):
+            # Batch of dictionaries
+            for key in ['state', 'action']:
+                if key in batch[0]:
+                    values = [item[key] for item in batch]
+                    # Stack or concatenate
+                    try:
+                        if hasattr(values[0], 'cpu'):
+                            values = [v.cpu() if hasattr(v, 'cpu') else v for v in values]
+                        collated[key] = torch.stack([torch.as_tensor(v) for v in values])
+                    except:
+                        # If stack fails, try to handle differently
+                        collated[key] = values
+        
+        # Handle tuple/list format (obs, action, ...)
+        elif isinstance(batch[0], (tuple, list)) and len(batch[0]) >= 2:
+            # Assume format: (state/obs, action, ...)
+            states = [item[0] for item in batch]
+            actions = [item[1] for item in batch]
+            
+            try:
+                collated['state'] = torch.stack([torch.as_tensor(s) for s in states])
+                collated['action'] = torch.stack([torch.as_tensor(a) for a in actions])
+            except:
+                collated['state'] = states
+                collated['action'] = actions
+        
+        return collated if collated else None
     
     def save_stats(self, all_stats):
         """Save stats to centralized cache directory"""

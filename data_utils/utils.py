@@ -234,32 +234,32 @@ def _create_dataset_from_config(dataset_config: dict, args):
     # Extract constructor arguments
     constructor_args = dataset_config.get('args', {})
     
-    # Handle legacy parameters for backward compatibility (only if not in constructor_args)
-    legacy_params = {}
-    if 'dataset_dir' not in constructor_args and 'dataset_path_list' not in constructor_args:
-        if 'dataset_dir' in dataset_config or 'path' in dataset_config:
-            legacy_params['dataset_dir'] = dataset_config.get('dataset_dir', dataset_config.get('path'))
+    # # Handle legacy parameters for backward compatibility (only if not in constructor_args)
+    # legacy_params = {}
+    # if 'dataset_dir' not in constructor_args and 'dataset_path_list' not in constructor_args:
+    #     if 'dataset_dir' in dataset_config or 'path' in dataset_config:
+    #         legacy_params['dataset_dir'] = dataset_config.get('dataset_dir', dataset_config.get('path'))
     
-    if 'camera_names' not in constructor_args:
-        legacy_params['camera_names'] = dataset_config.get('camera_names', [])
+    # if 'camera_names' not in constructor_args:
+    #     legacy_params['camera_names'] = dataset_config.get('camera_names', [])
     
-    if 'chunk_size' not in constructor_args:
-        legacy_params['chunk_size'] = dataset_config.get('chunk_size', getattr(args, 'chunk_size', 16))
+    # if 'chunk_size' not in constructor_args:
+    #     legacy_params['chunk_size'] = dataset_config.get('chunk_size', getattr(args, 'chunk_size', 16))
     
-    if 'ctrl_space' not in constructor_args:
-        legacy_params['ctrl_space'] = dataset_config.get('ctrl_space', 'ee')
+    # if 'ctrl_space' not in constructor_args:
+    #     legacy_params['ctrl_space'] = dataset_config.get('ctrl_space', 'ee')
     
-    if 'ctrl_type' not in constructor_args:
-        legacy_params['ctrl_type'] = dataset_config.get('ctrl_type', 'delta')
+    # if 'ctrl_type' not in constructor_args:
+    #     legacy_params['ctrl_type'] = dataset_config.get('ctrl_type', 'delta')
     
     # Merge legacy params with constructor args (constructor args take priority)
     final_args = {}
-    final_args.update(legacy_params)
+    # final_args.update(legacy_params)
     final_args.update(constructor_args)
     
-    # Add data_args if the dataset expects it
-    if 'data_args' not in final_args:
-        final_args['data_args'] = args
+    # # Add data_args if the dataset expects it
+    # if 'data_args' not in final_args:
+    #     final_args['data_args'] = args
     
     # No automatic parameter conversion - config should match dataset class signature exactly
     

@@ -1,23 +1,17 @@
 import os
 import argparse
-import yaml
 import json
-import transformers
 import policy.utils as ml_utils
-from data_utils.utils import set_seed, WrappedDataset, load_data, get_dataloader
+from data_utils.utils import set_seed, load_data, get_dataloader
 from configs.loader import ConfigLoader
-from configs.training.loader import load_training_config
 from policy.policy_loader import (
     get_policy_data_processor,
     get_policy_data_collator,
     get_policy_trainer_class,
     load_policy_model_for_training,
 )
-from accelerate import Accelerator
 from policy.trainer import BaseTrainer
 
-
-# Removed HyperArguments dataclass - using simple argparse instead
 
 def parse_param():
     """
@@ -89,11 +83,9 @@ def main(args, training_args):
     # Load dataset
     train_dataset, val_dataset = load_data(args, task_config)
     
-    # Wrap dataset
+    # Create data loader with policy-spefific data processor and collator
     data_processor = get_policy_data_processor(policy_cfg_path, args, model_components)
     data_collator = get_policy_data_collator(policy_cfg_path, args, model_components)
-    
-    # Create data loader
     train_loader, eval_loader = get_dataloader(train_dataset, val_dataset, data_processor, data_collator, args) 
     
     # Get Trainer

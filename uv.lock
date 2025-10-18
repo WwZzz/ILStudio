@@ -887,6 +887,7 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "diffusers" },
+    { name = "dlimp" },
     { name = "dm-control" },
     { name = "imageio" },
     { name = "imageio-ffmpeg" },
@@ -915,7 +916,6 @@ lerobot = [
     { name = "lerobot" },
 ]
 openvla = [
-    { name = "dlimp" },
     { name = "draccus" },
     { name = "tensorflow-graphics" },
     { name = "timm" },
@@ -925,7 +925,7 @@ openvla = [
 requires-dist = [
     { name = "accelerate" },
     { name = "diffusers", specifier = "==0.35.1" },
-    { name = "dlimp", marker = "extra == 'openvla'", git = "https://github.com/kvablack/dlimp?rev=ad72ce3a9b414db2185bc0b38461d4101a65477a" },
+    { name = "dlimp", git = "https://github.com/kvablack/dlimp?rev=ad72ce3a9b414db2185bc0b38461d4101a65477a" },
     { name = "dm-control", specifier = "==1.0.14" },
     { name = "draccus", marker = "extra == 'openvla'" },
     { name = "imageio", specifier = "==2.37.0" },
