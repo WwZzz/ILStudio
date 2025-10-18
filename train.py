@@ -81,12 +81,13 @@ def main(args, training_args):
     ml_utils.print_model_trainable_information(model)
     
     # Load dataset
-    train_dataset, val_dataset = load_data(args, task_config)
+    data_dict = load_data(args, task_config)
+    train_data, val_data = data_dict['train'], data_dict['eval']
     
     # Create data loader with policy-spefific data processor and collator
     data_processor = get_policy_data_processor(policy_cfg_path, args, model_components)
     data_collator = get_policy_data_collator(policy_cfg_path, args, model_components)
-    train_loader, eval_loader = get_dataloader(train_dataset, val_dataset, data_processor, data_collator, args) 
+    train_loader, eval_loader = get_dataloader(train_data, val_data, data_processor, data_collator, args) 
     
     # Get Trainer
     train_class = get_policy_trainer_class(policy_cfg_path) or BaseTrainer

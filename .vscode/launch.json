@@ -4,9 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
-
-
         {
             "name": "Python Debugger: Current File with Arguments",
             "type": "debugpy",
@@ -22,7 +19,7 @@
             },
             // train
             "args": [
-                "-c", "default", "-t", "droid_mini", "-p", "act_droid", "-o", "ckpt/act_droid",
+                "-c", "default", "-t", "sim_transfer_cube_mixed", "-p", "act", "-o", "ckpt/act_dataloader",
                 "--training.save_steps", "100", 
             ],
             // eval

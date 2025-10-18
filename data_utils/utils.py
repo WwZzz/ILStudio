@@ -516,8 +516,7 @@ def load_data(args, task_config, save_norm=True):
             "Old format with 'dataset_dir' is no longer supported. "
             "Please update your task config to use the datasets format."
         )
-    
-        return _load_data_flexible_format(args, task_config, save_norm)
+    return _load_data_flexible_format(args, task_config, save_norm)
 
 
 def _load_data_flexible_format(args, task_config, save_norm=True):
@@ -603,7 +602,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
     
     # Create combined dataset
     train_data = wrapped_datasets[0] if len(wrapped_datasets) == 1 else wrapped_datasets
-    return train_data, None
+    return {'train': train_data, 'eval': None}
 
 def load_normalizers(args):
     """Load normalizers from saved metadata
