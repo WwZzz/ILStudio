@@ -1,22 +1,12 @@
 import numpy as np
 import torch
 import os
-import h5py
-import pickle
 import fnmatch
-import cv2
 import json
-import torchvision.transforms as transforms
-import copy
-import gc
 import warnings
 import importlib
-from time import time
-from torch.utils.data import TensorDataset, DataLoader, ConcatDataset
-from torchvision.transforms.functional import to_pil_image, to_tensor
-from .normalize import BaseNormalizer, MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
-from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from torch.utils.data import DataLoader, ConcatDataset
+from .normalize import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 import torch.distributed as dist
 
 def is_distributed():
@@ -33,11 +23,12 @@ NORMTYPE2CLASS = {
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
     # Identify the type of the dataset: iter or map
     is_iter_dataset = hasattr(train_dataset, '__iter__') and (not hasattr(train_dataset, '__len__') or not hasattr(train_dataset, '__getitem__'))
+    
     if not is_iter_dataset:
-        print(f"Train dataset size: {len(train_dataset)}")
         if val_dataset is not None:
             print(f"Validation dataset size: {len(val_dataset)}")
-        # Create DataLoader
+        
+        # Create DataLoader with WrappedDataset
         wrapped_train_data = WrappedDataset(train_dataset, processor)
         if is_distributed():
             from torch.utils.data.distributed import DistributedSampler
@@ -45,6 +36,7 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
             sampler = DistributedSampler(wrapped_train_data) 
         else:
             sampler = None
+        
         train_loader = DataLoader(
             wrapped_train_data,
             batch_size=args.per_device_train_batch_size,
@@ -57,8 +49,41 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
         )
         eval_loader = None
         return train_loader, eval_loader
+    
     else:
-        raise NotImplementedError("Iterable dataset is not supported yet.")
+        # Wrap iterable dataset with processor
+        wrapped_train_data = WrappedIterableDataset(train_dataset, processor)
+        
+        # For iterable datasets, we cannot use DistributedSampler
+        # Instead, we rely on the dataset itself to handle distributed training
+        if is_distributed():
+            print(f"Warning: Iterable datasets should handle distributed training internally")
+            print(f"Make sure your dataset splits data across workers properly")
+        
+        # Create DataLoader for iterable dataset
+        train_loader = DataLoader(
+            wrapped_train_data,
+            batch_size=args.per_device_train_batch_size,
+            num_workers=args.dataloader_num_workers,
+            collate_fn=collator,
+            drop_last=True,
+            pin_memory=args.dataloader_pin_memory,
+        )
+        
+        # Handle validation dataset if provided
+        eval_loader = None
+        if val_dataset is not None:
+            wrapped_val_data = WrappedIterableDataset(val_dataset, processor)
+            eval_loader = DataLoader(
+                wrapped_val_data,
+                batch_size=args.per_device_train_batch_size,
+                num_workers=args.dataloader_num_workers,
+                collate_fn=collator,
+                drop_last=False,
+                pin_memory=args.dataloader_pin_memory,
+            )
+        
+        return train_loader, eval_loader
     
 
 def find_all_hdf5(dataset_dir):
@@ -74,22 +99,16 @@ def find_all_hdf5(dataset_dir):
             hdf5_files.append(os.path.join(root, filename))
     return hdf5_files
 
-
-# def smooth_base_action(base_action):
-#     return np.stack([
-#         np.convolve(base_action[:, i], np.ones(5)/5, mode='same') for i in range(base_action.shape[1])
-#     ], axis=-1).astype(np.float32)
-
 def set_seed(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     
 
-
 def flatten_list(l):
     return [item for sublist in l for item in sublist]
 
 class WrappedDataset(torch.utils.data.Dataset):
+    """Wrapper for map-style datasets"""
     def __init__(self, dataset, processor=None):
         self.dataset = dataset
         self.processor = processor
@@ -100,6 +119,20 @@ class WrappedDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         sample = self.dataset[index]
         return sample if self.processor is None else self.processor(sample)
+
+
+class WrappedIterableDataset(torch.utils.data.IterableDataset):
+    """Wrapper for iterable datasets with processor support"""
+    def __init__(self, dataset, processor=None):
+        super().__init__()
+        self.dataset = dataset
+        self.processor = processor
+    
+    def __iter__(self):
+        for sample in self.dataset:
+            if self.processor is not None:
+                sample = self.processor(sample)
+            yield sample
 
 
 def save_norm_meta_to_json(file_path: str, data: dict):

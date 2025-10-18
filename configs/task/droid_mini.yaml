@@ -3,7 +3,7 @@ datasets:
   - name: "droid_100"
     class: "data_utils.datasets.droid100.DroidDataset"
     args:
-      dataset_dir: "/inspire/hdd/project/robot-action/public/data/droid/"
+      dataset_dir: "/mnt/model/ilstd/data/droid_100"
       shuffle_buffer_size: 1000
       filter_dict_path: null
 
