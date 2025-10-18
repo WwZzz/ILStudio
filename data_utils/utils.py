@@ -9,6 +9,14 @@ from torch.utils.data import DataLoader, ConcatDataset
 from .normalize import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 import torch.distributed as dist
 
+# Import torchdata for mixed dataset support
+try:
+    from torchdata.datapipes.iter import IterableWrapper, Cycler, ShardingFilter, Shuffler, Batcher, Prefetcher
+    TORCHDATA_AVAILABLE = True
+except ImportError:
+    TORCHDATA_AVAILABLE = False
+    warnings.warn("torchdata not available. Multi-dataset mixing will not be supported.")
+
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
@@ -21,72 +29,209 @@ NORMTYPE2CLASS = {
 }
 
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
+    """
+    Create DataLoader from single dataset or multiple datasets.
+    
+    For multiple datasets (list), uses torchdata to create mixed iterable pipeline with:
+    - Cycle: Prevents pipeline exhaustion
+    - ShardingFilter: Distributed training support
+    - Shuffler: Randomization
+    - Batcher: Batching (if needed based on collator)
+    - Prefetcher: Performance optimization
+    
+    Args:
+        train_dataset: Single dataset or list of datasets
+        val_dataset: Optional validation dataset
+        processor: Function to process each sample
+        collator: Function to collate samples into batches
+        args: Training arguments
+    
+    Returns:
+        (train_loader, eval_loader)
+    """
     if isinstance(train_dataset, list):
-        raise NotImplementedError("List of datasets not supported in this function. Use ConcatDataset externally.")
-    else:
-        # Identify the type of the dataset: iter or map
-        is_iter_dataset = hasattr(train_dataset, '__iter__') and (not hasattr(train_dataset, '__len__') or not hasattr(train_dataset, '__getitem__'))
+        # Multiple datasets - use torchdata for mixing
+        if not TORCHDATA_AVAILABLE:
+            raise RuntimeError("torchdata is required for multi-dataset mixing. Install with: pip install torchdata")
         
-        if not is_iter_dataset:
-            if val_dataset is not None:
-                print(f"Validation dataset size: {len(val_dataset)}")
-            
-            # Create DataLoader with WrappedDataset
-            wrapped_train_data = WrappedDataset(train_dataset, processor)
-            if is_distributed():
-                from torch.utils.data.distributed import DistributedSampler
-                print(f"Using DistributedSampler for distributed training")
-                sampler = DistributedSampler(wrapped_train_data) 
+        print(f"Using mixed dataset pipeline with {len(train_dataset)} datasets")
+        train_loader = _create_mixed_dataloader(train_dataset, processor, collator, args)
+        
+        # Handle validation dataset
+        eval_loader = None
+        if val_dataset is not None:
+            if isinstance(val_dataset, list):
+                eval_loader = _create_mixed_dataloader(val_dataset, processor, collator, args, is_training=False)
             else:
-                sampler = None
-            
-            train_loader = DataLoader(
-                wrapped_train_data,
-                batch_size=args.per_device_train_batch_size,
-                shuffle=(sampler is None),
-                sampler=sampler,
-                num_workers=args.dataloader_num_workers,
-                collate_fn=collator,
-                drop_last=True,
-                pin_memory=args.dataloader_pin_memory,
-            )
-            eval_loader = None
-            return train_loader, eval_loader
+                eval_loader = _create_single_dataloader(val_dataset, processor, collator, args, is_training=False)
         
+        return train_loader, eval_loader
+    
+    else:
+        # Single dataset - use existing logic
+        return _create_single_dataloader(train_dataset, processor, collator, args, is_training=True)
+
+
+def _create_single_dataloader(dataset, processor, collator, args, is_training=True):
+    """Create DataLoader for a single dataset (map-style or iterable)"""
+    # Identify the type of the dataset: iter or map
+    is_iter_dataset = hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
+    
+    if not is_iter_dataset:
+        # Map-style dataset
+        if hasattr(dataset, '__len__'):
+            print(f"{'Train' if is_training else 'Validation'} dataset size: {len(dataset)}")
+        
+        # Create DataLoader with WrappedDataset
+        wrapped_data = WrappedDataset(dataset, processor)
+        
+        if is_training and is_distributed():
+            from torch.utils.data.distributed import DistributedSampler
+            print(f"Using DistributedSampler for distributed training")
+            sampler = DistributedSampler(wrapped_data) 
         else:
-            # Wrap iterable dataset with processor
-            wrapped_train_data = WrappedIterableDataset(train_dataset, processor)
-            
-            # For iterable datasets, we cannot use DistributedSampler
-            # Instead, we rely on the dataset itself to handle distributed training
-            if is_distributed():
-                print(f"Warning: Iterable datasets should handle distributed training internally")
-                print(f"Make sure your dataset splits data across workers properly")
-            
-            # Create DataLoader for iterable dataset
-            train_loader = DataLoader(
-                wrapped_train_data,
-                batch_size=args.per_device_train_batch_size,
-                num_workers=args.dataloader_num_workers,
-                collate_fn=collator,
-                drop_last=True,
-                pin_memory=args.dataloader_pin_memory,
-            )
-            
-            # Handle validation dataset if provided
-            eval_loader = None
-            if val_dataset is not None:
-                wrapped_val_data = WrappedIterableDataset(val_dataset, processor)
-                eval_loader = DataLoader(
-                    wrapped_val_data,
-                    batch_size=args.per_device_train_batch_size,
-                    num_workers=args.dataloader_num_workers,
-                    collate_fn=collator,
-                    drop_last=False,
-                    pin_memory=args.dataloader_pin_memory,
-                )
-            
-            return train_loader, eval_loader
+            sampler = None
+        
+        loader = DataLoader(
+            wrapped_data,
+            batch_size=args.per_device_train_batch_size,
+            shuffle=(sampler is None and is_training),
+            sampler=sampler,
+            num_workers=args.dataloader_num_workers,
+            collate_fn=collator,
+            drop_last=is_training,
+            pin_memory=args.dataloader_pin_memory,
+        )
+        
+        if is_training:
+            return loader, None
+        else:
+            return loader
+    
+    else:
+        # Iterable dataset
+        print(f"Using {'training' if is_training else 'validation'} iterable dataset")
+        
+        # Wrap iterable dataset with processor
+        wrapped_data = WrappedIterableDataset(dataset, processor)
+        
+        # For iterable datasets, we cannot use DistributedSampler
+        if is_training and is_distributed():
+            print(f"Warning: Iterable datasets should handle distributed training internally")
+            print(f"Make sure your dataset splits data across workers properly")
+        
+        # Create DataLoader for iterable dataset
+        loader = DataLoader(
+            wrapped_data,
+            batch_size=args.per_device_train_batch_size,
+            num_workers=args.dataloader_num_workers,
+            collate_fn=collator,
+            drop_last=is_training,
+            pin_memory=args.dataloader_pin_memory,
+        )
+        
+        if is_training:
+            return loader, None
+        else:
+            return loader
+
+
+def _create_mixed_dataloader(datasets, processor, collator, args, is_training=True):
+    """
+    Create DataLoader for multiple datasets using torchdata pipeline.
+    
+    Pipeline structure:
+    1. Wrap/Convert each dataset to iterable
+    2. Apply processor to each dataset
+    3. Wrap as IterableWrapper (torchdata pipeline)
+    4. Apply Cycle to prevent exhaustion
+    5. Apply ShardingFilter for distributed training
+    6. Apply Shuffler for randomization
+    7. Apply Batcher (if collator expects unbatched data)
+    8. Apply Prefetcher for performance
+    9. Create DataLoader
+    
+    Args:
+        datasets: List of datasets (can be map-style or iterable)
+        processor: Function to process each sample
+        collator: Function to collate samples into batches
+        args: Training arguments
+        is_training: Whether this is for training (affects shuffle, drop_last)
+    
+    Returns:
+        DataLoader with mixed pipeline
+    """
+    print(f"Building mixed dataset pipeline:")
+    
+    # Step 1: Convert all datasets to iterable with processor applied
+    iterable_datasets = []
+    for i, dataset in enumerate(datasets):
+        is_iter = hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
+        
+        if is_iter:
+            # Already iterable
+            print(f"  Dataset {i}: Iterable dataset")
+            wrapped = WrappedIterableDataset(dataset, processor)
+        else:
+            # Map-style: convert to iterable
+            print(f"  Dataset {i}: Map-style dataset (size={len(dataset)}) -> converting to iterable")
+            # First apply processor via WrappedDataset
+            wrapped_map = WrappedDataset(dataset, processor)
+            # Then convert to iterable
+            wrapped = MapToIterableDataset(wrapped_map, shuffle=is_training, seed=args.seed if hasattr(args, 'seed') else None)
+        
+        iterable_datasets.append(wrapped)
+    
+    # Step 2: Create torchdata pipelines for each dataset
+    print(f"Creating torchdata pipelines:")
+    pipelines = []
+    for i, dataset in enumerate(iterable_datasets):
+        # Wrap as IterableWrapper
+        pipe = IterableWrapper(dataset)
+        
+        # Apply Cycle to prevent exhaustion
+        pipe = pipe.cycle()
+        print(f"  Pipeline {i}: IterableWrapper -> Cycle")
+        
+        pipelines.append(pipe)
+    
+    # Step 3: Multiplex (mix) all pipelines
+    # Use round-robin sampling from each pipeline
+    from torchdata.datapipes.iter import Multiplexer
+    print(f"Multiplexing {len(pipelines)} pipelines")
+    mixed_pipe = Multiplexer(*pipelines)
+    
+    # Step 4: Apply ShardingFilter for distributed training
+    if is_distributed():
+        print(f"Applying ShardingFilter for distributed training")
+        mixed_pipe = mixed_pipe.sharding_filter()
+    
+    # Step 5: Apply Shuffler for randomization (if training)
+    if is_training:
+        buffer_size = getattr(args, 'shuffle_buffer_size', 10000)
+        print(f"Applying Shuffler with buffer_size={buffer_size}")
+        mixed_pipe = mixed_pipe.shuffle(buffer_size=buffer_size)
+    
+    # Step 6: Batching is handled by DataLoader's batch_size parameter
+    # We don't use Batcher here because collator might need custom logic
+    
+    # Step 7: Apply Prefetcher for performance
+    prefetch_size = getattr(args, 'prefetch_size', 10)
+    print(f"Applying Prefetcher with buffer_size={prefetch_size}")
+    mixed_pipe = mixed_pipe.prefetch(buffer_size=prefetch_size)
+    
+    # Step 8: Create DataLoader
+    print(f"Creating DataLoader with batch_size={args.per_device_train_batch_size}")
+    loader = DataLoader(
+        mixed_pipe,
+        batch_size=args.per_device_train_batch_size,
+        num_workers=args.dataloader_num_workers,
+        collate_fn=collator,
+        drop_last=is_training,
+        pin_memory=args.dataloader_pin_memory,
+    )
+    
+    return loader
     
 
 def find_all_hdf5(dataset_dir):
@@ -105,7 +250,7 @@ def find_all_hdf5(dataset_dir):
 def set_seed(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
-    
+
 
 def flatten_list(l):
     return [item for sublist in l for item in sublist]
@@ -136,6 +281,34 @@ class WrappedIterableDataset(torch.utils.data.IterableDataset):
             if self.processor is not None:
                 sample = self.processor(sample)
             yield sample
+
+
+class MapToIterableDataset(torch.utils.data.IterableDataset):
+    """Convert a map-style dataset to an iterable dataset with optional shuffling"""
+    def __init__(self, dataset, shuffle=True, seed=None):
+        super().__init__()
+        self.dataset = dataset
+        self.shuffle = shuffle
+        self.seed = seed
+    
+    def __iter__(self):
+        indices = list(range(len(self.dataset)))
+        
+        if self.shuffle:
+            # Use worker info for different shuffling per worker
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is not None:
+                # In multi-worker setting
+                worker_id = worker_info.id
+                seed = self.seed if self.seed is not None else 0
+                rng = np.random.RandomState(seed + worker_id)
+            else:
+                # Single worker
+                rng = np.random.RandomState(self.seed)
+            rng.shuffle(indices)
+        
+        for idx in indices:
+            yield self.dataset[idx]
 
 
 def save_norm_meta_to_json(file_path: str, data: dict):
@@ -344,7 +517,7 @@ def load_data(args, task_config, save_norm=True):
             "Please update your task config to use the datasets format."
         )
     
-    return _load_data_flexible_format(args, task_config, save_norm)
+        return _load_data_flexible_format(args, task_config, save_norm)
 
 
 def _load_data_flexible_format(args, task_config, save_norm=True):
@@ -403,7 +576,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             'version': '2.0',  # Format version
             'datasets': datasets_meta,  # List of dataset metadata
             'state': {k: str(v) for k, v in state_normalizers.items()}, 
-            'action': {k: str(v) for k, v in action_normalizers.items()},
+            'action': {k: str(v) for k, v in action_normalizers.items()}, 
         }
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
         
