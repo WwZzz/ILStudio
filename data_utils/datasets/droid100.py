@@ -19,6 +19,7 @@ import dlimp as dl
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import collections
+import numpy as np
 
 class DroidDataset:
     def __init__(
@@ -49,6 +50,8 @@ class DroidDataset:
         self.filter_dict_path = filter_dict_path
         self.data_processor = data_processor
         self.data_collator = data_collator
+        gpus = tf.config.list_physical_devices('GPU')   
+        tf.config.set_visible_devices(gpus[0] if gpus else [] , "GPU")
         # Load dataset
         dataset = self.load_data()
         # Shuffle, batch
@@ -61,13 +64,30 @@ class DroidDataset:
 
     def extract_all(self, features: Union[List[str], str]):
         if isinstance(features, str): features = [features]
-        dataset = self.dataset.map(lambda x: {feat: x[feat] for feat in features if feat in x})
-        numpy_dataset = tfds.as_numpy(dataset)
-        all_data = collections.defaultdict(list)
-        for example in numpy_dataset:
+        all_funcs = {}
+        for key in features:
+            if 'action' in key or 'actions' in key:
+                all_funcs['action'] = lambda x: x['actions']
+            elif 'state' in key:
+                all_funcs['state'] = lambda traj: tf.concat([tf.cast(traj["observation"]["joint_position"], tf.float32), tf.cast(traj["observation"]["gripper_position"], tf.float32)], axis=-1) 
+            elif 'image' in key:
+                all_funcs['image'] = lambda traj: tf.stack([traj["observation"]["image"], traj["observation"]["wrist_image"]], axis=0)  # (2, H, W, C)
+        dataset = self.traj_dataset.map(lambda traj: {feat: all_funcs[feat](traj) for feat in features}, num_parallel_calls=self.num_parallel_calls)
+        # batch_size = 1024
+        # dataset = dataset.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+        numpy_iterator = tfds.as_numpy(dataset)
+        all_data_batches = collections.defaultdict(list)
+        for batch in tqdm(numpy_iterator):
             for feat in features:
-                all_data[feat].append(example[feat])
-        return all_data
+                if feat in batch:
+                    all_data_batches[feat].append(batch[feat])
+        final_data = {}
+        for feat in features:
+            if all_data_batches[feat]:
+                final_data[feat] = np.concatenate(all_data_batches[feat], axis=0)
+            else:
+                final_data[feat] = np.array([]) # 处理空数据集或特征不存在的情况
+        return final_data
 
     def load_data(self, *args, **kwargs):
         data_dir=self.dataset_dir
@@ -80,9 +100,8 @@ class DroidDataset:
         num_parallel_calls=self.num_parallel_calls
         filter_dict_path=self.filter_dict_path
         
-        # gpus = tf.config.list_physical_devices('GPU')   
-        # tf.config.set_visible_devices(gpus[0] if gpus else [] , "GPU")
-        tf.config.set_visible_devices([] , "GPU")
+
+        # tf.config.set_visible_devices([] , "GPU")
 
         builder = tfds.builder("droid_100", data_dir=data_dir, version="1.0.0")
         dataset = dl.DLataset.from_rlds(builder, split="train", shuffle=shuffle, num_parallel_reads=num_parallel_reads)
@@ -95,7 +114,7 @@ class DroidDataset:
         )
 
         # # Repeat dataset so we never run out of data.
-        dataset = dataset.repeat()
+        
 
         # Load the filter dictionary if provided.
         # The filter dictionary is a JSON file that maps episode keys to ranges of frames to sample
@@ -169,6 +188,7 @@ class DroidDataset:
             }
 
         dataset = dataset.traj_map(restructure, num_parallel_calls)
+        self.traj_dataset = dataset
         
         def chunk_actions(traj):
             """
@@ -197,7 +217,7 @@ class DroidDataset:
             return traj
 
         dataset = dataset.traj_map(chunk_actions, num_parallel_calls)
-        self.traj_dataset = dataset
+        
         # Flatten: map from trajectory dataset to dataset of individual action chunks
         dataset = dataset.flatten(num_parallel_calls=num_parallel_calls)
 
@@ -245,6 +265,7 @@ class DroidDataset:
             return data_dict
         
         dataset = dataset.map(format_convert, num_parallel_calls)
+        dataset = dataset.repeat()
         return dataset
         
     def __iter__(self):

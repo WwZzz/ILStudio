@@ -32,7 +32,7 @@ NORMTYPE2CLASS = {
 
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
     # Identify the type of the dataset: iter or map
-    is_iter_dataset = hasattr(train_dataset, '__iter__') and not hasattr(train_dataset, '__getitem__')
+    is_iter_dataset = hasattr(train_dataset, '__iter__') and (not hasattr(train_dataset, '__len__') or not hasattr(train_dataset, '__getitem__'))
     if not is_iter_dataset:
         print(f"Train dataset size: {len(train_dataset)}")
         if val_dataset is not None:
@@ -399,7 +399,6 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         train_dataset = ConcatDataset(wrapped_datasets)
     
     # Test dataset
-    x = train_dataset[0]  # test __getitem__
     val_dataset = None
     
     return train_dataset, val_dataset
