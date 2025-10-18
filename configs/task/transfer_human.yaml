@@ -1,10 +1,13 @@
-dataset_dir:
-  - '/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_human'
-camera_names:
-  - primary
-dataset_class: AlohaSimDataset
-ctrl_type: abs
-ctrl_space: joint
+# 新的灵活数据集配置格式
+datasets:
+  - name: "transfer_human"
+    class: "AlohaSimDataset"
+    args:
+      dataset_path_list: ['/inspire/hdd/project/robot-action/public/data/act_aloha/sim_transfer_cube_human']
+      camera_names: ['primary']
+      chunk_size: 50
+      ctrl_space: 'joint'
+      ctrl_type: 'abs'
 
 # Task-specific parameters that will override policy configs
 action_dim: 14
@@ -12,4 +15,3 @@ state_dim: 14
 image_size: [640, 480]
 action_normalize: "zscore"
 state_normalize: "zscore"
-chunk_size: 50

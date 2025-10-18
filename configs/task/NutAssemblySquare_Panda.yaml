@@ -1,8 +1,11 @@
-dataset_dir:
-  - '/inspire/hdd/project/robot-action/public/data/robomimic/square/ph'
+# 新的灵活数据集配置格式
+datasets:
+  - name: "nut_assembly_square_panda"
+    class: "RobomimicDataset"
+    args:
+      dataset_path_list: ['/inspire/hdd/project/robot-action/public/data/robomimic/square/ph']
+      camera_names: ['primary']
+      ctrl_space: 'ee'
+      ctrl_type: 'delta'
+
 episode_len: 400
-camera_names:
-  - primary
-dataset_class: RobomimicDataset
-ctrl_type: delta
-ctrl_space: ee

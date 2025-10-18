@@ -4,7 +4,7 @@ import yaml
 import json
 import transformers
 import policy.utils as ml_utils
-from data_utils.utils import set_seed, WrappedDataset, load_data
+from data_utils.utils import set_seed, WrappedDataset, load_data, get_dataloader
 from configs.loader import ConfigLoader
 from configs.training.loader import load_training_config
 from policy.policy_loader import (
@@ -13,6 +13,9 @@ from policy.policy_loader import (
     get_policy_trainer_class,
     load_policy_model_for_training,
 )
+from accelerate import Accelerator
+from policy.trainer import BaseTrainer
+
 
 # Removed HyperArguments dataclass - using simple argparse instead
 
@@ -58,21 +61,12 @@ def main(args, training_args):
         None. The trained model and statistics are saved to the output directory
         specified in training_args.
     """
-    # Init task config
     set_seed(1)
-    
-    # Use the existing ConfigLoader instance that was created in parse_param()
-    # Don't create new instances - reuse the one with correct overrides
+    # Load all configurations and merge all parameters using unified loader
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'config_overrides', {}))
-    
-    # Load all configurations using the same loader
     task_config, task_cfg_path = cfg_loader.load_task(args.task)
     policy_config, policy_cfg_path = cfg_loader.load_policy(args.policy)
-    
-    # Load training config using the same loader instead of separate function
     training_config, _, training_cfg_path = cfg_loader.load_training(getattr(args, 'training_cfg_path', args.training_config), hyper_args=args)
-    
-    # Merge all parameters using unified loader
     ConfigLoader.merge_all_parameters(task_config, policy_config, training_config, args)
     
     # Save policy metadata to output dir
@@ -99,19 +93,17 @@ def main(args, training_args):
     data_processor = get_policy_data_processor(policy_cfg_path, args, model_components)
     data_collator = get_policy_data_collator(policy_cfg_path, args, model_components)
     
-    data_module = dict(
-        train_dataset=WrappedDataset(train_dataset, data_processor) if data_processor is not None else train_dataset,
-        eval_dataset=WrappedDataset(val_dataset, data_processor) if data_processor is not None and val_dataset is not None else val_dataset,
-        data_collator=data_collator,
-    )
+    # Create data loader
+    train_loader, eval_loader = get_dataloader(train_dataset, val_dataset, data_processor, data_collator, args) 
     
     # Get Trainer
-    train_class = get_policy_trainer_class(policy_cfg_path) or transformers.trainer.Trainer
+    train_class = get_policy_trainer_class(policy_cfg_path) or BaseTrainer
     trainer = train_class(
         args=training_args,
         model=model,
         tokenizer=model_components.get('tokenizer', None),
-        **data_module
+        train_loader=train_loader,
+        eval_loader=eval_loader,
     )
     trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
     # Save model

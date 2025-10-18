@@ -71,9 +71,6 @@ class NormalizedMapDataset(Dataset):
         # Get the original sample from the underlying dataset
         sample = self.dataset[idx]
         
-        # Make a copy to avoid modifying the original
-        sample = copy.copy(sample)
-        
         # Apply action normalization if available
         if self.action_normalizer is not None and 'action' in sample:
             sample['action'] = self.action_normalizer.normalize(sample['action'])
@@ -152,9 +149,6 @@ class NormalizedIterableDataset(IterableDataset):
             Sample dictionary with normalized actions and states
         """
         for sample in self.dataset:
-            # Make a copy to avoid modifying the original
-            sample = copy.copy(sample)
-            
             # Apply action normalization if available
             if self.action_normalizer is not None and 'action' in sample:
                 sample['action'] = self.action_normalizer.normalize(sample['action'])

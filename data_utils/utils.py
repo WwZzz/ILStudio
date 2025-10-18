@@ -7,7 +7,6 @@ import fnmatch
 import cv2
 import json
 import torchvision.transforms as transforms
-# import IPython  # Removed to avoid unnecessary dependency
 import copy
 import gc
 import warnings
@@ -22,8 +21,6 @@ import torch.distributed as dist
 
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
-
-# e = IPython.embed  # Removed to avoid unnecessary dependency
 
 # Normalize Class
 NORMTYPE2CLASS = {
@@ -107,47 +104,89 @@ class WrappedDataset(torch.utils.data.Dataset):
 
 def save_norm_meta_to_json(file_path: str, data: dict):
     """
-    Append normalization meta information to json file
+    Save normalization meta information to json file
+    
+    Saves complete metadata including datasets (with per-dataset ctrl_space/ctrl_type), state, and action.
     """
-    # If the file does not exist, create it with an empty placeholder
-    if not os.path.exists(file_path):
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump({'state':{}, 'action':{}}, f)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # Open with r+ mode to read first then write
-    with open(file_path, 'r+', encoding='utf-8') as f:
-        # Read existing content
-        try:
-            old = json.load(f)
-        except json.JSONDecodeError:
-            # File is empty or corrupted, reinitialize
-            old = {'state':{}, 'action':{}}
-
-        # Move pointer to the beginning of file
-        f.seek(0)
-        # Append new dict
-        old['state'].update(data.get('state', {}))
-        old['action'].update(data.get('action', {}))
-        old['kwargs'] = data.get('kwargs', {})
-        # Write back
-        json.dump(old, f, ensure_ascii=False, indent=2)
-        # Truncate excess content (when new content is shorter than old content)
-        f.truncate()
-
-def load_normalizer_from_meta(dataset_dir:str='', norm_meta=None, src_dir=''):
-    assert norm_meta is not None, "norm_meta cannot be None "
-    if isinstance(norm_meta, str):
-        with open(norm_meta, 'r') as f:
-            norm_meta = json.load(f)
-    kwargs = norm_meta.get('kwargs', {})
-    if dataset_dir=='': 
-        # when dataset_dir is not specified, using the first dataset dir in normalize.json
-        dataset_dir = list(norm_meta['state'].keys())[0]
-        warnings.warn(f"dataset_dir was not specified. using {dataset_dir} as the default value.")
-    if src_dir=='': src_dir = dataset_dir
-    dname = BaseNormalizer.meta2name(dataset_dir=dataset_dir, ctrl_space=kwargs.get('ctrl_space', 'ee'), ctrl_type=kwargs.get('ctrl_type', 'delta'))
-    state_normalizer = NORMTYPE2CLASS[norm_meta['state'][dataset_dir]](src_dir, dataset_name=dname, **kwargs)
-    action_normalizer = NORMTYPE2CLASS[norm_meta['action'][dataset_dir]](src_dir, dataset_name=dname, **kwargs)
+def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
+    """Load normalizers from metadata
+    
+    Uses dataset_id as keys and includes per-dataset ctrl_space/ctrl_type.
+    
+    Args:
+        norm_meta: Metadata dictionary
+        src_dir: Source directory where normalize.json and stats files are located.
+                 If empty or stats not found, will fallback to cache directory.
+        dataset_id: Specific dataset_id to load. If None, loads the first dataset from metadata.
+                    Note: This is read from metadata, not from args.dataset_dir.
+    
+    Returns:
+        Dictionary with 'state' and 'action' normalizers
+    """
+    datasets_info = norm_meta.get('datasets', [])
+    
+    if not datasets_info:
+        raise ValueError("No datasets found in metadata")
+    
+    # Determine which dataset to load
+    if dataset_id is None:
+        # Use first dataset as default (typical for single-dataset training)
+        dataset_meta = datasets_info[0]
+        dataset_id = dataset_meta['dataset_id']
+        if len(datasets_info) > 1:
+            print(f"Multiple datasets found in metadata. Using first: {dataset_id}")
+    else:
+        # Find the matching dataset by dataset_id
+        dataset_meta = None
+        for ds_meta in datasets_info:
+            if ds_meta['dataset_id'] == dataset_id:
+                dataset_meta = ds_meta
+                break
+        
+        if dataset_meta is None:
+            raise ValueError(f"Dataset '{dataset_id}' not found in metadata. Available: {[d['dataset_id'] for d in datasets_info]}")
+    
+    # Get ctrl info from metadata
+    ctrl_space = dataset_meta.get('ctrl_space', 'ee')
+    ctrl_type = dataset_meta.get('ctrl_type', 'delta')
+    
+    # Get normalizer types from metadata
+    state_norm_type = norm_meta['state'].get(dataset_id, 'Zscore')
+    action_norm_type = norm_meta['action'].get(dataset_id, 'Zscore')
+    
+    # Create normalizers with dataset_id and ctrl info
+    kwargs = {'ctrl_space': ctrl_space, 'ctrl_type': ctrl_type}
+    
+    # Determine load directory: prefer src_dir, fallback to cache
+    cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
+    
+    # Check if stats exist in src_dir
+    if src_dir and os.path.exists(src_dir):
+        stats_filename = f"{dataset_id}_stats_{ctrl_space}_{ctrl_type}.pkl"
+        src_stats_path = os.path.join(src_dir, stats_filename)
+        
+        if os.path.exists(src_stats_path):
+            # Load from src_dir (checkpoint directory)
+            load_dir = src_dir
+        else:
+            # Fallback to cache
+            load_dir = cache_dir
+            warnings.warn(f"Stats not found in {src_dir}, using cache directory: {cache_dir}")
+    else:
+        # Use cache directory
+        load_dir = cache_dir
+    
+    # Create normalizers
+    state_normalizer = NORMTYPE2CLASS[state_norm_type](
+        load_dir, dataset_name=dataset_id, **kwargs
+    )
+    action_normalizer = NORMTYPE2CLASS[action_norm_type](
+        load_dir, dataset_name=dataset_id, **kwargs
+    )
+    
     return {'state': state_normalizer, 'action': action_normalizer}
     
 def _import_class_from_path(class_path: str):
@@ -181,11 +220,16 @@ def _create_dataset_from_config(dataset_config: dict, args):
         args: Training arguments
     
     Returns:
-        Dataset instance
+        Dataset instance with added 'name' and 'dataset_id' attributes
     """
     # Get dataset class
     class_path = dataset_config.get('class', dataset_config.get('dataset_class', 'EpisodicDataset'))
     dataset_class = _import_class_from_path(class_path)
+    
+    # Extract dataset name from config (required for identification)
+    dataset_name = dataset_config.get('name')
+    if not dataset_name:
+        raise ValueError(f"Dataset configuration must include a 'name' field: {dataset_config}")
     
     # Extract constructor arguments
     constructor_args = dataset_config.get('args', {})
@@ -222,6 +266,12 @@ def _create_dataset_from_config(dataset_config: dict, args):
     # Create dataset instance
     try:
         dataset = dataset_class(**final_args)
+        
+        # Add name and dataset_id attributes for identification
+        # These are used by normalizers and other components to identify datasets
+        dataset.name = dataset_name
+        dataset.dataset_id = dataset_name  # Alias for clarity
+        
         return dataset
     except Exception as e:
         raise RuntimeError(f"Failed to create dataset {class_path} with args {final_args}: {e}")
@@ -230,23 +280,13 @@ def _create_dataset_from_config(dataset_config: dict, args):
 def load_data(args, task_config, save_norm=True):
     """Load datasets with flexible configuration support
     
-    Supports both legacy format and new flexible format:
-    
-    Legacy format (backward compatible):
-    ```yaml
-    dataset_dir: ['path1', 'path2']
-    dataset_class: 'EpisodicDataset'
-    camera_names: ['primary']
-    # ... other params
-    ```
-    
-    New flexible format:
+    Required format:
     ```yaml
     datasets:
       - name: "main_dataset"
         class: "data_utils.datasets.EpisodicDataset"
         args:
-          dataset_dir: ['path1']
+          dataset_path_list: ['path1']
           camera_names: ['primary']
           chunk_size: 64
           ctrl_space: 'ee'
@@ -260,11 +300,15 @@ def load_data(args, task_config, save_norm=True):
     ```
     """
     
-    # Check if using new flexible format
-    if 'datasets' in task_config:
-        return _load_data_flexible_format(args, task_config, save_norm)
-    else:
-        return _load_data_legacy_format(args, task_config, save_norm)
+    # Ensure new flexible format is used
+    if 'datasets' not in task_config:
+        raise ValueError(
+            "Task config must use the new flexible format with 'datasets' key. "
+            "Old format with 'dataset_dir' is no longer supported. "
+            "Please update your task config to use the datasets format."
+        )
+    
+    return _load_data_flexible_format(args, task_config, save_norm)
 
 
 def _load_data_flexible_format(args, task_config, save_norm=True):
@@ -300,45 +344,51 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
     action_normalizers = {}
     state_normalizers = {}
     
+    # Use dataset.dataset_id as the key for normalizers instead of dataset_dir
     for dataset in datasets:
-        dataset_dir = dataset.get_dataset_dir()
-        action_normalizers[dataset_dir] = action_normalizer_class(dataset)
-        state_normalizers[dataset_dir] = state_normalizer_class(dataset)
+        dataset_id = dataset.dataset_id  # Use the dataset_id attribute added in _create_dataset_from_config
+        action_normalizers[dataset_id] = action_normalizer_class(dataset, dataset_name=dataset_id)
+        state_normalizers[dataset_id] = state_normalizer_class(dataset, dataset_name=dataset_id)
     
     # Save normalization metadata
     if save_norm:
-        # Get ctrl_space and ctrl_type from first dataset or task config
-        ctrl_space = task_config.get('ctrl_space', 'ee')
-        ctrl_type = task_config.get('ctrl_type', 'delta')
+        # Build complete metadata for each dataset
+        datasets_meta = []
+        for dataset in datasets:
+            dataset_meta = {
+                'dataset_id': dataset.dataset_id,
+                'ctrl_space': getattr(dataset, 'ctrl_space', 'ee'),
+                'ctrl_type': getattr(dataset, 'ctrl_type', 'delta'),
+            }
+            datasets_meta.append(dataset_meta)
         
-        # Try to get from first dataset if not in task config
-        if len(datasets) > 0 and hasattr(datasets[0], 'ctrl_space'):
-            ctrl_space = getattr(datasets[0], 'ctrl_space', ctrl_space)
-            ctrl_type = getattr(datasets[0], 'ctrl_type', ctrl_type)
-        
+        # Metadata format that stores complete information for each dataset
         norm_meta = {
+            'version': '2.0',  # Format version
+            'datasets': datasets_meta,  # List of dataset metadata
             'state': {k: str(v) for k, v in state_normalizers.items()}, 
-            'action': {k: str(v) for k, v in action_normalizers.items()}, 
-            'kwargs': {'ctrl_space': ctrl_space, 'ctrl_type': ctrl_type}
+            'action': {k: str(v) for k, v in action_normalizers.items()},
         }
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
         
-        for dataset_dir, normalizer in state_normalizers.items():
+        # Save normalizer stats to output_dir (for training) using dataset_id as key
+        for dataset_id, normalizer in state_normalizers.items():
             try:
                 normalizer.save_stats_to_(args.output_dir)
             except Exception as e:
-                print(f"Failed to save normalizer stats of {dataset_dir} because {e}")
+                print(f"Failed to save normalizer stats of {dataset_id} because {e}")
     
     # Wrap datasets with normalizers
     from data_utils.dataset_wrappers import wrap_dataset_with_normalizers
     wrapped_datasets = []
     for dataset in datasets:
-        dataset_name = dataset.get_dataset_dir() if hasattr(dataset, 'get_dataset_dir') else None
+        # Use dataset.dataset_id as the identifier instead of dataset_dir
+        dataset_id = dataset.dataset_id
         wrapped_dataset = wrap_dataset_with_normalizers(
             dataset=dataset,
             action_normalizers=action_normalizers,
             state_normalizers=state_normalizers,
-            dataset_name=dataset_name
+            dataset_name=dataset_id
         )
         wrapped_datasets.append(wrapped_dataset)
     
@@ -354,104 +404,15 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
     
     return train_dataset, val_dataset
 
-
-def _load_data_legacy_format(args, task_config, save_norm=True):
-    """Load data using the legacy configuration format (backward compatibility)"""
-    
-    dataset_dir_l = task_config['dataset_dir']
-    camera_names = task_config.get('camera_names', [])
-    sample_weights = task_config.get('sample_weights', None)
-    train_ratio = task_config.get('train_ratio', 1.0)
-    ctrl_space = task_config.get('ctrl_space', 'ee')
-    ctrl_type = task_config.get('ctrl_type', 'delta')
-    data_class = task_config.get('dataset_class', 'EpisodicDataset')
-    
-    action_normtype = getattr(args, 'action_normalize', task_config.get('action_normalize', 'zscore'))
-    state_normtype = getattr(args, 'state_normalize', task_config.get('state_normalize', 'zscore'))
-    
-    if isinstance(dataset_dir_l, str):
-        dataset_dir_l = [dataset_dir_l]
-    
-    # Import dataset class
-    if data_class == 'EpisodicDataset':
-        from data_utils.datasets import EpisodicDataset
-        data_class = EpisodicDataset
-    else:
-        data_class = _import_class_from_path(data_class)
-    
-    # Create datasets
-    rank = dist.get_rank() if is_distributed() else 0
-    if rank == 0:
-        datasets = [
-            data_class(
-                [dataset_dir], 
-                camera_names, 
-                data_args=args, 
-                chunk_size=getattr(args, 'chunk_size', 16), 
-                ctrl_space=ctrl_space, 
-                ctrl_type=ctrl_type
-            ) 
-            for dataset_dir in dataset_dir_l
-        ]
-    
-    if is_distributed():
-        dist.barrier()
-        
-    if rank != 0:
-        datasets = [
-            data_class(
-                [dataset_dir], 
-                camera_names, 
-                data_args=args, 
-                chunk_size=getattr(args, 'chunk_size', 16), 
-                ctrl_space=ctrl_space, 
-                ctrl_type=ctrl_type
-            ) 
-            for dataset_dir in dataset_dir_l
-        ]
-    
-    # Get normalizer classes
-    action_normalizer_class = NORMTYPE2CLASS[action_normtype]
-    state_normalizer_class = NORMTYPE2CLASS[state_normtype]
-    
-    # Compute dataset statistics
-    action_normalizers = {dataset.get_dataset_dir(): action_normalizer_class(dataset) for dataset in datasets}
-    state_normalizers = {dataset.get_dataset_dir(): state_normalizer_class(dataset) for dataset in datasets}
-    
-    if save_norm:
-        norm_meta = {
-            'state': {k: str(v) for k, v in state_normalizers.items()}, 
-            'action': {k: str(v) for k, v in action_normalizers.items()}, 
-            'kwargs': {'ctrl_space': ctrl_space, 'ctrl_type': ctrl_type}
-        }
-        save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
-        
-        for dataset_dir, normalizer in state_normalizers.items():
-            try:
-                normalizer.save_stats_to_(args.output_dir)
-            except Exception as e:
-                print(f"Failed to save normalizer stats of {dataset_dir} because {e}")
-    
-    # Wrap datasets with normalizers
-    from data_utils.dataset_wrappers import wrap_dataset_with_normalizers
-    wrapped_datasets = []
-    for dataset in datasets:
-        dataset_name = dataset.get_dataset_dir() if hasattr(dataset, 'get_dataset_dir') else None
-        wrapped_dataset = wrap_dataset_with_normalizers(
-            dataset=dataset,
-            action_normalizers=action_normalizers,
-            state_normalizers=state_normalizers,
-            dataset_name=dataset_name
-        )
-        wrapped_datasets.append(wrapped_dataset)
-        
-    train_dataset = ConcatDataset(wrapped_datasets)
-    x = train_dataset[0]  # test __getitem__
-    val_dataset = None
-
-    return train_dataset, val_dataset
-
 def load_normalizers(args):
+    """Load normalizers from saved metadata
+    
+    Loads normalizers using dataset_id as key with per-dataset ctrl_space/ctrl_type.
+    
+    Returns:
+        tuple: (normalizers_dict, ctrl_space, ctrl_type) or (normalizers_dict, datasets_info)
+               For new format, returns list of dataset info dicts
+    """
     try:
         # load normalizers
         policy_normalize_file = os.path.join(os.path.dirname(args.model_name_or_path), 'normalize.json')
@@ -461,9 +422,26 @@ def load_normalizers(args):
                 raise FileNotFoundError("No normalize.json found")
         with open(policy_normalize_file, 'r') as f:
             norm_meta = json.load(f)
-        normalizers = load_normalizer_from_meta(args.dataset_dir, norm_meta, os.path.dirname(policy_normalize_file))
-        kwargs = norm_meta.get('kwargs', {'ctrl_type':'delta', 'ctrl_space':'ee'})
-        return normalizers, kwargs['ctrl_space'], kwargs['ctrl_type'] 
+        
+        # Load normalizer from metadata (uses first dataset by default)
+        # dataset_id is determined from metadata, not from args
+        normalizers = load_normalizer_from_meta(
+            norm_meta, 
+            src_dir=os.path.dirname(policy_normalize_file),
+            dataset_id=None  # Let it auto-select from metadata
+        )
+        
+        # Get ctrl info from the loaded dataset (first dataset)
+        datasets_info = norm_meta.get('datasets', [])
+        if datasets_info:
+            first_dataset = datasets_info[0]
+            ctrl_space = first_dataset.get('ctrl_space', 'ee')
+            ctrl_type = first_dataset.get('ctrl_type', 'delta')
+        else:
+            ctrl_space, ctrl_type = 'ee', 'delta'
+        
+        return normalizers, ctrl_space, ctrl_type
+            
     except Exception as e:
         warnings.warn(f"Failed to load normalizers from {args.model_name_or_path} because {e}")
         identity_normalizer = {'state':Identity(), 'action':Identity()}

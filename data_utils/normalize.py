@@ -66,7 +66,6 @@
 #   physical limits) or image pixel intensities.
 #   Note: This method is highly sensitive to outliers.
 
-# 所以要计算的统计量包括：均值、标准差、最小值、最大值、百分位最小值、百分位最大值，有这些统计量之后，就可以计算归一化和反归一化了
 # ----------------------- h5 structure
 # # ACTION
 # joint_action: (T, qpos_dim)
@@ -89,6 +88,7 @@ import fnmatch
 import hashlib
 import warnings
 import torch.distributed as dist
+import torch
 
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
@@ -111,19 +111,49 @@ def find_all_hdf5(dataset_dir):
 
 class BaseNormalizer:
     def __init__(self, dataset, dataset_name:str=None, gripper_indices: List[int] = [-1], ctrl_type='delta', ctrl_space='ee', *args, **kwargs):
+        """Initialize BaseNormalizer
+        
+        Args:
+            dataset: Dataset object or string path (for loading from cache)
+            dataset_name: Explicit name for the dataset (required for new format)
+            gripper_indices: Indices of gripper actions
+            ctrl_type: Control type ('abs', 'delta', etc.)
+            ctrl_space: Control space ('ee', 'joint', etc.)
+        """
+        # Get centralized cache directory
+        self.cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
         if isinstance(dataset, str):
+            # Loading mode: dataset is a path (cache_dir or dataset_dir for backward compat)
             self.dataset = None
-            self.dataset_dir = dataset
+            self.dataset_dir = dataset  # Keep for backward compatibility
             self.ctrl_space = ctrl_space
             self.ctrl_type = ctrl_type
+            # When loading, dataset_name must be provided
+            if dataset_name is None:
+                raise ValueError("dataset_name must be provided when loading normalizer from path")
+            self.dataset_name = dataset_name
         else:
+            # Training mode: dataset is an actual dataset object
             self.dataset = dataset
-            self.dataset_dir = dataset.get_dataset_dir() # the directionary path of .hdf5 files
-            self.ctrl_type = self.dataset.ctrl_type
-            self.ctrl_space = self.dataset.ctrl_space
-        self.dataset_name = 'd' + str2hash(self.dataset_dir) if dataset_name is None else dataset_name
+            self.dataset_dir = dataset.get_dataset_dir() if hasattr(dataset, 'get_dataset_dir') else None
+            self.ctrl_type = getattr(dataset, 'ctrl_type', ctrl_type)
+            self.ctrl_space = getattr(dataset, 'ctrl_space', ctrl_space)
+            
+            # Use dataset.dataset_id if available, otherwise fall back to hash-based name
+            if hasattr(dataset, 'dataset_id'):
+                self.dataset_name = dataset.dataset_id
+            elif dataset_name is not None:
+                self.dataset_name = dataset_name
+            elif self.dataset_dir:
+                self.dataset_name = 'd' + str2hash(self.dataset_dir)
+            else:
+                raise ValueError("Cannot determine dataset name: dataset has no 'dataset_id' attribute and dataset_name not provided")
+        
         self.gripper_indices = gripper_indices
         self.stats_filename = f"{self.dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
+        
         rank = dist.get_rank() if is_distributed() else 0
         if rank == 0:
             if self.is_stats_exist():
@@ -139,7 +169,20 @@ class BaseNormalizer:
         return f"{'d' + str2hash(dataset_dir)}"
 
     def is_stats_exist(self):
-        return os.path.exists(os.path.join(self.dataset_dir, self.stats_filename)) or os.path.exists(os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl'))
+        """Check if stats file exists in cache directory or dataset directory (backward compat)"""
+        # Check in centralized cache first (new format)
+        cache_path = os.path.join(self.cache_dir, self.stats_filename)
+        if os.path.exists(cache_path):
+            return True
+        
+        # Backward compatibility: check in dataset_dir if it exists
+        if self.dataset_dir:
+            old_path = os.path.join(self.dataset_dir, self.stats_filename)
+            old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+            if os.path.exists(old_path) or os.path.exists(old_path_alt):
+                return True
+        
+        return False
 
     def compute_stats_for_array(self, data_k):
         return {
@@ -170,30 +213,55 @@ class BaseNormalizer:
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
     
     def save_stats(self, all_stats):
-        with open(os.path.join(self.dataset_dir, self.stats_filename), 'wb') as file:  # 使用二进制写模式 ('wb')
+        """Save stats to centralized cache directory"""
+        save_path = os.path.join(self.cache_dir, self.stats_filename)
+        with open(save_path, 'wb') as file:
             pickle.dump(all_stats, file)
 
     def save_stats_to_(self, target_dir:str):
-        """Save the dataset's stats to `target_dir`"""
+        """Save the dataset's stats to `target_dir` (typically for training checkpoints)
+        
+        This saves stats to both the target_dir (for checkpoint) and cache_dir (for future use).
+        """
         assert hasattr(self, 'all_stats') and self.all_stats is not None, "No stats found."
         stats_to_save = {
             k: {
                 kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
             } if isinstance(v, dict) else v for k,v in self.all_stats.items()
         }
+        
+        # Save to target_dir (training checkpoint)
         save_path = os.path.join(target_dir, self.stats_filename)
-        if os.path.exists(save_path): 
-            warnings.warn(f"Stats file {save_path} already exists.")
-            return
-        with open(save_path, 'wb') as file:  # 使用二进制写模式 ('wb')
-            pickle.dump(stats_to_save, file)
+        if not os.path.exists(save_path):
+            with open(save_path, 'wb') as file:
+                pickle.dump(stats_to_save, file)
+        else:
+            warnings.warn(f"Stats file {save_path} already exists in training dir.")
+        
+        # Also save to cache_dir for future use
+        cache_path = os.path.join(self.cache_dir, self.stats_filename)
+        if not os.path.exists(cache_path):
+            with open(cache_path, 'wb') as file:
+                pickle.dump(stats_to_save, file)
 
     def load_stats(self):
-        stats_path = os.path.join(self.dataset_dir, self.stats_filename)
-        if not os.path.exists(stats_path):
-            stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        """Load stats from cache directory or dataset directory (backward compat)"""
+        # Try cache directory first (new format)
+        stats_path = os.path.join(self.cache_dir, self.stats_filename)
+        
+        if not os.path.exists(stats_path) and self.dataset_dir:
+            # Backward compatibility: try dataset_dir
+            stats_path = os.path.join(self.dataset_dir, self.stats_filename)
             if not os.path.exists(stats_path):
-                raise FileExistsError(f"Stats file {os.path.join(self.dataset_dir, self.stats_filename)} does not exist.")
+                stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        
+        if not os.path.exists(stats_path):
+            raise FileNotFoundError(
+                f"Stats file not found. Searched in:\n"
+                f"  - {os.path.join(self.cache_dir, self.stats_filename)}\n"
+                f"  - {os.path.join(self.dataset_dir, self.stats_filename) if self.dataset_dir else 'N/A'}"
+            )
+        
         with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
         all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
@@ -236,13 +304,13 @@ class MinMaxNormalizer(BaseNormalizer):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
         data = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
-        return data.astype(dtype)
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
         data = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
-        return data.astype(dtype)
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
 
 class PercentileNormalizer(BaseNormalizer):
     def __init__(self, dataset_dir, dataset_name=None, gripper_indices=[-1], low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee'):
@@ -259,13 +327,15 @@ class PercentileNormalizer(BaseNormalizer):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
         data = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
-        return np.clip(data, self.low, self.high).astype(dtype)
+        data = np.clip(data, self.low, self.high).astype(dtype)
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
         data = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
-        return np.clip(data, stats['q01'], stats['q99']).astype(dtype)
+        data = np.clip(data, stats['q01'], stats['q99'])
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
     def __init__(self, dataset, dataset_name=None, gripper_indices=[-1], ctrl_type='delta', ctrl_space='ee', min_std=0.01, *args, **kwargs):
@@ -280,14 +350,14 @@ class ZScoreNormalizer(BaseNormalizer):
         stats = self.get_stat_by_key(datatype)
         std = np.clip(stats['std'], self.min_std, np.inf)
         data = (data-stats['mean'])/std
-        return data.astype(dtype)
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype) 
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
         std = np.clip(stats['std'], self.min_std, np.inf)
         data = data*std + stats['mean']
-        return data.astype(dtype)
+        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
     
 class Identity(BaseNormalizer):
     def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):

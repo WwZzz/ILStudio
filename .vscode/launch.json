@@ -14,17 +14,20 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "MUJOCO_GL": "glfw",
+                "MUJOCO_GL": "egl",
                 "CUDA_VISIBLE_DEVICES": "0",
                 "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 "ILSTD_CACHE": "/mnt/model/ilstd",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
+            // train
             "args": [
-                "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_new_train_debug"
+                "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_new_train_debug",
+                "--training.save_steps", "100",
             ],
+            // eval
             // "args": [
-            //     "--output_dir", "results/test_octo","--model_name_or_path","ckpt/debug_octo", "--use_spawn"
+            //     "--output_dir", "results/test_act","--model_name_or_path","ckpt/act_new_train_debug/checkpoint-100", "--use_spawn"
             // ]
             // "args": [
             //     "--policy", "octo_aloha",

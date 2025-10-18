@@ -1,12 +1,13 @@
-dataset_dir:
-  - '/inspire/hdd/project/robot-action/public/data/sfo_train/pick_two_objects'
-camera_names:
-  - primary
-  - wrist_left
-  - wrist_right
-dataset_class: AlohaSIIv2Dataset
-ctrl_type: abs
-ctrl_space: joint
+# 新的灵活数据集配置格式
+datasets:
+  - name: "sii_pick_twice"
+    class: "AlohaSIIv2Dataset"
+    args:
+      dataset_path_list: ['/inspire/hdd/project/robot-action/public/data/sfo_train/pick_two_objects']
+      camera_names: ['primary', 'wrist_left', 'wrist_right']
+      chunk_size: 100
+      ctrl_space: 'joint'
+      ctrl_type: 'abs'
 
 # Task-specific parameters that will override policy configs
 action_dim: 14
@@ -14,4 +15,3 @@ state_dim: 14
 image_size: [256, 256]
 action_normalize: "zscore"
 state_normalize: "zscore"
-chunk_size: 100
