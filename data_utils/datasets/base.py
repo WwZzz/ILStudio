@@ -31,8 +31,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
     """
     
     def __init__(self, dataset_path_list: list, camera_names: list, action_normalizers: dict = {}, 
-                 state_normalizers: dict = {}, data_args=None, chunk_size: int = 16, 
-                 ctrl_space: str = 'ee', ctrl_type: str = 'delta'):
+                 state_normalizers: dict = {}, chunk_size: int = 16, 
+                 ctrl_space: str = 'ee', ctrl_type: str = 'delta',
+                 image_size: tuple = (480, 640), preload_data: bool = False):
         """
         Initialize the episodic dataset.
         
@@ -41,10 +42,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
             camera_names: List of camera names to use
             action_normalizers: Dictionary of action normalizers per dataset
             state_normalizers: Dictionary of state normalizers per dataset
-            data_args: Data processing arguments
             chunk_size: Number of timesteps per sample
             ctrl_space: Control space type ('ee', 'joint', 'other')
             ctrl_type: Control type ('abs', 'rel', 'delta')
+            image_size: Target size for image resizing (height, width)
+            preload_data: Whether to preload all data into memory
         """
         super(EpisodicDataset).__init__()
         
@@ -64,9 +66,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.state_normalizers = state_normalizers
         self.chunk_size = chunk_size
         self.camera_names = camera_names
-        self.data_args = data_args
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']
         self.ctrl_type = ctrl_type  # ['abs', 'rel', 'delta']
+        self.image_size = image_size
+        self.preload_data = preload_data
         self.freq = -1
         self.max_workers = 8
         self.initialize()
@@ -93,7 +96,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
     
     def initialize(self):
         """Initialize the dataset by loading data and computing episode lengths."""
-        self.loaded_data = self._load_all_episodes_into_memory() if getattr(self.data_args, 'preload_data', False) else None
+        self.loaded_data = self._load_all_episodes_into_memory() if self.preload_data else None
         self.episode_len = self.get_episode_len()  # Get length of each episode
         self.cumulative_len = np.cumsum(self.episode_len)  # Compute cumulative lengths
         self.max_episode_len = max(self.episode_len)  # Get maximum episode length
@@ -283,9 +286,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         data_dict = self.load_onestep_from_episode(dataset_path, start_ts) 
         action, image_dict, state, raw_lang = data_dict['action'], data_dict['image'], data_dict['state'], data_dict['language_instruction']
         reasoning = data_dict.get('reasoning', '')
-        padded_action = np.zeros((self.data_args.chunk_size, action.shape[1]), dtype=np.float32) 
+        padded_action = np.zeros((self.chunk_size, action.shape[1]), dtype=np.float32) 
         padded_action[:action.shape[0]] = action
-        is_pad = np.zeros(self.data_args.chunk_size) 
+        is_pad = np.zeros(self.chunk_size) 
         is_pad[action.shape[0]:] = 1
         all_cam_images = []
         for cam_name in self.camera_names:

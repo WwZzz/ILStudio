@@ -18,10 +18,10 @@ class WrappedLerobotDataset(tud.Dataset):
             camera_names: list=[], 
             action_normalizers: dict = {},  
             state_normalizers: dict = {}, 
-            data_args=None, 
             chunk_size: int = 16,  
             ctrl_space: str = 'ee', 
             ctrl_type: str = 'delta',
+            image_size: tuple = None,
             *args, 
             **kwargs,
             ):
@@ -59,7 +59,7 @@ class WrappedLerobotDataset(tud.Dataset):
         self.episode_ids = np.arange(sum(self.per_dataset_num_episodes))
         self.action_normalizers = action_normalizers
         self.state_normalizers = state_normalizers
-        self.data_args = data_args
+        self.image_size = image_size
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']
         self.ctrl_type = ctrl_type  # ['abs', 'rel', 'delta']
         self.freq = self.dataset_metas[0].fps
@@ -186,9 +186,8 @@ class WrappedLerobotDataset(tud.Dataset):
         is_pad = sample['action_is_pad']
         # process image
         cam_keys = self.datasets[dataset_idx].meta.camera_keys if len(self.camera_names)==0 else self.camera_names
-        image_size = getattr(self.data_args, 'image_size', None)
-        if image_size is not None:
-            images = torch.cat([resize_with_pad(sample[cam_key].unsqueeze(0), height=image_size[1], width=image_size[0]) for cam_key in cam_keys], dim=0)
+        if self.image_size is not None:
+            images = torch.cat([resize_with_pad(sample[cam_key].unsqueeze(0), height=self.image_size[1], width=self.image_size[0]) for cam_key in cam_keys], dim=0)
         else:
             images = torch.stack([sample[cam_key] for cam_key in cam_keys])
         data_dict = {

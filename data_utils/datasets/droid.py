@@ -5,30 +5,31 @@ Thus, we provide a data loader example here that uses the RLDS data format.
 The data loader also applies a few DROID-specific data filters / transformations.
 """
 
-from enum import Enum
-from enum import auto
-import json
-import logging
-from pathlib import Path
 import concurrent.futures
-import logging
-import os
 import pathlib
-import re
 import shutil
-import stat
 import time
 import urllib.parse
 import torch
 import filelock
 import fsspec
-import fsspec.generic
 from tqdm import tqdm
+from typing import Union, List
+import dlimp as dl
+import tensorflow as tf
+import tensorflow_datasets as tfds
+import collections
+import numpy as np
+import json
+from pathlib import Path
+import logging
 
 class DroidDataset:
     def __init__(
         self,
         dataset_dir: str,
+        name: str = "droid_100",
+        version: str = "1.0.0",
         batch_size: int = -1,
         shuffle: bool = True,
         chunk_size: int = 16,
@@ -40,9 +41,12 @@ class DroidDataset:
         filter_dict_path=None,  # Path to json file with indices to sample during training
         data_processor: callable = None,  # Optional function to apply to each data sample
         data_collator: callable = None,  # Optional function to collate a batch of data samples
+        gpu_for_dataset: List[int] = [],
     ):
         # Import tensorflow here to not make it mandatory in case RLDS data loader is not used.
         self.dataset_dir = dataset_dir
+        self.name = name
+        self.version = version
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.chunk_size = chunk_size
@@ -54,6 +58,8 @@ class DroidDataset:
         self.filter_dict_path = filter_dict_path
         self.data_processor = data_processor
         self.data_collator = data_collator
+        gpus = tf.config.list_physical_devices('GPU')   
+        tf.config.set_visible_devices([gpus[i] for i in gpu_for_dataset] , "GPU")
         # Load dataset
         dataset = self.load_data()
         # Shuffle, batch
@@ -64,6 +70,32 @@ class DroidDataset:
         dataset = dataset.with_ram_budget(1)
         self.dataset = dataset
 
+    def extract_all(self, features: Union[List[str], str]):
+        if isinstance(features, str): features = [features]
+        all_funcs = {}
+        for key in features:
+            if 'action' in key or 'actions' in key:
+                all_funcs['action'] = lambda x: x['actions']
+            elif 'state' in key:
+                all_funcs['state'] = lambda traj: tf.concat([tf.cast(traj["observation"]["joint_position"], tf.float32), tf.cast(traj["observation"]["gripper_position"], tf.float32)], axis=-1) 
+            elif 'image' in key:
+                all_funcs['image'] = lambda traj: tf.stack([traj["observation"]["image"], traj["observation"]["wrist_image"]], axis=0)  # (2, H, W, C)
+        dataset = self.traj_dataset.map(lambda traj: {feat: all_funcs[feat](traj) for feat in features}, num_parallel_calls=self.num_parallel_calls)
+        # batch_size = 1024
+        # dataset = dataset.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+        numpy_iterator = tfds.as_numpy(dataset)
+        all_data_batches = collections.defaultdict(list)
+        for batch in tqdm(numpy_iterator):
+            for feat in features:
+                if feat in batch:
+                    all_data_batches[feat].append(batch[feat])
+        final_data = {}
+        for feat in features:
+            if all_data_batches[feat]:
+                final_data[feat] = np.concatenate(all_data_batches[feat], axis=0)
+            else:
+                final_data[feat] = np.array([]) # 处理空数据集或特征不存在的情况
+        return final_data
 
     def load_data(self, *args, **kwargs):
         data_dir=self.dataset_dir
@@ -75,13 +107,10 @@ class DroidDataset:
         num_parallel_reads=self.num_parallel_reads
         num_parallel_calls=self.num_parallel_calls
         filter_dict_path=self.filter_dict_path
-        import dlimp as dl
-        import tensorflow as tf
-        import tensorflow_datasets as tfds
-        gpus = tf.config.list_physical_devices('GPU')   
-        tf.config.set_visible_devices(gpus[0] if gpus else [] , "GPU")
 
-        builder = tfds.builder("droid", data_dir=data_dir, version="1.0.1")
+        # tf.config.set_visible_devices([] , "GPU")
+
+        builder = tfds.builder(self.name, data_dir=data_dir, version=self.version)
         dataset = dl.DLataset.from_rlds(builder, split="train", shuffle=shuffle, num_parallel_reads=num_parallel_reads)
 
         # Filter out any unsuccessful trajectories -- we use the file name to check this
@@ -92,7 +121,7 @@ class DroidDataset:
         )
 
         # # Repeat dataset so we never run out of data.
-        dataset = dataset.repeat()
+        
 
         # Load the filter dictionary if provided.
         # The filter dictionary is a JSON file that maps episode keys to ranges of frames to sample
@@ -101,6 +130,7 @@ class DroidDataset:
         #     "<episode key>": [[0, 100], [200, 300]]
         # }
         # means keep frames 0-99 and 200-299).
+        
         if filter_dict_path is not None:
             cached_filter_dict_path = self.download(filter_dict_path, cache_dir=data_dir)
             with Path(cached_filter_dict_path).open("r") as f:
@@ -186,6 +216,7 @@ class DroidDataset:
             }
 
         dataset = dataset.traj_map(restructure, num_parallel_calls)
+        self.traj_dataset = dataset
         
         def chunk_actions(traj):
             """
@@ -214,7 +245,7 @@ class DroidDataset:
             return traj
 
         dataset = dataset.traj_map(chunk_actions, num_parallel_calls)
-        self.traj_dataset = dataset
+        
         # Flatten: map from trajectory dataset to dataset of individual action chunks
         dataset = dataset.flatten(num_parallel_calls=num_parallel_calls)
 
@@ -262,6 +293,7 @@ class DroidDataset:
             return data_dict
         
         dataset = dataset.map(format_convert, num_parallel_calls)
+        dataset = dataset.repeat()
         return dataset
         
     def __iter__(self):

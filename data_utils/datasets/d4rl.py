@@ -4,8 +4,9 @@ import os
 
 class D4RLDataset(EpisodicDataset):
     def __init__(self, dataset_path_list: list, camera_names: list, action_normalizers: dict = {}, 
-                state_normalizers: dict = {}, data_args=None, chunk_size: int = 16, 
-                ctrl_space: str = 'ee', ctrl_type: str = 'delta'):
+                state_normalizers: dict = {}, chunk_size: int = 16, 
+                ctrl_space: str = 'ee', ctrl_type: str = 'delta',
+                image_size: tuple = (480, 640), preload_data: bool = False):
         super(EpisodicDataset).__init__()
         self.episode_ids = np.arange(len(dataset_path_list))
         self.dataset_path_list = dataset_path_list
@@ -13,9 +14,10 @@ class D4RLDataset(EpisodicDataset):
         self.state_normalizers = state_normalizers
         self.chunk_size = chunk_size
         self.camera_names = camera_names
-        self.data_args = data_args
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']
         self.ctrl_type = ctrl_type  # ['abs', 'rel', 'delta']
+        self.image_size = image_size
+        self.preload_data = preload_data
         self.freq = -1
         self.max_workers = 8
         self.initialize()
