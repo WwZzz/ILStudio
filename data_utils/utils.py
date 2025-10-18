@@ -8,6 +8,7 @@ import importlib
 from torch.utils.data import DataLoader, ConcatDataset
 from .normalize import MinMaxNormalizer, PercentileNormalizer, ZScoreNormalizer, Identity
 import torch.distributed as dist
+import torchdata.datapipes.iter as dp
 
 # Import torchdata for mixed dataset support
 try:
@@ -135,6 +136,8 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         else:
             return loader
 
+# 假设 is_distributed() 是一个检查分布式环境的函数
+# from torch.distributed import is_initialized as is_distributed
 
 def _create_mixed_dataloader(datasets, processor, collator, args, is_training=True):
     """
@@ -202,18 +205,23 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     mixed_pipe = Multiplexer(*pipelines)
     
     # Step 4: Apply ShardingFilter for distributed training
-    if is_distributed():
-        print(f"Applying ShardingFilter for distributed training")
-        mixed_pipe = mixed_pipe.sharding_filter()
+    # print(f"Applying ShardingFilter for distributed training")
+    # mixed_pipe = mixed_pipe.sharding_filter()
     
     # Step 5: Apply Shuffler for randomization (if training)
-    if is_training:
-        buffer_size = getattr(args, 'shuffle_buffer_size', 10000)
-        print(f"Applying Shuffler with buffer_size={buffer_size}")
-        mixed_pipe = mixed_pipe.shuffle(buffer_size=buffer_size)
+    # if is_training:
+    #     buffer_size = getattr(args, 'shuffle_buffer_size', 100)
+    #     print(f"Applying Shuffler with buffer_size={buffer_size}")
+    #     mixed_pipe = mixed_pipe.shuffle(buffer_size=buffer_size)
     
     # Step 6: Batching is handled by DataLoader's batch_size parameter
     # We don't use Batcher here because collator might need custom logic
+    batch_size = args.per_device_train_batch_size if is_training else args.per_device_eval_batch_size
+    mixed_pipe = mixed_pipe.batch(
+        batch_size=batch_size, 
+        drop_last=is_training
+    )
+    mixed_pipe = mixed_pipe.collate(collate_fn=collator)
     
     # Step 7: Apply Prefetcher for performance
     prefetch_size = getattr(args, 'prefetch_size', 10)
@@ -224,11 +232,11 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     print(f"Creating DataLoader with batch_size={args.per_device_train_batch_size}")
     loader = DataLoader(
         mixed_pipe,
-        batch_size=args.per_device_train_batch_size,
+        batch_size=None,  # **职责划分**: Batching 已在 pipeline 中完成
         num_workers=args.dataloader_num_workers,
-        collate_fn=collator,
-        drop_last=is_training,
+        collate_fn=None, # **职责划分**: Collate 已在 pipeline 中完成
         pin_memory=args.dataloader_pin_memory,
+        prefetch_factor=None # **职责划分**: Prefetch 已在 pipeline 中完成
     )
     
     return loader

@@ -1,7 +1,7 @@
 # 新的灵活数据集配置格式
 datasets:
   - name: "droid_100"
-    class: "data_utils.datasets.droid100.DroidDataset"
+    class: "data_utils.datasets.droid.DroidDataset"
     args:
       dataset_dir: "/inspire/hdd/project/robot-action/public/data/droid/"
       name: "droid_100"

@@ -6,7 +6,7 @@ datasets:
     args:
       dataset_path_list: ['data/sim_transfer_cube_scripted']
       camera_names: ['primary']
-      chunk_size: 64
+      chunk_size: 100
       ctrl_space: 'joint'
       ctrl_type: 'abs'
   - name: "sim_transfer_cube_human"
@@ -14,7 +14,7 @@ datasets:
     args:
       dataset_path_list: ['data/sim_transfer_cube_human']
       camera_names: ['primary']
-      chunk_size: 64
+      chunk_size: 100
       ctrl_space: 'joint'
       ctrl_type: 'abs'
 
