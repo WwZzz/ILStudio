@@ -19,8 +19,6 @@ class WrappedTFDSDataset(IterableDataset):
     def __init__(self, 
             dataset_path_list: list, 
             camera_names: list=[], 
-            action_normalizers: dict = {},  
-            state_normalizers: dict = {}, 
             chunk_size: int = 16,  
             ctrl_space: str = 'ee', 
             ctrl_type: str = 'delta',

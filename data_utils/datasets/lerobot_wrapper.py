@@ -16,8 +16,6 @@ class WrappedLerobotDataset(tud.Dataset):
     def __init__(self, 
             dataset_path_list: list, 
             camera_names: list=[], 
-            action_normalizers: dict = {},  
-            state_normalizers: dict = {}, 
             chunk_size: int = 16,  
             ctrl_space: str = 'ee', 
             ctrl_type: str = 'delta',
@@ -57,8 +55,6 @@ class WrappedLerobotDataset(tud.Dataset):
         self.total_episodes = sum(num_episodes)
         self.camera_names = camera_names
         self.episode_ids = np.arange(sum(self.per_dataset_num_episodes))
-        self.action_normalizers = action_normalizers
-        self.state_normalizers = state_normalizers
         self.image_size = image_size
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']
         self.ctrl_type = ctrl_type  # ['abs', 'rel', 'delta']
@@ -89,14 +85,6 @@ class WrappedLerobotDataset(tud.Dataset):
     def __len__(self):
         """Return the total number of samples in the dataset."""
         return self.total_frames
-
-    def set_action_normalizers(self, ns):
-        """Set action normalizers for the dataset."""
-        self.action_normalizers = ns
-
-    def set_state_normalizers(self, ns):
-        """Set state normalizers for the dataset."""
-        self.state_normalizers = ns
         
     @property
     def num_episodes(self):
