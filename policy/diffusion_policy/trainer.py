@@ -21,22 +21,22 @@ class Trainer(BaseTrainer):
         return self.optimizer
     
     def training_step(self, *args, **kwargs):
-        """扩展训练步骤，更新 EMA 参数"""
+        """Extended training step, update EMA parameters"""
         loss = super().training_step(*args, **kwargs)
         if hasattr(self.model, "ema") and self.model.ema is not None:
-            self.model.ema.step(self.model.parameters())  # 使用模型的 `ema` 对象更新权重
+            self.model.ema.step(self.model.parameters())  # Use model's `ema` object to update weights
         return loss
     
     def evaluate(self, *args, **kwargs):
-        """评估时使用 EMA 参数"""
+        """Use EMA parameters during evaluation"""
         using_ema = hasattr(self.model, "ema") and self.model.ema is not None
         if using_ema:
-            # 保存原始模型参数并切换到 EMA 参数
-            self.model.ema.store(self.model.parameters())  # 备份当前模型参数
-            self.model.ema.copy_to(self.model.parameters())  # 将 EMA 参数加载到模型中
-        # 执行默认的评估逻辑
+            # Save original model parameters and switch to EMA parameters
+            self.model.ema.store(self.model.parameters())  # Backup current model parameters
+            self.model.ema.copy_to(self.model.parameters())  # Load EMA parameters into model
+        # Execute default evaluation logic
         results = super().evaluate(*args, **kwargs)
         if using_ema:
-            # 恢复原始模型参数
+            # Restore original model parameters
             self.model.ema.restore(self.model.parameters())
         return results

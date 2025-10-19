@@ -64,11 +64,11 @@ class ACTPolicyConfig(PretrainedConfig):
     
 
 class ACTPolicy(PreTrainedModel):
-    config_class = ACTPolicyConfig  # 配置类
+    config_class = ACTPolicyConfig  # Configuration class
 
     def __init__(self, config):
         super().__init__(config)
-        # 构建模型和优化器
+        # Build model and optimizer
         self.model = build(config)
         self.kl_weight = config.kl_weight
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])

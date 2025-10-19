@@ -4,8 +4,9 @@ Follow the implementation of Koch robot, provide a unified interface for So101 r
 """
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.robots.so101_follower import SO101FollowerConfig, SO101Follower
+from .bi_so101_follower import BiSO101FollowerConfig, BiSO101Follower
 from deploy.robot.base import BaseRobot
+from lerobot.robots.robot import Robot
 import numpy as np
 import traceback
 from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
@@ -14,18 +15,19 @@ from benchmark.base import MetaAction, MetaObs
 from pathlib import Path
 from typing import Optional
 
-class So101FollowerWithCamera(BaseRobot):
+class BiSo101FollowerWithCamera(BaseRobot):
     """
-    Integrate camera directly into So101Follower
+    Integrate camera directly into BiSO101Follower
     So that the camera becomes part of the robot, rather than an external component
     
-    Note: Since lerobot may not directly support So101, this provides a basic framework
-    Need to adjust according to the actual So101 SDK
+    Note: Since lerobot may not directly support BiSO101, this provides a basic framework
+    Need to adjust according to the actual BiSO101 SDK
     """
-    def __init__(self, com: str="COM8", robot_id: str="so101_follower_arm", camera_configs: dict={}, calibration_dir: Optional[str]=None, **kwargs):
+    def __init__(self, left_arm_port: str="/dev/ttyACM0", right_arm_port: str="/dev/ttyACM3", robot_id: str="bi_so101_follower_arm", camera_configs: dict={}, calibration_dir: Optional[str]=None, **kwargs):
         super().__init__()
         
-        self.com = com
+        self.left_arm_port = left_arm_port
+        self.right_arm_port = right_arm_port
         self.robot_id = robot_id
         
         # Create camera configurations
@@ -39,15 +41,17 @@ class So101FollowerWithCamera(BaseRobot):
             self.cameras[cam_name] = OpenCVCamera(cam_config)
         
         # So101 arm part - using official lerobot support
-        robot_config = SO101FollowerConfig(
-            port=com, 
+        robot_config = BiSO101FollowerConfig(
+            left_arm_port=left_arm_port,
+            right_arm_port=right_arm_port,
             id=robot_id, 
             cameras=self.camera_configs_dict  # Pass camera configurations to lerobot's default implementation
         )
         if calibration_dir:
             robot_config.calibration_dir = Path(calibration_dir)
-        self._robot = SO101Follower(robot_config)
-        self._motors = list(self._robot.bus.motors)
+        self._robot = BiSO101Follower(robot_config)
+        self._left_motors = list(self._robot.left_arm.bus.motors)
+        self._right_motors = list(self._robot.right_arm.bus.motors)
     
     def connect(self):
         """Connect robot and cameras"""
@@ -66,7 +70,7 @@ class So101FollowerWithCamera(BaseRobot):
     
     def get_action_dim(self):
         """Get action dimension"""
-        return len(self._motors)
+        return len(self._left_motors) + len(self._right_motors)
 
     def get_observation(self):
         """Get complete observation data (including camera images)"""
@@ -83,8 +87,9 @@ class So101FollowerWithCamera(BaseRobot):
         """Convert the observations from the robot to MetaObs"""
         if obs is None:
             return None
-            
-        obs['qpos'] = np.array([obs[mname+'.pos'] for mname in self._motors], dtype=np.float32)
+        left_qpos = np.array([obs['left_'+mname+'.pos'] for mname in self._left_motors], dtype=np.float32)
+        right_qpos = np.array([obs['right_'+mname+'.pos'] for mname in self._right_motors], dtype=np.float32)
+        obs['qpos'] = np.concatenate([left_qpos, right_qpos])
         
         # Process image data
         if 'front_camera' in obs:
@@ -104,7 +109,9 @@ class So101FollowerWithCamera(BaseRobot):
     def publish_action(self, action: np.ndarray):
         """Publish action to robot"""
         try:
-            action_dict = {mname+'.pos': action[i] for i, mname in enumerate(self._motors)}
+            left_action = {'left_'+mname+'.pos': action[i] for i, mname in enumerate(self._left_motors)}
+            right_action = {'right_'+mname+'.pos': action[i+len(self._left_motors)] for i, mname in enumerate(self._right_motors)}
+            action_dict = {**left_action, **right_action}
             self._robot.send_action(action_dict)
         except Exception as e:
             pass

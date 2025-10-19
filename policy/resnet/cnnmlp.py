@@ -48,11 +48,11 @@ class CNNMLPPolicyConfig(PretrainedConfig):
     
 
 class CNNMLPPolicy(PreTrainedModel):
-    config_class = CNNMLPPolicyConfig  # 配置类
+    config_class = CNNMLPPolicyConfig  # Configuration class
 
     def __init__(self, config):
         super().__init__(config)
-        # 构建模型和优化器
+        # Build model and optimizer
         self.model = build_cnnmlp(config)
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     

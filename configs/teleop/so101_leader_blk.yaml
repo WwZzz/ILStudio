@@ -7,5 +7,6 @@ action_dtype: "float64"
 freq: 100.0
 
 # Device-specific settings
-com: /dev/ttyACM1
+com: /dev/ttyACM2
 robot_id: so101_leader
+calibration_dir: /media/zzz/ElementsSE/laptop_ubuntu/.cache/ilstd/data/calibration/so101_leader_blk

@@ -56,9 +56,9 @@ class DiffusionPolicyConfig(PretrainedConfig):
         self.clip_sample = clip_sample
         self.prediction_type = prediction_type
 
-# 转化后的模型
+# Converted model
 class DiffusionPolicyModel(PreTrainedModel):
-    # 默认配置类
+    # Default configuration class
     config_class = DiffusionPolicyConfig
 
     def __init__(self, config):
@@ -71,7 +71,7 @@ class DiffusionPolicyModel(PreTrainedModel):
         self.ac_dim = config.action_dim
         self.obs_dim = self.feature_dimension * len(self.camera_names) + config.state_dim
 
-        # 构建模型结构
+        # Build model structure
         backbones = []
         pools = []
         linears = []
@@ -104,11 +104,11 @@ class DiffusionPolicyModel(PreTrainedModel):
             })
         }).float().cuda()
 
-        # 使用 EMA
+        # Use EMA
         self.ema = EMAModel(self.nets.parameters(), power=config.ema_power)
         # self.ema = EMAModel(model=self.nets, power=config.ema_power)
 
-        # 初始化噪声调度器
+        # Initialize noise scheduler
         self.noise_scheduler = DDIMScheduler(
             num_train_timesteps=self.config.num_train_timesteps,
             beta_start=self.config.beta_start,
@@ -124,7 +124,7 @@ class DiffusionPolicyModel(PreTrainedModel):
         self.init_weights()
 
     def init_weights(self):
-        """初始化所有模块的权重"""
+        """Initialize weights for all modules"""
         for module in self.nets.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
@@ -135,8 +135,8 @@ class DiffusionPolicyModel(PreTrainedModel):
 
     def forward(self, qpos, image, actions=None, is_pad=None):
         """
-        在训练时，输入 `qpos`, `image`, 和 `actions`，返回 loss 。
-        在推理时，仅输入 `qpos`, `image`，返回去噪后的动作序列。
+        During training, input `qpos`, `image`, and `actions`, returns loss.
+        During inference, only input `qpos`, `image`, returns denoised action sequence.
         """
         # device = nets['policy']['linears'][0].weight.device
         # qpos = qpos.to(device)
@@ -148,7 +148,7 @@ class DiffusionPolicyModel(PreTrainedModel):
         B = qpos.shape[0]
         nets = self.nets
 
-        # 摄像机特征提取
+        # Camera feature extraction
         all_features = []
         for cam_id in range(len(self.camera_names)):
             cam_image = image[:, cam_id]
@@ -162,8 +162,8 @@ class DiffusionPolicyModel(PreTrainedModel):
         else:
             obs_cond = qpos.squeeze(1)
 
-        if actions is not None:  # 训练模式
-            # 添加噪声
+        if actions is not None:  # Training mode
+            # Add noise
             noise = torch.randn(actions.shape, device=obs_cond.device)
             timesteps = torch.randint(
                 0, self.noise_scheduler.config.num_train_timesteps,
@@ -172,12 +172,12 @@ class DiffusionPolicyModel(PreTrainedModel):
             noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
             noise_pred = nets['policy']['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
 
-            # 计算 L2 损失
+            # Calculate L2 loss
             all_l2 = nn.functional.mse_loss(noise_pred, noise, reduction='none')
             loss = (all_l2 * ~is_pad.unsqueeze(-1)).mean()
 
             return {'loss': loss}
-        else:  # 推理模式
+        else:  # Inference mode
             Tp = self.prediction_horizon
             action_dim = self.ac_dim
             noisy_action = torch.randn((B, Tp, action_dim), device=obs_cond.device)
@@ -206,28 +206,28 @@ class DiffusionPolicyModel(PreTrainedModel):
     
     def save_pretrained(self, save_directory, state_dict=None, *args, **kwargs):
         """
-        保存模型权重和配置到指定目录。
+        Save model weights and configuration to specified directory.
         
         Args:
-            save_directory (str): 模型保存的文件夹路径。
-            state_dict (dict, optional): 模型的权重。若为 None，则从 `self.state_dict()` 获取。
-            *args, **kwargs: 兼容 `Trainer` 传递的其他参数。
+            save_directory (str): Directory path to save the model.
+            state_dict (dict, optional): Model weights. If None, get from `self.state_dict()`.
+            *args, **kwargs: Other parameters passed by `Trainer` for compatibility.
         """
-        # 如果保存目录不存在，则创建
+        # Create directory if it doesn't exist
         os.makedirs(save_directory, exist_ok=True)
         
-        # 保存配置文件到 {save_directory}/config.json
+        # Save configuration file to {save_directory}/config.json
         self.config.save_pretrained(save_directory)
 
-        # 如果未提供 state_dict，则从模型中获取
+        # If state_dict not provided, get from model
         if state_dict is None:
             state_dict = self.state_dict()
 
-        # 保存模型权重到 {save_directory}/pytorch_model.bin
+        # Save model weights to {save_directory}/pytorch_model.bin
         model_save_path = os.path.join(save_directory, "pytorch_model.bin")
         torch.save(state_dict, model_save_path)
 
-        # 如果 EMA 也在使用，我们保存 EMA 的平均权重
+        # If EMA is also in use, we save the EMA averaged weights
         if self.ema is not None:
             ema_save_path = os.path.join(save_directory, "ema_model.bin")
             torch.save(self.ema.state_dict(), ema_save_path)
@@ -235,20 +235,20 @@ class DiffusionPolicyModel(PreTrainedModel):
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
         """
-        加载预训练模型和它的配置。
+        Load pretrained model and its configuration.
         """
-        # 1. 加载配置文件
+        # 1. Load configuration file
         config = DiffusionPolicyConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
 
-        # 2. 初始化模型
+        # 2. Initialize model
         model = cls(config)
 
-        # 3. 加载模型权重
+        # 3. Load model weights
         model_path = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
         state_dict = torch.load(model_path, map_location="cpu")
         model.load_state_dict(state_dict)
 
-        # 4. 加载 EMA 权重（如果存在）
+        # 4. Load EMA weights (if exists)
         ema_path = os.path.join(pretrained_model_name_or_path, "ema_model.bin")
         if os.path.isfile(ema_path) and model.ema is not None:
             ema_state_dict = torch.load(ema_path, map_location="cpu")

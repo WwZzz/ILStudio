@@ -14,26 +14,26 @@ from .policy import ConditionalUnet1D
 from .data_utils import Qwen2VLAProcess, Qwen2VLADataCollatorForSupervisedDataset
 from .fusion import ActionProjector, FiLM
 # =============================================================================
-# 步骤 1: 创建自定义的 Config 类
+# Step 1: Create custom Config class
 # =============================================================================
 class QwenVLPolicyConfig(PretrainedConfig):
     """
-    这是我们自定义模型的配置类。它继承自 PretrainedConfig，
-    使其与 Hugging Face 生态系统兼容。
-    参数:
+    This is our custom model configuration class. It inherits from PretrainedConfig,
+    making it compatible with the Hugging Face ecosystem.
+    Parameters:
         vlm_model_name_or_path (str, optional):
-            基础 VLM 模型的路径或 Hugging Face Hub 名称。
-            例如: "Qwen/Qwen2-VL-1.5B-Instruct"。
+            Path to base VLM model or Hugging Face Hub name.
+            For example: "Qwen/Qwen2-VL-1.5B-Instruct".
         policy_input_size (int, optional):
-            Policy Head 的输入维度。这通常与 VLM 的 hidden_size 相同。
+            Input dimension of Policy Head. This is usually the same as VLM's hidden_size.
         policy_hidden_size (int, optional):
-            Policy Head 中间隐藏层的维度。
+            Dimension of Policy Head's intermediate hidden layer.
         policy_output_size (int, optional):
-            Policy Head 的最终输出维度。
+            Final output dimension of Policy Head.
         **kwargs:
-            传递给父类 PretrainedConfig 的其他参数。
+            Other parameters passed to parent class PretrainedConfig.
     """
-    # 自定义一个模型类型名称，这对于 `AutoModel` 等自动类很重要
+    # Custom model type name, important for auto classes like `AutoModel`
     model_type = "qwen_vl_with_policy_head"
 
     def __init__(
@@ -69,31 +69,31 @@ class QwenVLPolicyConfig(PretrainedConfig):
 
 
 # =============================================================================
-# 步骤 2: 创建自定义的 Model 类
+# Step 2: Create custom Model class
 # =============================================================================
 class QwenVLForPolicy(PreTrainedModel):
     """
-    一个包含 Qwen2-VL 模型和 Policy Head 的自定义模型。
+    A custom model containing Qwen2-VL model and Policy Head.
     """
-    # 将模型类与我们自定义的配置类关联起来
+    # Associate model class with our custom configuration class
     config_class = QwenVLPolicyConfig
 
     def __init__(self, config: QwenVLPolicyConfig):
         super().__init__(config)
         self.config = config
-        # 1. 加载 VLM 模型
-        # 使用 AutoModelForCausalLM 加载，更通用和健壮
+        # 1. Load VLM model
+        # Use AutoModelForCausalLM for loading, more general and robust
         print(f"Initializing VLM from base path: {config.vlm_model_name_or_path}")
         self.vlm = Qwen2VLForConditionalGeneration.from_pretrained(
             config.vlm_model_name_or_path,
-            torch_dtype=torch.bfloat16, # 自动选择合适的精度
-            trust_remote_code=True # Qwen-VL 模型需要此参数
+            torch_dtype=torch.bfloat16, # Automatically select appropriate precision
+            trust_remote_code=True # Qwen-VL model requires this parameter
         )
-        # 2. 定义 Policy Head
+        # 2. Define Policy Head
         policy_config_dict = {k[7:]:v for k,v in self.config.to_dict().items() if 'policy_' in k}
         self.policy_head = ConditionalUnet1D(**policy_config_dict)
         
-        # 3. 定义融合模块
+        # 3. Define fusion module
         config.hidden_size = config.policy_cond_dim
         self.action_proj = ActionProjector(config.hidden_size, config.hidden_size)
         self.reasoning_proj = ActionProjector(config.hidden_size, config.hidden_size)
@@ -101,18 +101,18 @@ class QwenVLForPolicy(PreTrainedModel):
     
     def set_requires_grad(self, training_args):
         if not training_args.lora_enable:
-            # 设置视觉模型的冻结
+            # Set vision model freezing
             self.vlm.visual.requires_grad_(True) # set to true first
             self.config.freeze_vision_tower = training_args.freeze_vision_tower
             if training_args.freeze_vision_tower:
                 for n,p in self.vlm.visual.named_parameters():
                     p.requires_grad = False
-            if not training_args.freeze_backbone:# 尝试设置微调lm_head
+            if not training_args.freeze_backbone:# Try to set fine-tuning lm_head
                 try:
                     self.vlm.lm_head.requires_grad_(True) 
                 except Exception as e:
                     print(e)
-        # 设置policy_head要梯度
+        # Set policy_head to require gradients
         self.policy_head.requires_grad_(True)
         self.action_proj.requires_grad_(True)
         self.reasoning_proj.requires_grad_(True)
@@ -132,8 +132,8 @@ class QwenVLForPolicy(PreTrainedModel):
         identity = []
         for i in range(indexs.shape[0]):
             end = indexs[i] + 1
-            temp = input_ids[i] == 151643  # pad token id for qwen2_vl，因为qwen2_vl是左padding
-            start = sum(temp.int()) # 去掉padding
+            temp = input_ids[i] == 151643  # pad token id for qwen2_vl, because qwen2_vl uses left padding
+            start = sum(temp.int()) # Remove padding
             input_embeddings.append(self.action_proj(hidden_states[i, start:end, :]))
             identity.append(torch.mean(hidden_states[i, start:end, :], dim=0))
             reasoning_embeddings.append(self.reasoning_proj(hidden_states[i, end:, :]))
@@ -161,13 +161,13 @@ class QwenVLForPolicy(PreTrainedModel):
         **kwargs,
     ):
         """
-        前向传播逻辑。
+        Forward propagation logic.
 
-        返回:
-            一个字典，包含 policy_logits。
+        Returns:
+            A dictionary containing policy_logits.
         """
-        # 将输入传递给 VLM
-        # 我们需要 VLM 的最后一层 hidden states
+        # Pass input to VLM
+        # We need the last layer hidden states from VLM
         outputs = self.vlm(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -176,15 +176,15 @@ class QwenVLForPolicy(PreTrainedModel):
             pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw,
             video_grid_thw=video_grid_thw,
-            output_hidden_states=True,  # 确保 VLM 返回 hidden_states
+            output_hidden_states=True,  # Ensure VLM returns hidden_states
             # return_dict=True,
         )
-        # 提取最后一层的 hidden states
+        # Extract last layer hidden states
         hidden_states = outputs.hidden_states[-1]
-        # 用film提取子任务相关的信息
+        # Use film to extract subtask-related information
         action_conds = self.film_forward(labels=labels, input_ids=input_ids, hidden_states=hidden_states)
         policy_outputs = self.policy_head(actions, action_conds, states, is_pad)
-        # 计算action loss
+        # Calculate action loss
         return {
             'llm_loss': outputs['loss'],
             'action_loss': policy_outputs['loss'],

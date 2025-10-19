@@ -84,9 +84,9 @@ class SmolVLAPolicyConfig(PretrainedConfig):
 
 class SmolVLAPolicy(PreTrainedModel):
     """
-    一个包含 SmolVLM 模型和 Policy Head 的自定义模型。
+    A custom model containing SmolVLM model and Policy Head.
     """
-    # 将模型类与我们自定义的配置类关联起来
+    # Associate model class with our custom configuration class
     config_class = SmolVLAPolicyConfig
 
     def __init__(self, config: SmolVLAPolicyConfig):

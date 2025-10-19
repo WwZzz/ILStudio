@@ -15,10 +15,10 @@ from .multimodal_encoder.t5_encoder import T5Embedder
 from .rdt.model import RDT
 from modeling import RDTRunner
 # =============================================================================
-# 步骤 1: 创建自定义的 Config 类
+# Step 1: Create custom Config class
 # =============================================================================
 class RDTConfig(PretrainedConfig):
-    # 自定义一个模型类型名称，这对于 `AutoModel` 等自动类很重要
+    # Custom model type name, important for auto classes like `AutoModel`
     model_type = "rdt"
 
     def __init__(
@@ -80,29 +80,29 @@ class RDTConfig(PretrainedConfig):
 
 
 # =============================================================================
-# 步骤 2: 创建自定义的 Model 类
+# Step 2: Create custom Model class
 # =============================================================================
 class RDTPolicy(PreTrainedModel):
     """
-    一个包含 Qwen2-VL 模型和 Policy Head 的自定义模型。
+    A custom model containing Qwen2-VL model and Policy Head.
     """
-    # 将模型类与我们自定义的配置类关联起来
+    # Associate model class with our custom configuration class
     config_class = RDTConfig
 
     def __init__(self, config: RDTConfig):
         super().__init__(config)
         self.config = config
-        # 1. 加载视觉编码器
+        # 1. Load vision encoder
         self.vision_encoder  = SiglipVisionTower.from_pretrained(config.pretrained_vision_encoder_name_or_path)
         self.image_processor = self.vision_encoder.image_processor
-        # 2. 加载文本编码器
+        # 2. Load text encoder
         text_embedder = T5Embedder(
             from_pretrained=config.pretrained_text_encoder_name_or_path, 
             model_max_length=tokenizer_max_length
         )
         self.tokenizer, self.text_encoder = text_embedder.tokenizer, text_embedder.model
         
-        # 3. 定义RDT
+        # 3. Define RDT
         self.model = RDT(
             output_dim=config.action_dim,
             horizon=config.pred_horizon,
@@ -115,7 +115,7 @@ class RDTPolicy(PreTrainedModel):
             img_pos_embed_config=None,
             dtype=torch.bfloat16,
         )
-        # 4. 定义connector
+        # 4. Define connector
         # Create adpators for various conditional inputs
         self.lang_adaptor = self.build_condition_adapter(
             config.lang_adaptor, 
@@ -134,7 +134,7 @@ class RDTPolicy(PreTrainedModel):
             out_features=config.hidden_size
         )
         
-        # 5. 定义diffusion's noise scheduler 
+        # 5. Define diffusion's noise scheduler 
         # Create the noise scheduler
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps = config.num_train_timesteps,

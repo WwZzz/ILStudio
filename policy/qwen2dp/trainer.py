@@ -16,7 +16,7 @@ from transformers.trainer import (
 )
 from policy.trainer import BaseTrainer
 
-# 忽略重复的 UserWarning，只让特定警告显示一次
+# Ignore duplicate UserWarnings, only show specific warnings once
 warnings.simplefilter("once", UserWarning)
 
 def _lora_decay_fn(name, param, decay_param_names):
@@ -51,7 +51,7 @@ class Trainer(BaseTrainer):
         return (loss, outputs) if return_outputs else loss
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call=False):
-        """override：先保存 PEFT，再保存非 PEFT 的可训练参数"""
+        """override: Save PEFT first, then save non-PEFT trainable parameters"""
         output_dir = output_dir or self.args.output_dir
         super().save_model(output_dir, _internal_call)
         self.model.config.save_pretrained(output_dir)
@@ -59,18 +59,18 @@ class Trainer(BaseTrainer):
         trainable_keys = [n for n,p in self.accelerator.unwrap_model(self.model).named_parameters() if "lora_" not in n and p.requires_grad]
         if self.is_deepspeed_enabled:
             if self.accelerator.deepspeed_config["zero_optimization"]["stage"] == 3:
-                # ZeRO-3：必须先在 ds_config 里打开"stage3_gather_16bit_weights_on_model_save": true
+                # ZeRO-3: Must first enable "stage3_gather_16bit_weights_on_model_save": true in ds_config
                 state_dict = self.deepspeed._zero3_consolidated_16bit_state_dict()
             else:
-                # ZeRO-0/1/2：权重完整在每张卡，clone 一下即可
+                # ZeRO-0/1/2: Weights are complete on each card, just clone
                 from deepspeed.checkpoint.utils import clone_tensors_for_torch_save
                 state_dict = clone_tensors_for_torch_save(
                     self.accelerator.unwrap_model(self.deepspeed).state_dict()
                 )
         else:
-            # 非 DeepSpeed：直接拿
+            # Non-DeepSpeed: Get directly
             state_dict = self.model.state_dict()
-        # 4. 过滤出「非 LoRA 且 requires_grad=True」的参数
+        # 4. Filter out parameters that are "non-LoRA and requires_grad=True"
         extra_state = {
             k: v for k, v in state_dict.items()
             if k in trainable_keys
@@ -80,7 +80,7 @@ class Trainer(BaseTrainer):
             save_file(extra_state, os.path.join(output_dir, self.EXTRA_FILE))
 
     def _load_from_checkpoint(self, resume_from_checkpoint):
-        """override：先加载 PEFT，再加载非 PEFT 权重"""
+        """override: Load PEFT first, then load non-PEFT weights"""
         super()._load_from_checkpoint(resume_from_checkpoint)
 
         extra_path = os.path.join(resume_from_checkpoint, self.EXTRA_FILE)
@@ -94,11 +94,11 @@ class Trainer(BaseTrainer):
     def create_optimizer(self):
         opt_model = self.model_wrapped if hasattr(self, "model_wrapped") else self.model
         if self.optimizer is not None: return self.optimizer
-        # --------------- 1. 收集所有可训练参数 ---------------
+        # --------------- 1. Collect all trainable parameters ---------------
         decay_param_names = set(
             get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
         )
-        decay_param_names = {n for n in decay_param_names if "bias" not in n} # bias不decay
+        decay_param_names = {n for n in decay_param_names if "bias" not in n} # bias does not decay
 
         lora_decay = []
         lora_nodecay = []
@@ -108,14 +108,14 @@ class Trainer(BaseTrainer):
         for name, param in opt_model.named_parameters():
             if not param.requires_grad:
                 continue
-            is_lora = ".lora_" in name                # 匹配 LoRA
+            is_lora = ".lora_" in name                # Match LoRA
             is_no_decay = name not in decay_param_names
             if is_lora:
                 (lora_nodecay if is_no_decay else lora_decay).append(param)
             else:
                 (full_nodecay if is_no_decay else full_decay).append(param)
 
-        # --------------- 2. 构造 param_groups ---------------
+        # --------------- 2. Construct param_groups ---------------
         lora_lr = getattr(self.args, "lora_lr", 1e-4)
         full_lr = getattr(self.args, "learning_rate", 1e-4)
 
@@ -140,9 +140,9 @@ class Trainer(BaseTrainer):
         if not param_groups:
             raise ValueError("No trainable parameters found!")
 
-        # --------------- 3. DeepSpeed 注入 ---------------
+        # --------------- 3. DeepSpeed injection ---------------
         if self.is_deepspeed_enabled:
-            # 把分组信息直接写进 deepspeed_config
+            # Write grouping information directly into deepspeed_config
             ds_config = self.args.deepspeed_config if hasattr(self.args, 'deepspeed_config') else self.args.deepspeed
             if isinstance(ds_config, str):
                 with open(ds_config, "r", encoding="utf-8") as f:
@@ -183,6 +183,6 @@ class Trainer(BaseTrainer):
         optimizer_cls, optimizer_kwargs = self.get_optimizer_cls_and_kwargs(
             self.args, opt_model
         )
-        optimizer_kwargs.pop("lr", None)  # 已在组里指定
+        optimizer_kwargs.pop("lr", None)  # Already specified in groups
         self.optimizer = optimizer_cls(param_groups, **optimizer_kwargs)
         return self.optimizer

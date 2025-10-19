@@ -152,13 +152,13 @@ class ConditionalUnet1D(nn.Module):
         all_dims = [action_dim] + list(down_dims)
         start_dim = down_dims[0]
         self.action_dim = action_dim
-        self.num_queries = prediction_horizon # 生成的动作的步数（action chunk）
-        self.noise_samples = noise_samples # 只用于训练时加噪的噪声个数，增加样本数快速训练
+        self.num_queries = prediction_horizon # Number of action steps to generate (action chunk)
+        self.noise_samples = noise_samples # Number of noise samples only for training noise addition, increase sample count for fast training
         # self.global_1d_pool = nn.AdaptiveAvgPool1d(1)
         # self.proj2action = nn.Linear(config.hidden_dim, config.global_cond_dim)
-        self.norm_after_pool = nn.LayerNorm(cond_dim) # 全局条件的LN层
-        self.combine = nn.Linear(cond_dim+state_dim, cond_dim) # 融合state和全局条件
-        # 生成diffusion第k步的k的embedding
+        self.norm_after_pool = nn.LayerNorm(cond_dim) # LayerNorm layer for global conditions
+        self.combine = nn.Linear(cond_dim+state_dim, cond_dim) # Fuse state and global conditions
+        # Generate embedding for diffusion step k
         dsed = diffusion_step_embed_dim
         diffusion_step_encoder = nn.Sequential(
             SinusoidalPosEmb(dsed, torch.bfloat16),
@@ -166,7 +166,7 @@ class ConditionalUnet1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
-        cond_dim = dsed + cond_dim #步数emb_dim+条件emb_dim
+        cond_dim = dsed + cond_dim # step emb_dim + condition emb_dim
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
         mid_dim = all_dims[-1]
@@ -332,7 +332,7 @@ class ConditionalUnet1D(nn.Module):
         global_cond = self.norm_after_pool(global_cond)
         global_cond = torch.cat([global_cond, states], dim=-1) if states is not None else global_cond
         global_cond = self.combine(global_cond)
-        # 1. time 这个是扩散的步数，不是真正的时间
+        # 1. time This is the diffusion step number, not real time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
@@ -346,7 +346,7 @@ class ConditionalUnet1D(nn.Module):
         if global_cond is not None:
             global_feature = torch.cat([
                 global_feature, global_cond
-            ], axis=-1) # 时间步emb + global_cond( cond + robo_state )
+            ], axis=-1) # timestep emb + global_cond( cond + robo_state )
 
         x = sample
         h = []

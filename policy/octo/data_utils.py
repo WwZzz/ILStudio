@@ -63,7 +63,7 @@ class OctoDataProcessor:
             data_dict['action'] = sample['action'][np.newaxis,:]
             is_pad = sample['is_pad'][:, None]                 # (k,1)
             mask = 1.0 - np.tile(is_pad, (1, data_dict['action'].shape[-1]))  # (k,d)
-            mask = mask.astype(bool)                           # 或 np.bool_
+            mask = mask.astype(bool)                           # or np.bool_
             mask = mask[np.newaxis, :]        
             data_dict['action_pad_mask'] = mask
         data_dict = self._np2pt(data_dict)

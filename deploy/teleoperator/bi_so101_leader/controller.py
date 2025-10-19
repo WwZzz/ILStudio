@@ -4,7 +4,7 @@ So101 Leader 遥操作实现
 """
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.teleoperators.so101_leader import SO101LeaderConfig as RobotSO101LeaderConfig, SO101Leader as RobotSO101Leader
+from .bi_so101_leader import BiSO101LeaderConfig as RobotBiSO101LeaderConfig, BiSO101Leader as RobotBiSO101Leader
 from deploy.robot.base import BaseRobot
 import numpy as np
 import traceback
@@ -19,7 +19,7 @@ from typing import Optional
 from pathlib import Path
     
 
-class So101Leader(BaseTeleopDevice):
+class BiSO101Leader(BaseTeleopDevice):
     """
     Concrete implementation of teleoperation using So101 Leader
     参照 Koch Leader 的实现方式
@@ -28,15 +28,16 @@ class So101Leader(BaseTeleopDevice):
                 shm_name: str, 
                 shm_shape: tuple, 
                 shm_dtype: type, 
-                action_dim: int = 6,
+                action_dim: int = 12,
                 action_dtype = np.float32,
                 frequency: int = 100, 
-                com: str="COM7",    
-                robot_id: str="so101_leader_arm",
+                left_arm_port: str="/dev/ttyACM1",    
+                right_arm_port: str="/dev/ttyACM2",    
+                robot_id: str="bi_so101_leader_arm",
                 calibration_dir: Optional[str]=None,
                 **kwargs):
         """
-        Initialize the So101 Leader teleoperation device
+        Initialize the BiSO101 Leader teleoperation device
         
         Args:
             shm_name: Name of the shared memory segment
@@ -44,42 +45,47 @@ class So101Leader(BaseTeleopDevice):
             shm_dtype: Data type of the shared memory array
             action_dim: The dim of the flattened action
             frequency: Control frequency in Hz
-            com: Communication port for the leader device
+            left_arm_port: Communication port for the left arm
+            right_arm_port: Communication port for the right arm
             robot_id: Identifier for the robot
         """
         super().__init__(shm_name, shm_shape, shm_dtype, action_dim, action_dtype, frequency)
         
-        self.com = com
+        self.left_arm_port = left_arm_port
+        self.right_arm_port = right_arm_port
         self.robot_id = robot_id
         
-        # 使用官方的 lerobot 支持：
-        robot_config = RobotSO101LeaderConfig(port=com, id=robot_id)
+        # Use the official lerobot support:
+        robot_config = RobotBiSO101LeaderConfig(left_arm_port=left_arm_port, right_arm_port=right_arm_port, id=robot_id)
         if calibration_dir:
             robot_config.calibration_dir = Path(calibration_dir)
-        self._teleop_device = RobotSO101Leader(robot_config)
+        self._teleop_device = RobotBiSO101Leader(robot_config)
         self._teleop_device.connect()
-        self._motors = list(self._teleop_device.bus.motors)
+        self._left_motors = list(self._teleop_device.left_arm.bus.motors)
+        self._right_motors = list(self._teleop_device.right_arm.bus.motors)
         
     def get_observation(self):
-        """获取 Leader 设备的观测数据"""
+        """Get the observation data for the Leader device"""
         return self._teleop_device.get_action()
     
     def observation_to_action(self, observation):
-        """将观测数据转换为标准化的机器人动作"""
-        return np.array([observation[mname+'.pos'] for mname in self._motors], dtype=self.action_dtype)
+        """Convert the observation data to the standardized robot action"""
+        left_qpos = np.array([observation['left_'+mname+'.pos'] for mname in self._left_motors], dtype=self.action_dtype)
+        right_qpos = np.array([observation['right_'+mname+'.pos'] for mname in self._right_motors], dtype=self.action_dtype)
+        return np.concatenate([left_qpos, right_qpos])
     
     def stop(self):
-        """停止遥操作设备"""
+        """Stop the teleoperation device"""
         if self._teleop_device.is_connected:
             self._teleop_device.disconnect()
     
     def get_doc(self) -> str:
-        """获取设备文档"""
+        """Get the documentation for the device"""
         return """
-        So101 Leader Teleoperation Device
+        BiSO101 Leader Teleoperation Device
         
-        This device allows you to control a So101 follower robot by manipulating
-        a So101 leader device. The leader device captures your hand movements
+        This device allows you to control a BiSO101 follower robot by manipulating
+        a BiSO101 leader device. The leader device captures your hand movements
         and translates them into commands for the follower robot.
         
         Controls:
@@ -87,7 +93,9 @@ class So101Leader(BaseTeleopDevice):
         - The system captures joint positions and sends them to the follower
         
         Configuration:
-        - com: Communication port (default: COM7 on Windows, /dev/ttyACM0 on Linux)
-        - action_dim: Number of controllable joints (default: 6)
+        - left_arm_port: Communication port for the left arm (default: /dev/ttyACM1)
+        - right_arm_port: Communication port for the right arm (default: /dev/ttyACM2)
+        - robot_id: Identifier for the robot (default: bi_so101_leader_arm)
+        - action_dim: Number of controllable joints (default: 12)
         - frequency: Control frequency in Hz (default: 100)
         """

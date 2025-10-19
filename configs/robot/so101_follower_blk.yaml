@@ -1,5 +1,5 @@
 target: deploy.robot.so101.So101FollowerWithCamera
-com: /dev/ttyACM0
+com: /dev/ttyACM3
 robot_id: so101_follower
 camera_configs:
   front_camera:
@@ -8,3 +8,4 @@ camera_configs:
     height: 480
     fps: 30
 use_lock: True
+calibration_dir: /media/zzz/ElementsSE/laptop_ubuntu/.cache/ilstd/data/calibration/so101_follower_blk

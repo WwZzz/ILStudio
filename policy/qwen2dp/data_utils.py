@@ -58,7 +58,7 @@ class Qwen2VLAProcess:
         return torch.from_numpy(np.array(each))
 
     def __call__(self, sample, use_reasoning=True):
-        # 处理模型的输入部分
+        # Process model input part
         video = False
         messages = self.datastruct_droid2llava(sample, video=video)
 
@@ -90,15 +90,15 @@ class Qwen2VLAProcess:
         input_labels = torch.ones_like(model_inputs['input_ids']) * (-100)
         answer = sample['reasoning']+ '<|im_end|>' if 'reasoning' in sample else '<|im_end|>'
         # answer = sample['reasoning']
-        # 开始处理输出部分
-        # tokenize标签文本，变成词表id
+        # Start processing output part
+        # Tokenize label text, convert to vocabulary id
         output_text = self.tokenizer(answer, padding=True, return_tensors="pt")
         output_labels = output_text['input_ids'].long()
-        # 拼接输入和输出的文本id，一起作为最终的所有文本
+        # Concatenate input and output text ids as final text
         model_inputs['input_ids'] = torch.cat((model_inputs['input_ids'], output_text['input_ids']), dim=-1).long()
-        # 拼接两种文本的attn_mask
+        # Concatenate attention masks of both texts
         model_inputs['attention_mask'] = torch.cat((model_inputs['attention_mask'], output_text['attention_mask']), dim=-1).bool()
-        # 记住两种标签，无需计算损失的ingore_idx是-100的，剩下的answer对应的要计算损失，所以后面要shift
+        # Remember both labels, ignore_idx is -100 for no loss calculation, remaining answer needs loss calculation, so shift later
         labels = torch.cat((input_labels, output_labels), dim=-1)
         data_dict['state'] = sample.get('state', None)
         data_dict['action'] = sample.get('action', None)

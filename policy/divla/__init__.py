@@ -28,13 +28,13 @@ def find_all_linear_names(model, lora_module=None):
     return list(lora_module_names)
 
 def load_model(args):
-    # 先加载config
-    if args.is_pretrained: # 测试时加载
+    # Load config first
+    if args.is_pretrained: # Load during testing
         config = QwenVLPolicyConfig.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(config.vlm_model_name_or_path)
         multimodal_processor = AutoProcessor.from_pretrained(config.vlm_model_name_or_path)
         peft_path = os.path.join(args.model_name_or_path, 'adapter_config.json')
-        # 检测是否是peft
+        # Detect if it is peft
         if os.path.exists(peft_path):  
             model = QwenVLForPolicy(config=config)
             model = PeftModel.from_pretrained(model,args.model_name_or_path)
@@ -45,20 +45,20 @@ def load_model(args):
             model = model.merge_and_unload().to(torch.bfloat16)
         else:
             model = QwenVLForPolicy.from_pretrained(args.model_name_or_path, config=config).to(torch.bfloat16)
-    else: # 训练时加载
+    else: # Load during training
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path) # load qwen2_vl tokenizer
         multimodal_processor = AutoProcessor.from_pretrained(args.model_name_or_path) # load qwen2_vl input processor
         config = QwenVLPolicyConfig(vlm_model_name_or_path=args.model_name_or_path, policy_action_dim = args.action_dim, policy_state_dim = args.state_dim, policy_prediction_horizon = args.chunk_size) 
         # config.llm_loss_weight = args.llm_loss_weight
         model = QwenVLForPolicy(config=config).to(torch.bfloat16)
         # model.requires_grad_(not args.freeze_backbone)
-        # 加载lora
+        # Load lora
         if args.lora_enable:
-            # 加载Lora的参数
+            # Load LoRA parameters
             lora_config = LoraConfig(
                 r=args.lora_r,
                 lora_alpha=args.lora_alpha,
-                target_modules=find_all_linear_names(model, args.lora_module), # 默认只有vit
+                target_modules=find_all_linear_names(model, args.lora_module), # Default only vit
                 lora_dropout=args.lora_dropout,
                 bias=args.lora_bias,
                 task_type=args.lora_task_type,
@@ -69,11 +69,11 @@ def load_model(args):
             model = get_peft_model(model, lora_config) # !!!only set lora weights to requires_grad True!!!
             model.print_trainable_parameters()
         
-    # 这里要获取model的类型，需要动态import
+    # Need to get model type here, requires dynamic import
     model.tokenizer = tokenizer
     model.multimodal_processor = multimodal_processor
     model.config.use_cache = False
-    # # 是否启用梯度检查点，反向传播时重新计算激活值，从而不保存激活值，省显存
+    # # Whether to enable gradient checkpointing, recompute activations during backprop to save memory
     if hasattr(args, 'gradient_checkpointing') and args.gradient_checkpointing:
         if hasattr(model.vlm, "enable_input_require_grads"):
             model.vlm.enable_input_require_grads()
@@ -81,15 +81,15 @@ def load_model(args):
             def make_inputs_require_grad(module, input, output):
                 output.requires_grad_(True)
             model.vlm.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-    if hasattr(args, 'bf16'): # 训练时设置需要梯度的参数
+    if hasattr(args, 'bf16'): # Set parameters requiring gradients during training
         model.set_requires_grad(args)
-        # 模型放到device上
+        # Put model on device
         vision_tower = model.vlm.visual
         vision_tower.to(dtype=torch.bfloat16 if args.bf16 else torch.float16, device=args.device)
         model.to(dtype=torch.bfloat16 if args.bf16 else torch.float16, device=args.device)
         compute_dtype = (torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
         
-        # 设置config里头的自定义参数
+        # Set custom parameters in config
         model.config.lora_lr = args.lora_lr
         model.config.use_cache = True
         model.config.save_pretrained(args.output_dir)

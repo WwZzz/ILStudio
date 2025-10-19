@@ -1,4 +1,4 @@
-# start_teleop_recorder_simple_multithread.py - 简化多线程版本的遥操作数据记录器
+# start_teleop_recorder_simple_multithread.py - Simplified multi-threaded teleoperation data recorder
 import yaml
 import os
 import time
@@ -32,19 +32,19 @@ def parse_param():
     parser = argparse.ArgumentParser(description='Simple multi-threaded teleoperation data recorder')
     
     # Essential arguments
-    parser.add_argument('--shm_name', type=str, default='ilstd_teleop_controller',
+    parser.add_argument("-shm", '--shm_name', type=str, default='ilstd_teleop_controller',
                        help='Name of shared memory for action data (optional)')
-    parser.add_argument('--config', type=str, default='robot/dummy',
+    parser.add_argument("-c", '--config', type=str, default='robot/dummy',
                        help='Robot config (name under configs/robot or absolute path to yaml)')
-    parser.add_argument('--frequency', "-freq", type=int, default=25,
+    parser.add_argument("-f", '--frequency', type=int, default=25,
                        help='Recording frequency in Hz')
-    parser.add_argument('--action_frequency', "-afreq", type=int, default=40,
+    parser.add_argument("-af", '--action_frequency', type=int, default=40,
                        help='Recording frequency in Hz')
-    parser.add_argument('--observation_frequency', "-ofreq", type=int, default=50,
+    parser.add_argument("-of", '--observation_frequency', type=int, default=50,
                     help='Recording frequency in Hz')
-    parser.add_argument('--output_dir', type=str, default='data/teleop_recordings',
+    parser.add_argument("-o", '--output_dir', type=str, default='data/teleop_recordings',
                        help='Directory to save recorded episodes')
-    parser.add_argument('--start_idx', type=int, default=0,
+    parser.add_argument("-s", '--start_idx', type=int, default=0,
                        help='Starting episode index')
     
     args, unknown = parser.parse_known_args()
@@ -89,7 +89,7 @@ def save_episode_to_hdf5(output_dir, episode_id, observations, actions):
             write_group(obs_group, observations)
 
 class SimpleMultiThreadTeleopRecorder:
-    """简化多线程遥操作记录器主类"""
+    """Simplified multi-threaded teleoperation recorder main class"""
     
     def __init__(self, args):
         self.args = args
@@ -98,13 +98,13 @@ class SimpleMultiThreadTeleopRecorder:
         self.action_shm = None
         self.episode_count = args.start_idx
         
-        # 线程控制
+        # Thread control
         self.action_publisher_thread = None
         self.observation_collector_thread = None
         self.running = False
         
     def initialize_robot(self):
-        """初始化机器人"""
+        """Initialize robot"""
         from configs.loader import ConfigLoader
         from configs.utils import apply_overrides_to_mapping
         from data_utils.utils import _convert_to_type
@@ -125,15 +125,15 @@ class SimpleMultiThreadTeleopRecorder:
         print("Robot successfully loaded.")
         
     def setup_action_buffer(self):
-        """设置动作缓冲区"""
+        """Setup action buffer"""
         if self.args.shm_name and self.args.shm_name.strip():
-            # 推断动作参数
+            # Infer action parameters
             action_dim, action_dtype = infer_action_params_from_shm(self.args.shm_name)
             print(f"Inferred action_dim: {action_dim}, action_dtype: {action_dtype}")
             
             shm_info = generate_shm_info(self.args.shm_name, action_dim, action_dtype)
             
-            # 直接连接共享内存
+            # Directly connect to shared memory
             max_retries = 10
             retry_delay = 0.5
             for attempt in range(max_retries):
@@ -142,7 +142,7 @@ class SimpleMultiThreadTeleopRecorder:
                     self.action_buffer = np.ndarray(shm_info['shape'], dtype=shm_info['dtype'], buffer=self.action_shm.buf)
                     print("Main process connected to shared memory.")
                     
-                    # 验证共享内存是否可访问
+                    # Verify shared memory accessibility
                     try:
                         _ = self.action_buffer[0]
                         print("Shared memory is accessible and ready for use.")
@@ -166,8 +166,8 @@ class SimpleMultiThreadTeleopRecorder:
             self.action_shm = None
     
     def action_publisher_worker(self):
-        """动作发布工作线程"""
-        # 检查是否有动作缓冲区，如果没有则直接退出
+        """Action publisher worker thread"""
+        # Check if action buffer exists, exit directly if not
         if self.action_buffer is None:
             print("[ActionPublisher] No action buffer available, skipping action publishing thread")
             return
@@ -195,7 +195,7 @@ class SimpleMultiThreadTeleopRecorder:
         print("[ActionPublisher] Thread stopped")
     
     def observation_collector_worker(self):
-        """观测收集工作线程"""
+        """Observation collector worker thread"""
         print(f"[ObservationCollector] Thread started, collecting at {self.args.observation_frequency}Hz")
         rate_limiter = RateLimiter()
         
@@ -205,8 +205,8 @@ class SimpleMultiThreadTeleopRecorder:
                 if obs:
                     current_time = time.perf_counter()
                     obs['_timestamp'] = current_time
-                    # 这里可以将观测数据存储到队列或直接处理
-                    # 为了简化，我们暂时不在这里处理
+                    # Here we can store observation data to queue or process directly
+                    # For simplicity, we temporarily don't process here
                 
                 rate_limiter.sleep(self.args.observation_frequency)
                 
@@ -218,10 +218,10 @@ class SimpleMultiThreadTeleopRecorder:
         print("[ObservationCollector] Thread stopped")
     
     def start_threads(self):
-        """启动后台线程"""
+        """Start background threads"""
         self.running = True
         
-        # 启动动作发布线程（仅当有动作缓冲区时）
+        # Start action publisher thread (only when action buffer exists)
         if self.action_buffer is not None:
             self.action_publisher_thread = threading.Thread(
                 target=self.action_publisher_worker, 
@@ -232,7 +232,7 @@ class SimpleMultiThreadTeleopRecorder:
         else:
             print("Action publisher thread skipped (no action buffer)")
         
-        # 启动观测收集线程
+        # Start observation collector thread
         self.observation_collector_thread = threading.Thread(
             target=self.observation_collector_worker, 
             daemon=True
@@ -243,7 +243,7 @@ class SimpleMultiThreadTeleopRecorder:
         print("Background threads started successfully")
     
     def stop_threads(self):
-        """停止后台线程"""
+        """Stop background threads"""
         self.running = False
         
         if self.action_publisher_thread:
@@ -255,7 +255,7 @@ class SimpleMultiThreadTeleopRecorder:
             print("Observation collector thread stopped")
     
     def collect_episode_data(self, kb_hit):
-        """收集一个episode的数据"""
+        """Collect data for one episode"""
         print(f"Starting episode {self.episode_count}. Recording...")
         
         observations, actions = [], []
@@ -266,7 +266,7 @@ class SimpleMultiThreadTeleopRecorder:
         while kb_hit.get_input() is not None: 
             pass
 
-        # 数据收集循环
+        # Data collection loop
         stop_recording = False
         rate_limiter = RateLimiter()
         
@@ -274,7 +274,7 @@ class SimpleMultiThreadTeleopRecorder:
             if kb_hit.get_input() is not None:
                 stop_recording = True
             else:
-                # 获取观测数据
+                # Get observation data
                 obs = self.robot.get_observation()
                 if obs:
                     current_time = time.perf_counter()
@@ -282,7 +282,7 @@ class SimpleMultiThreadTeleopRecorder:
                     observations.append(obs)
                     all_timestamps.append(current_time)
                     
-                    # 获取动作数据
+                    # Get action data
                     if self.action_buffer is not None:
                         action = self.action_buffer[0]['action'].copy()
                         actions.append(action)
@@ -301,7 +301,7 @@ class SimpleMultiThreadTeleopRecorder:
         return observations, actions
     
     def save_episode(self, observations, actions):
-        """保存episode数据"""
+        """Save episode data"""
         if observations:
             if hasattr(self.robot, 'save_episode'):
                 self.robot.save_episode(
@@ -317,24 +317,24 @@ class SimpleMultiThreadTeleopRecorder:
             print("No data collected, skipping save.")
     
     def run(self):
-        """主运行循环"""
-        # 初始化非阻塞键盘输入
+        """Main run loop"""
+        # Initialize non-blocking keyboard input
         kb_hit = KBHit()
         kb_hit.set_curses_term()
         
         try:
-            # 初始化机器人
+            # Initialize robot
             self.initialize_robot()
             
-            # 设置动作缓冲区
+            # Setup action buffer
             self.setup_action_buffer()
             
-            # 启动后台线程
+            # Start background threads
             self.start_threads()
             
-            # 主数据收集循环
+            # Main data collection loop
             while not shutdown_event.is_set():
-                # 等待用户开始episode
+                # Wait for user to start episode
                 print(f"\n{'='*10}\nPress Enter to START episode {self.episode_count}...\n{'='*10}")
                 while not shutdown_event.is_set():
                     if kb_hit.get_input() is not None:
@@ -344,13 +344,13 @@ class SimpleMultiThreadTeleopRecorder:
                 if shutdown_event.is_set(): 
                     break
 
-                # 收集episode数据
+                # Collect episode data
                 observations, actions = self.collect_episode_data(kb_hit)
                 
                 if shutdown_event.is_set(): 
                     break
 
-                # 询问是否保存
+                # Ask whether to save
                 print("Save this episode? (Press Enter to SAVE, or type anything and press Enter to DISCARD)")
                 saving_prompt = None
                 while saving_prompt is None and not shutdown_event.is_set():
@@ -369,29 +369,29 @@ class SimpleMultiThreadTeleopRecorder:
         except KeyboardInterrupt:
             print("\n[Main Process] Exit by KeyboardInterrupt (fallback).")
         finally:
-            # 优雅关闭
+            # Graceful shutdown
             print("\n[Main Process] Shutting down...")
             print("[Main Process] Note: Only closing recorder connection to shared memory.")
             print("[Main Process] The shared memory block will remain available for other processes.")
             shutdown_event.set()
             kb_hit.set_normal_term()
 
-            # 停止后台线程
+            # Stop background threads
             self.stop_threads()
 
-            # 关闭共享内存连接（不销毁共享内存块）
+            # Close shared memory connection (do not destroy shared memory block)
             if self.action_shm:
                 print("Closing shared memory connection (NOT destroying the memory block)...")
                 try:
-                    # 检查共享内存是否仍然有效
+                    # Check if shared memory is still valid
                     try:
-                        # 尝试访问共享内存来检查它是否仍然存在
+                        # Try to access shared memory to check if it still exists
                         _ = self.action_buffer[0]
                         print("Shared memory is still accessible before closing connection.")
                     except Exception as e:
                         print(f"Warning: Shared memory may have been closed by another process: {e}")
                     
-                    # 防止资源跟踪器自动清理共享内存
+                    # Prevent resource tracker from automatically cleaning up shared memory
                     try:
                         import multiprocessing.resource_tracker
                         if hasattr(multiprocessing.resource_tracker._resource_tracker, 'unregister'):
@@ -400,7 +400,7 @@ class SimpleMultiThreadTeleopRecorder:
                     except Exception as e:
                         print(f"Warning: Could not unregister from resource tracker: {e}")
                     
-                    self.action_shm.close()  # 只关闭连接，不销毁共享内存块
+                    self.action_shm.close()  # Only close connection, do not destroy shared memory block
                     print("Main process shared memory connection closed.")
                     print("Shared memory block should remain available for other processes.")
                     print("Note: If shared memory is no longer available, it may have been closed by the controller process.")
@@ -408,7 +408,7 @@ class SimpleMultiThreadTeleopRecorder:
                     print(f"Warning: Error closing shared memory connection: {e}")
                     print("Shared memory block should still be available for other processes.")
 
-            # 关闭机器人
+            # Close robot
             if self.robot:
                 self.robot.shutdown()
                 print("Robot shutdown command sent.")
@@ -423,6 +423,6 @@ if __name__ == '__main__':
     args = parse_param()
     signal.signal(signal.SIGINT, signal_handler)
 
-    # 创建并运行简化多线程记录器
+    # Create and run simplified multi-threaded recorder
     recorder = SimpleMultiThreadTeleopRecorder(args)
     recorder.run()

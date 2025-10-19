@@ -56,7 +56,7 @@ def main():
     parser = argparse.ArgumentParser(description='Teleoperation parameters')
 
     parser.add_argument(
-        '--config', type=str, default='keyboard',
+        "-c", '--config', type=str, default='keyboard',
         help='Teleop config (name under configs/teleop or absolute path to yaml)'
     )
     
