@@ -14,18 +14,18 @@
                 "MUJOCO_GL": "egl",
                 "CUDA_VISIBLE_DEVICES": "0",
                 "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
-                "ILSTD_CACHE": "/mnt/model/ilstd",
+                "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
             // train
-            "args": [
-                "-c", "default", "-t", "sim_transfer_cube_mixed", "-p", "act", "-o", "ckpt/act_dataloader",
-                "--training.save_steps", "100", 
-            ],
-            // eval
             // "args": [
-            //     "--output_dir", "results/test_act","--model_name_or_path","ckpt/act_new_train_debug/checkpoint-100", "--use_spawn"
-            // ]
+            //     "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_dataloader",
+            //     "--training.save_steps", "100", 
+            // ],
+            // eval
+            "args": [
+                "--output_dir", "results/test_act_norm","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn"
+            ]
             // "args": [
             //     "--policy", "octo_aloha",
             //     "--task", "sim_transfer_cube_scripted",

@@ -9,7 +9,7 @@ datasets:
       chunk_size: 100
       ctrl_space: 'joint'
       ctrl_type: 'abs'
-      preload_data: True
+    action_norm_mask: [0,1,2,3,4,5,6]
 
 # 任务特定参数
 action_dim: 14

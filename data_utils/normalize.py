@@ -109,19 +109,26 @@ def find_all_hdf5(dataset_dir):
     return hdf5_files
 
 class BaseNormalizer:
-    def __init__(self, dataset, dataset_name:str=None, gripper_indices: List[int] = [-1], ctrl_type='delta', ctrl_space='ee', *args, **kwargs):
+    def __init__(self, dataset, dataset_name:str=None, ctrl_type='delta', ctrl_space='ee', mask=None, *args, **kwargs):
         """Initialize BaseNormalizer
         
         Args:
             dataset: Dataset object or string path (for loading from cache)
             dataset_name: Explicit name for the dataset (required for new format)
-            gripper_indices: Indices of gripper actions
             ctrl_type: Control type ('abs', 'delta', etc.)
             ctrl_space: Control space ('ee', 'joint', etc.)
+            mask: Optional mask for selective normalization. Can be:
+                  - None: normalize all dimensions (default behavior)
+                  - Boolean array: True for dimensions to normalize, False to skip
+                  - List of indices: indices of dimensions NOT to normalize (e.g., [-1] for last dim)
         """
         # Get centralized cache directory
         self.cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
         os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Store mask specification (will be converted to bool array later when data shape is known)
+        self.mask_spec = mask
+        self.mask = None  # Will be initialized on first normalize/denormalize call
         
         if isinstance(dataset, str):
             # Loading mode: dataset is a path (cache_dir or dataset_dir for backward compat)
@@ -150,7 +157,6 @@ class BaseNormalizer:
             else:
                 raise ValueError("Cannot determine dataset name: dataset has no 'dataset_id' attribute and dataset_name not provided")
         
-        self.gripper_indices = gripper_indices
         self.stats_filename = f"{self.dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
         
         rank = dist.get_rank() if is_distributed() else 0
@@ -492,6 +498,73 @@ class BaseNormalizer:
         if key not in self.all_stats: raise KeyError(f"Cannot find {key} in stats.")
         return self.all_stats[key]
     
+    def _build_mask(self, data_shape):
+        """Build boolean mask from mask_spec based on data shape
+        
+        Args:
+            data_shape: Shape of the data to be normalized (last dimension is feature dim)
+        
+        Returns:
+            Boolean numpy array of shape (feature_dim,) or None if no masking
+        """
+        if self.mask_spec is None:
+            return None
+        
+        # Get feature dimension (last dimension of data)
+        if isinstance(data_shape, (tuple, list)):
+            feature_dim = data_shape[-1]
+        else:
+            feature_dim = data_shape
+        
+        # Case 1: mask_spec is already a boolean array
+        if isinstance(self.mask_spec, (np.ndarray, list, tuple)):
+            mask_array = np.array(self.mask_spec)
+            
+            # If it's boolean, use directly
+            if mask_array.dtype == bool:
+                if len(mask_array) != feature_dim:
+                    raise ValueError(f"Mask length {len(mask_array)} doesn't match feature dimension {feature_dim}")
+                return mask_array
+            
+            # Otherwise, treat as indices of dimensions NOT to normalize
+            else:
+                # Create a mask with all True (normalize all by default)
+                mask = np.ones(feature_dim, dtype=bool)
+                # Set specified indices to False (don't normalize)
+                indices = np.array(self.mask_spec, dtype=int)
+                # Handle negative indices
+                indices = np.where(indices < 0, feature_dim + indices, indices)
+                mask[indices] = False
+                return mask
+        
+        else:
+            raise ValueError(f"Invalid mask_spec type: {type(self.mask_spec)}. Expected None, boolean array, or list of indices.")
+    
+    def _apply_mask(self, data, normalized_data, mask):
+        """Apply mask to selectively use normalized or original data
+        
+        Args:
+            data: Original data
+            normalized_data: Normalized data
+            mask: Boolean mask (True = use normalized, False = use original)
+        
+        Returns:
+            Data with selective normalization applied
+        """
+        if mask is None:
+            return normalized_data
+        
+        # Expand mask to match data shape (broadcast over batch dimensions)
+        # data shape: (batch_size, ..., feature_dim)
+        # mask shape: (feature_dim,)
+        if isinstance(data, torch.Tensor):
+            mask_tensor = torch.from_numpy(mask).to(data.device)
+            result = torch.where(mask_tensor, normalized_data, data)
+        else:
+            result = np.where(mask, normalized_data, data)
+        
+        return result
+    
     def normalize_metaobs(self, mobs: MetaObs, ctrl_space='ee'):
         assert ctrl_space==self.ctrl_space, f"the space of observation {ctrl_space} does not match the normalizer's {self.ctrl_space}"
         mobs.state = self.normalize(mobs.state, datatype='state')
@@ -511,8 +584,8 @@ class BaseNormalizer:
     
     
 class MinMaxNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, gripper_indices=[-1], low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee'):
-        super().__init__(dataset, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+        super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
         self.high = high
@@ -524,18 +597,38 @@ class MinMaxNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
+        normalized = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
+        denormalized = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class PercentileNormalizer(BaseNormalizer):
-    def __init__(self, dataset_dir, dataset_name=None, gripper_indices=[-1], low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee'):
-        super().__init__(dataset_dir, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset_dir, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+        super().__init__(dataset_dir, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
         self.high = high
@@ -547,20 +640,46 @@ class PercentileNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
-        data = np.clip(data, self.low, self.high).astype(dtype)
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
+        normalized = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
+        if isinstance(normalized, torch.Tensor):
+            normalized = torch.clip(normalized, self.low, self.high)
+        else:
+            normalized = np.clip(normalized, self.low, self.high)
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
-        data = np.clip(data, stats['q01'], stats['q99'])
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
+        denormalized = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
+        if isinstance(denormalized, torch.Tensor):
+            denormalized = torch.clip(denormalized, stats['q01'], stats['q99'])
+        else:
+            denormalized = np.clip(denormalized, stats['q01'], stats['q99'])
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, gripper_indices=[-1], ctrl_type='delta', ctrl_space='ee', min_std=0.01, *args, **kwargs):
-        super().__init__(dataset, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=0.01, mask=None, *args, **kwargs):
+        super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         self.min_std = min_std # avoid large deviation
         
     def __str__(self):
@@ -569,16 +688,36 @@ class ZScoreNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
         std = np.clip(stats['std'], self.min_std, np.inf)
-        data = (data-stats['mean'])/std
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype) 
+        normalized = (data-stats['mean'])/std
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype) 
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
         std = np.clip(stats['std'], self.min_std, np.inf)
-        data = data*std + stats['mean']
-        return data.to(dtype) if isinstance(data, torch.Tensor) else data.astype(dtype)
+        denormalized = data*std + stats['mean']
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
 class Identity(BaseNormalizer):
     def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):

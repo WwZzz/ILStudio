@@ -1,6 +1,6 @@
 <div align="center">
   <img src='https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_ilstd_logo.png'  width="200"/>
-<h1> IL-Studio: A Plug-and-Play Imitation-Learning Playground for Robotics
+<h1> ILStudio: A Plug-and-Play Imitation-Learning Playground for Robotics
 </h1>
 
 
@@ -28,9 +28,12 @@ We recommend using [uv](https://docs.astral.sh/uv/) to manage Python dependencie
 This will install the core dependencies for the main `IL-Studio` project.
 
 ```shell
+git clone https://github.com/WwZzz/IL-Studio.git
+# Init submodule (Optional)
+git submodule update --init --recursive 
 # Navigate to the project root
-cd /path/to/IL-Studio
-# install uv by 'pip install uv' before running the command below
+cd IL-Studio
+# Install uv by 'pip install uv' before running the command below
 uv sync
 ```
 

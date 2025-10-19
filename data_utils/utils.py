@@ -350,12 +350,32 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
     ctrl_space = dataset_meta.get('ctrl_space', 'ee')
     ctrl_type = dataset_meta.get('ctrl_type', 'delta')
     
+    # Get mask info from metadata
+    action_norm_mask = dataset_meta.get('action_norm_mask', None)
+    state_norm_mask = dataset_meta.get('state_norm_mask', None)
+    
+    # Log mask information for transparency
+    if action_norm_mask is not None or state_norm_mask is not None:
+        print(f"Loading normalizers with mask configuration for dataset '{dataset_id}':")
+        if action_norm_mask is not None:
+            print(f"  - action_norm_mask: {action_norm_mask}")
+        if state_norm_mask is not None:
+            print(f"  - state_norm_mask: {state_norm_mask}")
+    
     # Get normalizer types from metadata
     state_norm_type = norm_meta['state'].get(dataset_id, 'Zscore')
     action_norm_type = norm_meta['action'].get(dataset_id, 'Zscore')
     
     # Create normalizers with dataset_id and ctrl info
     kwargs = {'ctrl_space': ctrl_space, 'ctrl_type': ctrl_type}
+    state_kwargs = kwargs.copy()
+    action_kwargs = kwargs.copy()
+    
+    # Add mask to kwargs if present
+    if state_norm_mask is not None:
+        state_kwargs['mask'] = state_norm_mask
+    if action_norm_mask is not None:
+        action_kwargs['mask'] = action_norm_mask
     
     # Determine load directory: prefer src_dir, fallback to cache
     cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
@@ -378,10 +398,10 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
     
     # Create normalizers
     state_normalizer = NORMTYPE2CLASS[state_norm_type](
-        load_dir, dataset_name=dataset_id, **kwargs
+        load_dir, dataset_name=dataset_id, **state_kwargs
     )
     action_normalizer = NORMTYPE2CLASS[action_norm_type](
-        load_dir, dataset_name=dataset_id, **kwargs
+        load_dir, dataset_name=dataset_id, **action_kwargs
     )
     
     return {'state': state_normalizer, 'action': action_normalizer}
@@ -541,21 +561,64 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
     state_normalizers = {}
     
     # Use dataset.dataset_id as the key for normalizers instead of dataset_dir
-    for dataset in datasets:
+    # Also extract mask information from dataset_config
+    for dataset, dataset_config in zip(datasets, datasets_config):
         dataset_id = dataset.dataset_id  # Use the dataset_id attribute added in _create_dataset_from_config
-        action_normalizers[dataset_id] = action_normalizer_class(dataset, dataset_name=dataset_id)
-        state_normalizers[dataset_id] = state_normalizer_class(dataset, dataset_name=dataset_id)
+        
+        # Extract mask information from dataset config (same level as args)
+        action_norm_mask = dataset_config.get('action_norm_mask', None)
+        state_norm_mask = dataset_config.get('state_norm_mask', None)
+        
+        # Log mask configuration for transparency
+        if action_norm_mask is not None or state_norm_mask is not None:
+            print(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
+            if action_norm_mask is not None:
+                print(f"  - action_norm_mask: {action_norm_mask}")
+            if state_norm_mask is not None:
+                print(f"  - state_norm_mask: {state_norm_mask}")
+        
+        # Create normalizers with masks
+        action_normalizers[dataset_id] = action_normalizer_class(
+            dataset, 
+            dataset_name=dataset_id, 
+            mask=action_norm_mask
+        )
+        state_normalizers[dataset_id] = state_normalizer_class(
+            dataset, 
+            dataset_name=dataset_id, 
+            mask=state_norm_mask
+        )
     
     # Save normalization metadata
     if save_norm:
         # Build complete metadata for each dataset
         datasets_meta = []
-        for dataset in datasets:
+        for dataset, dataset_config in zip(datasets, datasets_config):
+            # Extract mask info from config (same level as args)
+            action_norm_mask = dataset_config.get('action_norm_mask', None)
+            state_norm_mask = dataset_config.get('state_norm_mask', None)
+            
             dataset_meta = {
                 'dataset_id': dataset.dataset_id,
                 'ctrl_space': getattr(dataset, 'ctrl_space', 'ee'),
                 'ctrl_type': getattr(dataset, 'ctrl_type', 'delta'),
             }
+            
+            # Add mask information if present
+            if action_norm_mask is not None:
+                # Convert to list for JSON serialization
+                if isinstance(action_norm_mask, np.ndarray):
+                    dataset_meta['action_norm_mask'] = action_norm_mask.tolist()
+                else:
+                    dataset_meta['action_norm_mask'] = action_norm_mask
+            
+            if state_norm_mask is not None:
+                # Convert to list for JSON serialization
+                if isinstance(state_norm_mask, np.ndarray):
+                    dataset_meta['state_norm_mask'] = state_norm_mask.tolist()
+                else:
+                    dataset_meta['state_norm_mask'] = state_norm_mask
+            
             datasets_meta.append(dataset_meta)
         
         # Metadata format that stores complete information for each dataset
@@ -565,6 +628,19 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             'state': {k: str(v) for k, v in state_normalizers.items()}, 
             'action': {k: str(v) for k, v in action_normalizers.items()}, 
         }
+        
+        # Log mask information being saved
+        has_mask = any('action_norm_mask' in ds or 'state_norm_mask' in ds for ds in datasets_meta)
+        if has_mask:
+            print(f"\nSaving normalizer metadata with mask configurations to: {os.path.join(args.output_dir, 'normalize.json')}")
+            for ds_meta in datasets_meta:
+                if 'action_norm_mask' in ds_meta or 'state_norm_mask' in ds_meta:
+                    print(f"  Dataset '{ds_meta['dataset_id']}':")
+                    if 'action_norm_mask' in ds_meta:
+                        print(f"    - action_norm_mask: {ds_meta['action_norm_mask']}")
+                    if 'state_norm_mask' in ds_meta:
+                        print(f"    - state_norm_mask: {ds_meta['state_norm_mask']}")
+        
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
         
         # Save normalizer stats to output_dir (for training) using dataset_id as key
