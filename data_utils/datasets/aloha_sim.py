@@ -51,7 +51,7 @@ class AlohaSimDataset(EpisodicDataset):
                 "Please install it with: pip install huggingface_hub"
             )
         if not self.dataset_dir:
-            self.dataset_dir = os.environ.get('ILSTD_CACHE', '~/.cache/ilstd')
+            self.dataset_dir = os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd'))
             os.makedirs(self.dataset_dir, exist_ok=True)
         # Download the dataset using HuggingFace's default cache
         downloaded_path = snapshot_download(
