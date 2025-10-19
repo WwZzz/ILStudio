@@ -3,8 +3,9 @@ import json
 from typing import Optional
 import transformers
 from peft import PeftModel
+from policy.trainer import BaseTrainer
 
-class Trainer(transformers.Trainer):
+class Trainer(BaseTrainer):
     """
     A versatile Trainer that intelligently handles saving for different training scenarios.
     

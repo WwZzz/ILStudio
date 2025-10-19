@@ -1,5 +1,9 @@
-dataset_dir:
-  - "/inspire/hdd/project/robot-action/public/data/libero_h5"
+# 新的灵活数据集配置格式
+datasets:
+  - name: "libero_test"
+    class: "EpisodicDataset"
+    args:
+      dataset_path_list: ["/inspire/hdd/project/robot-action/public/data/libero_h5"]
+      camera_names: ['primary']
+
 episode_len: 400
-camera_names:
-  - primary

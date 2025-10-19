@@ -90,7 +90,7 @@ class RobomimicDataset(EpisodicDataset):
             'pad_seq_length': True,
             'get_pad_mask': False,
             'goal_mode': None,
-            'hdf5_cache_mode': 'all' if getattr(self.data_args, 'preload_data', True) else 'low_dim',
+            'hdf5_cache_mode': 'all' if self.preload_data else 'low_dim',
             'hdf5_use_swmr': True,
             'hdf5_normalize_obs': False,
             'filter_by_attribute': filter_by_attribute,

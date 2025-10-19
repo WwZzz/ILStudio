@@ -6,7 +6,9 @@ export NUMPY_EXPERIMENTAL_DTYPE_API=1
 ENV=aloha
 TASKNAME=transfer_cube_top
 
-DATASET=data/sim_transfer_cube_scripted
+# Optional: specify dataset_id if you have multiple datasets in normalize.json
+# Leave empty to use the first dataset (default)
+DATASET_ID=""
 CKPT=ckpt/act_sim_transfer_cube_scripted_zscore_example
 OUTPUT=results/act_${TASKNAME}_example
 
@@ -21,7 +23,7 @@ python eval.py --env_name $ENV \
     --save_dir $OUTPUT \
     --num_rollout $ROLLOUT \
     --num_envs $PARALLEL \
-    --dataset_dir $DATASET \
+    --dataset_id $DATASET_ID \
     --fps $FPS \
     --camera_ids "[0]" \
     --max_timesteps 400 \

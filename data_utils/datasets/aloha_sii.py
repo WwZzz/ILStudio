@@ -65,9 +65,9 @@ class AlohaSIIDataset(EpisodicDataset):
             raise NotImplementedError("relative action was not implemented")
         # Load images
         image_dict = dict(
-            primary=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_high'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size),
-            wrist_left=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_left_wrist'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size),
-            wrist_right=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_right_wrist'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size),
+            primary=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_high'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.image_size),
+            wrist_left=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_left_wrist'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.image_size),
+            wrist_right=cv2.resize(cv2.imdecode(np.frombuffer(root[f'/observations/images/cam_right_wrist'][start_ts], np.uint8), cv2.IMREAD_COLOR), self.image_size),
         )
         # Load reasoning information
         reasoning = ""
@@ -115,21 +115,21 @@ class AlohaSIIDataset(EpisodicDataset):
                 img_bytes = root[f'/observations/images/cam_high'][()]
                 image_dict.update(
                     dict(
-                        primary=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(img_byte, np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size) for img_byte in img_bytes]),
+                        primary=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(img_byte, np.uint8), cv2.IMREAD_COLOR), self.image_size) for img_byte in img_bytes]),
                     )
                 )
             if 'image_wrist' in feats or 'image' in feats or len(feats) == 0:
                 left_bytes = root[f'/observations/images/cam_left_wrist'][()]
                 image_dict.update(
                     dict(
-                        wrist_left=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(lb, np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size) for lb in left_bytes]),
+                        wrist_left=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(lb, np.uint8), cv2.IMREAD_COLOR), self.image_size) for lb in left_bytes]),
                     )
                 )
                 del left_bytes
                 right_bytes = root[f'/observations/images/cam_right_wrist'][()]
                 image_dict.update(
                     dict(
-                        wrist_right=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(rb, np.uint8), cv2.IMREAD_COLOR), self.data_args.image_size) for rb in right_bytes]),
+                        wrist_right=np.stack([cv2.resize(cv2.imdecode(np.frombuffer(rb, np.uint8), cv2.IMREAD_COLOR), self.image_size) for rb in right_bytes]),
                     )
                 )
                 del right_bytes

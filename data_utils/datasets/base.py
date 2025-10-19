@@ -30,21 +30,21 @@ class EpisodicDataset(torch.utils.data.Dataset):
     including memory management, episode indexing, and data normalization.
     """
     
-    def __init__(self, dataset_path_list: list, camera_names: list, action_normalizers: dict = {}, 
-                 state_normalizers: dict = {}, data_args=None, chunk_size: int = 16, 
-                 ctrl_space: str = 'ee', ctrl_type: str = 'delta'):
+    def __init__(self, dataset_path_list: list, camera_names: list, 
+                 chunk_size: int = 16, 
+                 ctrl_space: str = 'ee', ctrl_type: str = 'delta',
+                 image_size: tuple = (480, 640), preload_data: bool = False):
         """
         Initialize the episodic dataset.
         
         Args:
             dataset_path_list: List containing a single dataset directory path, or list of .h5 file paths (for backward compatibility)
             camera_names: List of camera names to use
-            action_normalizers: Dictionary of action normalizers per dataset
-            state_normalizers: Dictionary of state normalizers per dataset
-            data_args: Data processing arguments
             chunk_size: Number of timesteps per sample
             ctrl_space: Control space type ('ee', 'joint', 'other')
             ctrl_type: Control type ('abs', 'rel', 'delta')
+            image_size: Target size for image resizing (height, width)
+            preload_data: Whether to preload all data into memory
         """
         super(EpisodicDataset).__init__()
         
@@ -60,13 +60,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
             self.dataset_dir = os.path.dirname(dataset_path_list[0]) if len(dataset_path_list) > 0 else ""
         
         self.episode_ids = np.arange(len(self.dataset_path_list))
-        self.action_normalizers = action_normalizers
-        self.state_normalizers = state_normalizers
         self.chunk_size = chunk_size
         self.camera_names = camera_names
-        self.data_args = data_args
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']
         self.ctrl_type = ctrl_type  # ['abs', 'rel', 'delta']
+        self.image_size = image_size
+        self.preload_data = preload_data
         self.freq = -1
         self.max_workers = 8
         self.initialize()
@@ -93,7 +92,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
     
     def initialize(self):
         """Initialize the dataset by loading data and computing episode lengths."""
-        self.loaded_data = self._load_all_episodes_into_memory() if getattr(self.data_args, 'preload_data', False) else None
+        self.loaded_data = self._load_all_episodes_into_memory() if self.preload_data else None
         self.episode_len = self.get_episode_len()  # Get length of each episode
         self.cumulative_len = np.cumsum(self.episode_len)  # Compute cumulative lengths
         self.max_episode_len = max(self.episode_len)  # Get maximum episode length
@@ -200,15 +199,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         episode_id = self.episode_ids[episode_index]
         return episode_id, start_ts
 
-    def set_action_normalizers(self, ns):
-        """Set action normalizers for the dataset."""
-        self.action_normalizers = ns
-
-    def set_state_normalizers(self, ns):
-        """Set state normalizers for the dataset."""
-        self.state_normalizers = ns
-
-
     def extract_from_episode(self, episode_idx, keyname=[]):
         episode_path = self.dataset_path_list[episode_idx]
         feat = self.load_feat_from_episode(episode_path, keyname)
@@ -283,9 +273,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         data_dict = self.load_onestep_from_episode(dataset_path, start_ts) 
         action, image_dict, state, raw_lang = data_dict['action'], data_dict['image'], data_dict['state'], data_dict['language_instruction']
         reasoning = data_dict.get('reasoning', '')
-        padded_action = np.zeros((self.data_args.chunk_size, action.shape[1]), dtype=np.float32) 
+        padded_action = np.zeros((self.chunk_size, action.shape[1]), dtype=np.float32) 
         padded_action[:action.shape[0]] = action
-        is_pad = np.zeros(self.data_args.chunk_size) 
+        is_pad = np.zeros(self.chunk_size) 
         is_pad[action.shape[0]:] = 1
         all_cam_images = []
         for cam_name in self.camera_names:
@@ -294,27 +284,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
             all_cam_images = np.stack(all_cam_images, axis=0)  # Stack images into array
         else:
             all_cam_images = None
-        # Normalize data
-        action_normalizer = self.action_normalizers.get(self.get_dataset_dir(), None)
-        if action_normalizer is not None:
-            action_data = action_normalizer.normalize(padded_action, datatype='action')
-        else:
-            action_data = padded_action
-            warnings.warn("No Normalization being applied to actions during training")
-        state_normalizer = self.state_normalizers.get(self.get_dataset_dir(), None)
-        if state_normalizer is not None:
-            state_data = state_normalizer.normalize(state, datatype='state')
-        else:
-            state_data = state
-            warnings.warn("No Normalization being applied to states during training")
+        
         # Construct observations, convert arrays to tensors
         if all_cam_images is not None:
             image_data = torch.from_numpy(all_cam_images)
             image_data = torch.einsum('k h w c -> k c h w', image_data)  # Swap image channels
         else:
             image_data = None
-        state_data = torch.from_numpy(state_data).float()
-        action_data = torch.from_numpy(action_data).float()
+        state_data = torch.from_numpy(state).float()
+        action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
         sample = {
             'image': image_data,
@@ -327,10 +305,4 @@ class EpisodicDataset(torch.utils.data.Dataset):
             'episode_id': episode_id,
         }  # Construct sample dict
         assert raw_lang is not None, ""
-        del image_data
-        del state_data
-        del action_data
-        del is_pad
-        del raw_lang
-        del reasoning
         return sample

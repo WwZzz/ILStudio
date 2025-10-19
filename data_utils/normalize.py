@@ -66,7 +66,6 @@
 #   physical limits) or image pixel intensities.
 #   Note: This method is highly sensitive to outliers.
 
-# 所以要计算的统计量包括：均值、标准差、最小值、最大值、百分位最小值、百分位最大值，有这些统计量之后，就可以计算归一化和反归一化了
 # ----------------------- h5 structure
 # # ACTION
 # joint_action: (T, qpos_dim)
@@ -80,7 +79,6 @@
 
 import pickle
 import numpy as np
-import h5py
 import os
 from collections import defaultdict
 from benchmark.base import MetaAction, MetaObs  
@@ -88,6 +86,11 @@ from typing import List
 import fnmatch
 import hashlib
 import warnings
+import torch.distributed as dist
+import torch
+
+def is_distributed():
+    return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
 def str2hash(s: str):
     return str(hashlib.md5(s.encode()).hexdigest())
@@ -106,32 +109,85 @@ def find_all_hdf5(dataset_dir):
     return hdf5_files
 
 class BaseNormalizer:
-    def __init__(self, dataset, dataset_name:str=None, gripper_indices: List[int] = [-1], ctrl_type='delta', ctrl_space='ee', *args, **kwargs):
+    def __init__(self, dataset, dataset_name:str=None, ctrl_type='delta', ctrl_space='ee', mask=None, *args, **kwargs):
+        """Initialize BaseNormalizer
+        
+        Args:
+            dataset: Dataset object or string path (for loading from cache)
+            dataset_name: Explicit name for the dataset (required for new format)
+            ctrl_type: Control type ('abs', 'delta', etc.)
+            ctrl_space: Control space ('ee', 'joint', etc.)
+            mask: Optional mask for selective normalization. Can be:
+                  - None: normalize all dimensions (default behavior)
+                  - Boolean array: True for dimensions to normalize, False to skip
+                  - List of indices: indices of dimensions NOT to normalize (e.g., [-1] for last dim)
+        """
+        # Get centralized cache directory
+        self.cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Store mask specification (will be converted to bool array later when data shape is known)
+        self.mask_spec = mask
+        self.mask = None  # Will be initialized on first normalize/denormalize call
+        
         if isinstance(dataset, str):
+            # Loading mode: dataset is a path (cache_dir or dataset_dir for backward compat)
             self.dataset = None
-            self.dataset_dir = dataset
+            self.dataset_dir = dataset  # Keep for backward compatibility
             self.ctrl_space = ctrl_space
             self.ctrl_type = ctrl_type
+            # When loading, dataset_name must be provided
+            if dataset_name is None:
+                raise ValueError("dataset_name must be provided when loading normalizer from path")
+            self.dataset_name = dataset_name
         else:
+            # Training mode: dataset is an actual dataset object
             self.dataset = dataset
-            self.dataset_dir = dataset.get_dataset_dir() # the directionary path of .hdf5 files
-            self.ctrl_type = self.dataset.ctrl_type
-            self.ctrl_space = self.dataset.ctrl_space
-        self.dataset_name = 'd' + str2hash(self.dataset_dir) if dataset_name is None else dataset_name
-        self.gripper_indices = gripper_indices
+            self.dataset_dir = dataset.get_dataset_dir() if hasattr(dataset, 'get_dataset_dir') else None
+            self.ctrl_type = getattr(dataset, 'ctrl_type', ctrl_type)
+            self.ctrl_space = getattr(dataset, 'ctrl_space', ctrl_space)
+            
+            # Use dataset.dataset_id if available, otherwise fall back to hash-based name
+            if hasattr(dataset, 'dataset_id'):
+                self.dataset_name = dataset.dataset_id
+            elif dataset_name is not None:
+                self.dataset_name = dataset_name
+            elif self.dataset_dir:
+                self.dataset_name = 'd' + str2hash(self.dataset_dir)
+            else:
+                raise ValueError("Cannot determine dataset name: dataset has no 'dataset_id' attribute and dataset_name not provided")
+        
         self.stats_filename = f"{self.dataset_name}_stats_{self.ctrl_space}_{self.ctrl_type}.pkl"
-        if self.is_stats_exist():
-            self.all_stats = self.load_stats()
-        else:
-            assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
-            self.all_stats = self.compute_and_save_stats()
+        
+        rank = dist.get_rank() if is_distributed() else 0
+        if rank == 0:
+            if self.is_stats_exist():
+                self.all_stats = self.load_stats()
+            else:
+                assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
+                self.all_stats = self.compute_and_save_stats()
+        if is_distributed(): dist.barrier()
+        if rank != 0: self.all_stats = self.load_stats()
 
     @classmethod
     def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):
         return f"{'d' + str2hash(dataset_dir)}"
 
     def is_stats_exist(self):
-        return os.path.exists(os.path.join(self.dataset_dir, self.stats_filename)) or os.path.exists(os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl'))
+        """Check if stats file exists in cache directory or dataset directory (backward compat)"""
+        # Check in centralized cache first (new format)
+        cache_path = os.path.join(self.cache_dir, self.stats_filename)
+        if os.path.exists(cache_path):
+            return True
+        
+        # Backward compatibility: check in dataset_dir if it exists
+        if self.dataset_dir:
+            old_path = os.path.join(self.dataset_dir, self.stats_filename)
+            old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+            if os.path.exists(old_path) or os.path.exists(old_path_alt):
+                return True
+        
+        return False
 
     def compute_stats_for_array(self, data_k):
         return {
@@ -144,48 +200,295 @@ class BaseNormalizer:
         }
     
     def compute_and_save_stats(self):
+        """Compute and save normalization statistics
+        
+        Supports multiple dataset types with flexible data extraction:
+        1. Episodic datasets with num_episodes and extract_from_episode
+        2. Datasets with extract_all() method
+        3. Map-style datasets with __len__ and __getitem__
+        4. Iterable datasets
+        """
         all_data = defaultdict(list)
-        for idx in range(self.dataset.num_episodes):
-            res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
-            for k in res_each: all_data[k].append(res_each[k])
-        #########################################################
+        num_trajectories = None
+        
+        # Method 1: Check if dataset has num_episodes and extract_from_episode
+        if hasattr(self.dataset, 'num_episodes') and hasattr(self.dataset, 'extract_from_episode'):
+            print(f"Using episodic extraction: {self.dataset.num_episodes} episodes")
+            num_trajectories = self.dataset.num_episodes
+            for idx in range(self.dataset.num_episodes):
+                res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
+                for k in res_each:
+                    all_data[k].append(res_each[k])
+        
+        # Method 2: Check if dataset has extract_all() method
+        elif hasattr(self.dataset, 'extract_all') and callable(getattr(self.dataset, 'extract_all')):
+            print("Using extract_all() method")
+            try:
+                extracted = self.dataset.extract_all(['state', 'action'])
+                for k, v in extracted.items():
+                    # Assume extract_all returns already concatenated arrays
+                    if isinstance(v, (list, tuple)):
+                        all_data[k] = [v]
+                    else:
+                        all_data[k] = [v]
+            except Exception as e:
+                print(f"extract_all() failed: {e}, falling back to iteration")
+                all_data = None
+        
+        # Method 3 & 4: Use DataLoader for map-style or iterable datasets
+        if not all_data or len(all_data) == 0:
+            from torch.utils.data import DataLoader
+            
+            # Determine if it's a map-style dataset
+            is_map_style = hasattr(self.dataset, '__len__') and hasattr(self.dataset, '__getitem__')
+            
+            # Try to detect if the dataset returns batched data
+            returns_batches = self._detect_if_returns_batches()
+            
+            if is_map_style:
+                print(f"Using DataLoader for map-style dataset: {len(self.dataset)} samples")
+                batch_size = 1 if returns_batches else 32
+                if returns_batches:
+                    print("  Detected: Dataset returns batches, using batch_size=1")
+                else:
+                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                
+                dataloader = DataLoader(
+                    self.dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    collate_fn=None if returns_batches else self._collate_for_stats
+                )
+            else:
+                print("Using DataLoader for iterable dataset")
+                batch_size = 1 if returns_batches else 32
+                if returns_batches:
+                    print("  Detected: Dataset returns batches, using batch_size=1")
+                else:
+                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                
+                dataloader = DataLoader(
+                    self.dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    collate_fn=None if returns_batches else self._collate_for_stats
+                )
+            
+            # Collect data from dataloader
+            batch_count = 0
+            for batch_or_sample in dataloader:
+                if batch_or_sample is None:
+                    continue
+                
+                # Handle both dict and tuple/list formats
+                if isinstance(batch_or_sample, dict):
+                    # Dict format
+                    for key in ['state', 'action']:
+                        if key in batch_or_sample:
+                            value = batch_or_sample[key]
+                            # Convert to numpy if needed
+                            if hasattr(value, 'cpu'):
+                                value = value.cpu().numpy()
+                            elif not isinstance(value, np.ndarray):
+                                value = np.array(value)
+                            all_data[key].append(value)
+                
+                elif isinstance(batch_or_sample, (tuple, list)) and len(batch_or_sample) >= 2:
+                    # Tuple/list format: (state, action, ...)
+                    state_val = batch_or_sample[0]
+                    action_val = batch_or_sample[1]
+                    
+                    # Convert to numpy
+                    if hasattr(state_val, 'cpu'):
+                        state_val = state_val.cpu().numpy()
+                    elif not isinstance(state_val, np.ndarray):
+                        state_val = np.array(state_val)
+                    
+                    if hasattr(action_val, 'cpu'):
+                        action_val = action_val.cpu().numpy()
+                    elif not isinstance(action_val, np.ndarray):
+                        action_val = np.array(action_val)
+                    
+                    all_data['state'].append(state_val)
+                    all_data['action'].append(action_val)
+                
+                batch_count += 1
+                if batch_count % 100 == 0:
+                    print(f"Processed {batch_count} batches...")
+            
+            print(f"Total batches processed: {batch_count}")
+        
+        # Concatenate all collected data
+        for k in all_data:
+            if len(all_data[k]) > 0:
+                all_data[k] = np.concatenate(all_data[k], axis=0)
+            else:
+                raise ValueError(f"No data collected for key '{k}'")
+        
+        # Compute statistics
         all_stats = {}
-        num_transitions = -1
-        all_stats['num_trajectories'] = self.dataset.num_episodes
-        for k in all_data: all_data[k] = np.concatenate(all_data[k])
+        if num_trajectories is not None:
+            all_stats['num_trajectories'] = num_trajectories
+        
         for k in all_data:
             data_k = all_data[k]
-            if 'num_transitions' not in all_stats: all_stats['num_transitions'] = data_k.shape[0]
+            if 'num_transitions' not in all_stats:
+                all_stats['num_transitions'] = data_k.shape[0]
             dict_k = {k.split('/')[-1]: self.compute_stats_for_array(data_k)}
             all_stats.update(dict_k)
+        
+        print(f"Statistics computed: {all_stats.get('num_transitions', 0)} transitions")
         self.save_stats(all_stats)
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
     
+    def _detect_if_returns_batches(self):
+        """Detect if the dataset returns batches or individual samples
+        
+        This is important for correctly constructing the DataLoader:
+        - If returns batches: use batch_size=1, no collate_fn
+        - If returns samples: use batch_size=32, with collate_fn
+        
+        Detection rules:
+        1. Map-style datasets (__len__ + __getitem__) always return samples
+        2. Iterable datasets: check 'raw_lang' field
+           - If raw_lang is a list → returns batches
+           - If raw_lang is a string → returns samples
+        
+        Returns:
+            bool: True if dataset returns batches, False if returns samples
+        """
+        # Rule 1: Map-style datasets always return samples
+        if hasattr(self.dataset, '__len__') and hasattr(self.dataset, '__getitem__'):
+            print(f"    Map-style dataset always returns samples")
+            return False
+        
+        # Rule 2: For iterable datasets, check raw_lang field
+        # Strategy 1: Check for explicit attributes first
+        if hasattr(self.dataset, 'returns_batches'):
+            result = bool(self.dataset.returns_batches)
+            print(f"    Explicit attribute returns_batches={result}")
+            return result
+        
+        # Strategy 2: Peek at the first item and check raw_lang
+        try:
+            # For iterable datasets
+            if hasattr(self.dataset, '__iter__'):
+                iterator = iter(self.dataset)
+                sample = next(iterator)
+            else:
+                # Can't detect, assume returns samples
+                print(f"    Cannot iterate dataset, assuming samples")
+                return False
+            
+            # Check raw_lang field
+            if isinstance(sample, dict) and 'raw_lang' in sample:
+                raw_lang = sample['raw_lang']
+                if isinstance(raw_lang, list):
+                    print(f"    Detected batch: raw_lang is a list (length={len(raw_lang)})")
+                    return True
+                elif isinstance(raw_lang, str):
+                    print(f"    Detected sample: raw_lang is a string")
+                    return False
+            
+            # If no raw_lang field, assume returns samples
+            print(f"    No raw_lang field found, assuming samples")
+            return False
+            
+        except Exception as e:
+            # If peek fails, assume returns samples (safer default)
+            print(f"    Could not detect batch/sample format ({e}), assuming samples")
+            return False
+    
+    def _collate_for_stats(self, batch):
+        """Collate function for DataLoader to extract state and action"""
+        if not batch:
+            return None
+        
+        # Handle different batch formats
+        collated = {}
+        
+        # Check if batch items are dictionaries
+        if isinstance(batch[0], dict):
+            # Batch of dictionaries
+            for key in ['state', 'action']:
+                if key in batch[0]:
+                    values = [item[key] for item in batch]
+                    # Stack or concatenate
+                    try:
+                        if hasattr(values[0], 'cpu'):
+                            values = [v.cpu() if hasattr(v, 'cpu') else v for v in values]
+                        collated[key] = torch.stack([torch.as_tensor(v) for v in values])
+                    except:
+                        # If stack fails, try to handle differently
+                        collated[key] = values
+        
+        # Handle tuple/list format (obs, action, ...)
+        elif isinstance(batch[0], (tuple, list)) and len(batch[0]) >= 2:
+            # Assume format: (state/obs, action, ...)
+            states = [item[0] for item in batch]
+            actions = [item[1] for item in batch]
+            
+            try:
+                collated['state'] = torch.stack([torch.as_tensor(s) for s in states])
+                collated['action'] = torch.stack([torch.as_tensor(a) for a in actions])
+            except:
+                collated['state'] = states
+                collated['action'] = actions
+        
+        return collated if collated else None
+    
     def save_stats(self, all_stats):
-        with open(os.path.join(self.dataset_dir, self.stats_filename), 'wb') as file:  # 使用二进制写模式 ('wb')
+        """Save stats to centralized cache directory"""
+        save_path = os.path.join(self.cache_dir, self.stats_filename)
+        with open(save_path, 'wb') as file:
             pickle.dump(all_stats, file)
 
     def save_stats_to_(self, target_dir:str):
-        """Save the dataset's stats to `target_dir`"""
+        """Save the dataset's stats to `target_dir` (typically for training checkpoints)
+        
+        This saves stats to both the target_dir (for checkpoint) and cache_dir (for future use).
+        """
         assert hasattr(self, 'all_stats') and self.all_stats is not None, "No stats found."
         stats_to_save = {
             k: {
                 kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
             } if isinstance(v, dict) else v for k,v in self.all_stats.items()
         }
+        
+        # Save to target_dir (training checkpoint)
         save_path = os.path.join(target_dir, self.stats_filename)
-        if os.path.exists(save_path): 
-            warnings.warn(f"Stats file {save_path} already exists.")
-            return
-        with open(save_path, 'wb') as file:  # 使用二进制写模式 ('wb')
-            pickle.dump(stats_to_save, file)
+        if not os.path.exists(save_path):
+            with open(save_path, 'wb') as file:
+                pickle.dump(stats_to_save, file)
+        else:
+            warnings.warn(f"Stats file {save_path} already exists in training dir.")
+        
+        # Also save to cache_dir for future use
+        cache_path = os.path.join(self.cache_dir, self.stats_filename)
+        if not os.path.exists(cache_path):
+            with open(cache_path, 'wb') as file:
+                pickle.dump(stats_to_save, file)
 
     def load_stats(self):
-        stats_path = os.path.join(self.dataset_dir, self.stats_filename)
-        if not os.path.exists(stats_path):
-            stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        """Load stats from cache directory or dataset directory (backward compat)"""
+        # Try cache directory first (new format)
+        stats_path = os.path.join(self.cache_dir, self.stats_filename)
+        
+        if not os.path.exists(stats_path) and self.dataset_dir:
+            # Backward compatibility: try dataset_dir
+            stats_path = os.path.join(self.dataset_dir, self.stats_filename)
             if not os.path.exists(stats_path):
-                raise FileExistsError(f"Stats file {os.path.join(self.dataset_dir, self.stats_filename)} does not exist.")
+                stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        
+        if not os.path.exists(stats_path):
+            raise FileNotFoundError(
+                f"Stats file not found. Searched in:\n"
+                f"  - {os.path.join(self.cache_dir, self.stats_filename)}\n"
+                f"  - {os.path.join(self.dataset_dir, self.stats_filename) if self.dataset_dir else 'N/A'}"
+            )
+        
         with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
         all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
@@ -194,6 +497,73 @@ class BaseNormalizer:
     def get_stat_by_key(self, key='action'):
         if key not in self.all_stats: raise KeyError(f"Cannot find {key} in stats.")
         return self.all_stats[key]
+    
+    def _build_mask(self, data_shape):
+        """Build boolean mask from mask_spec based on data shape
+        
+        Args:
+            data_shape: Shape of the data to be normalized (last dimension is feature dim)
+        
+        Returns:
+            Boolean numpy array of shape (feature_dim,) or None if no masking
+        """
+        if self.mask_spec is None:
+            return None
+        
+        # Get feature dimension (last dimension of data)
+        if isinstance(data_shape, (tuple, list)):
+            feature_dim = data_shape[-1]
+        else:
+            feature_dim = data_shape
+        
+        # Case 1: mask_spec is already a boolean array
+        if isinstance(self.mask_spec, (np.ndarray, list, tuple)):
+            mask_array = np.array(self.mask_spec)
+            
+            # If it's boolean, use directly
+            if mask_array.dtype == bool:
+                if len(mask_array) != feature_dim:
+                    raise ValueError(f"Mask length {len(mask_array)} doesn't match feature dimension {feature_dim}")
+                return mask_array
+            
+            # Otherwise, treat as indices of dimensions NOT to normalize
+            else:
+                # Create a mask with all True (normalize all by default)
+                mask = np.ones(feature_dim, dtype=bool)
+                # Set specified indices to False (don't normalize)
+                indices = np.array(self.mask_spec, dtype=int)
+                # Handle negative indices
+                indices = np.where(indices < 0, feature_dim + indices, indices)
+                mask[indices] = False
+                return mask
+        
+        else:
+            raise ValueError(f"Invalid mask_spec type: {type(self.mask_spec)}. Expected None, boolean array, or list of indices.")
+    
+    def _apply_mask(self, data, normalized_data, mask):
+        """Apply mask to selectively use normalized or original data
+        
+        Args:
+            data: Original data
+            normalized_data: Normalized data
+            mask: Boolean mask (True = use normalized, False = use original)
+        
+        Returns:
+            Data with selective normalization applied
+        """
+        if mask is None:
+            return normalized_data
+        
+        # Expand mask to match data shape (broadcast over batch dimensions)
+        # data shape: (batch_size, ..., feature_dim)
+        # mask shape: (feature_dim,)
+        if isinstance(data, torch.Tensor):
+            mask_tensor = torch.from_numpy(mask).to(data.device)
+            result = torch.where(mask_tensor, normalized_data, data)
+        else:
+            result = np.where(mask, normalized_data, data)
+        
+        return result
     
     def normalize_metaobs(self, mobs: MetaObs, ctrl_space='ee'):
         assert ctrl_space==self.ctrl_space, f"the space of observation {ctrl_space} does not match the normalizer's {self.ctrl_space}"
@@ -214,8 +584,8 @@ class BaseNormalizer:
     
     
 class MinMaxNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, gripper_indices=[-1], low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee'):
-        super().__init__(dataset, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+        super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
         self.high = high
@@ -227,18 +597,38 @@ class MinMaxNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
-        return data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
+        normalized = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
-        return data.astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
+        denormalized = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class PercentileNormalizer(BaseNormalizer):
-    def __init__(self, dataset_dir, dataset_name=None, gripper_indices=[-1], low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee'):
-        super().__init__(dataset_dir, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset_dir, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+        super().__init__(dataset_dir, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
         self.high = high
@@ -250,18 +640,46 @@ class PercentileNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
-        return np.clip(data, self.low, self.high).astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
+        normalized = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
+        if isinstance(normalized, torch.Tensor):
+            normalized = torch.clip(normalized, self.low, self.high)
+        else:
+            normalized = np.clip(normalized, self.low, self.high)
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
-        data = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
-        return np.clip(data, stats['q01'], stats['q99']).astype(dtype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
+        denormalized = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
+        if isinstance(denormalized, torch.Tensor):
+            denormalized = torch.clip(denormalized, stats['q01'], stats['q99'])
+        else:
+            denormalized = np.clip(denormalized, stats['q01'], stats['q99'])
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, gripper_indices=[-1], ctrl_type='delta', ctrl_space='ee', min_std=0.01, *args, **kwargs):
-        super().__init__(dataset, dataset_name, gripper_indices, ctrl_type=ctrl_type, ctrl_space=ctrl_space)
+    def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=0.01, mask=None, *args, **kwargs):
+        super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         self.min_std = min_std # avoid large deviation
         
     def __str__(self):
@@ -270,16 +688,36 @@ class ZScoreNormalizer(BaseNormalizer):
     def normalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform normalization
         std = np.clip(stats['std'], self.min_std, np.inf)
-        data = (data-stats['mean'])/std
-        return data.astype(dtype)
+        normalized = (data-stats['mean'])/std
+        
+        # Apply mask to selectively normalize
+        result = self._apply_mask(data, normalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype) 
     
     def denormalize(self, data, datatype='action'):
         dtype = data.dtype
         stats = self.get_stat_by_key(datatype)
+        
+        # Initialize mask on first call
+        if self.mask is None and self.mask_spec is not None:
+            self.mask = self._build_mask(data.shape)
+        
+        # Perform denormalization
         std = np.clip(stats['std'], self.min_std, np.inf)
-        data = data*std + stats['mean']
-        return data.astype(dtype)
+        denormalized = data*std + stats['mean']
+        
+        # Apply mask to selectively denormalize
+        result = self._apply_mask(data, denormalized, self.mask)
+        
+        return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
 class Identity(BaseNormalizer):
     def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):

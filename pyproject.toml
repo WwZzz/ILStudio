@@ -33,6 +33,8 @@ dependencies = [
     "pynput",
     "numpy==1.26.4",
     "mujoco==2.3.7",
+    "dlimp @ git+https://github.com/kvablack/dlimp@5edaa4691567873d495633f2708982b42edf1972",
+    "torchdata<=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +42,6 @@ openvla = [
     "timm>=0.9.10",
     "draccus",
     "tensorflow_graphics",
-    "dlimp @ git+https://github.com/kvablack/dlimp@5edaa4691567873d495633f2708982b42edf1972",
 ]
 
 lerobot = [          

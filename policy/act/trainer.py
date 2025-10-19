@@ -1,7 +1,8 @@
 import transformers
 import torch 
+from policy.trainer import BaseTrainer
 
-class Trainer(transformers.trainer.Trainer):
+class Trainer(BaseTrainer):
     def create_optimizer(self):
         param_groups = [
             {"params": [p for n, p in self.model.named_parameters() if "backbone" not in n and p.requires_grad]},

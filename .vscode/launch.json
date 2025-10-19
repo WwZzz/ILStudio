@@ -4,9 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
-
-
         {
             "name": "Python Debugger: Current File with Arguments",
             "type": "debugpy",
@@ -14,11 +11,28 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "MUJOCO_GL": "glfw",
-                "CUDA_VISIBLE_DEVICES": "0"
+                "MUJOCO_GL": "egl",
+                "CUDA_VISIBLE_DEVICES": "0",
+                "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
+                "ILSTD_CACHE": "/mnt/model/ilstd/data",
+                "HF_ENDPOINT": "https://hf-mirror.com",
             },
+            // policy client
+            // "args": [
+            //     "--output_dir", "results/test_act_remote","--model_name_or_path","localhost:21000", "--use_spawn",
+            // ],
+            //policy server
+            // "args": [
+            //     "--model_name_or_path", "ckpt/act_dataloader/checkpoint-100", "--host", "0.0.0.0", "--port", "21000", "--chunk_size", "64"
+            // ],
+            // train
+            // "args": [
+            //     "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_dataloader",
+            //     "--training.save_steps", "100", 
+            // ],
+            // eval
             "args": [
-                "--output_dir", "results/test_octo","--model_name_or_path","ckpt/debug_octo", "--use_spawn"
+                "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
             ]
             // "args": [
             //     "--policy", "octo_aloha",
