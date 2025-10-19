@@ -1,13 +1,13 @@
 import os
 from tianshou.env import SubprocVectorEnv
 import json
-from data_utils.utils import set_seed, load_normalizers
+from data_utils.utils import set_seed
 from tqdm import tqdm
 import imageio
 from benchmark.utils import evaluate
-from benchmark.base import MetaPolicy
 import importlib
 import multiprocessing as mp
+from policy.utils import load_policy
 
 def parse_param():
     """
@@ -26,12 +26,12 @@ def parse_param():
                        help='Whether to use pretrained model')
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use for evaluation')
-    # Direct checkpoint loading
+    # Model loading - can be checkpoint path or server address
     parser.add_argument('-m', '--model_name_or_path', type=str, 
-                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
-                       help='Path to the model checkpoint (directory or specific checkpoint)')
-    parser.add_argument('--dataset_dir', type=str, default='',
-                       help='Dataset directory')
+                       default='localhost:5000',
+                       help='Path to model checkpoint OR server address (host:port) for remote policy server')
+    parser.add_argument('--dataset_id', type=str, default='',
+                       help='Dataset ID to use (only for local model loading, ignored for remote server)')
     # Simulator arguments
     parser.add_argument('-e', '--env', type=str, default='aloha',
                        help='Env config (name under configs/env or absolute path to yaml)')
@@ -57,20 +57,8 @@ if __name__=='__main__':
     set_seed(0)
     args = parse_param()
     if args.use_spawn: mp.set_start_method('spawn', force=True)
-    # For evaluation, parameters will be loaded from saved model config
-    # No need to load task config parameters
-    normalizers, ctrl_space, ctrl_type = load_normalizers(args)
-    args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
-    
-    # Load policy directly from checkpoint
-    print(f"Loading model from checkpoint: {args.model_name_or_path}")
-    from policy.direct_loader import load_model_from_checkpoint
-    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
-    model = model_components['model']
-    config = model_components.get('config', None)
-    if config:
-        print(f"Loaded config from checkpoint: {type(config).__name__}")
-    policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'], state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type)
+    policy = load_policy(args)
+
     # load env via YAML config
     from configs.loader import ConfigLoader
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, '_unknown', []))
@@ -102,7 +90,11 @@ if __name__=='__main__':
         env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
         env = SubprocVectorEnv(env_fns)
         # evaluate
-        model.eval()
+        if hasattr(policy, 'policy') and hasattr(policy.policy, 'eval'):
+            # Local model mode
+            policy.policy.eval()
+        # Remote mode doesn't need model.eval()
+        
         eval_result = evaluate(args, policy, env, video_writer=video_writer)
         print(eval_result)
         all_eval_results.append(eval_result)

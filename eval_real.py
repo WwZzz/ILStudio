@@ -1,22 +1,14 @@
 # eval_real.py (simplified argparse with complete core functionality)
 import yaml
-import os
 import traceback
 import time
-import transformers
-import importlib
 import threading
 import queue
 import torch
-import numpy as np
-from benchmark.base import MetaPolicy
-from data_utils.utils import set_seed,  _convert_to_type, load_normalizers
+from data_utils.utils import set_seed,  _convert_to_type
 from deploy.robot.base import AbstractRobotInterface, RateLimiter, make_robot
-from PIL import Image, ImageDraw, ImageFont
-from configs.task.loader import load_task_config
-from typing import Dict, Optional, Sequence, List, Any
 from deploy.action_manager import load_action_manager
-
+from policy.utils import load_policy
 
 def parse_param():
     """
@@ -45,15 +37,14 @@ def parse_param():
     
     # Direct checkpoint loading
     parser.add_argument('--model_name_or_path', type=str, 
-                       default='/home/noematrix/Desktop/IL-Studio/ckpt/act_sim_transfer_cube_scripted_zscore_example',
-                       help='Path to the model checkpoint (directory or specific checkpoint)')
+                       default='localhost:5000',
+                       help='Path to model checkpoint OR server address (host:port) for remote policy server')
     parser.add_argument('--norm_path', type=str, default='',
                        help='Path to normalization data')
     parser.add_argument('--save_dir', type=str, default='results/real_debug',
                        help='Directory to save results')
-    parser.add_argument('--dataset_dir', type=str, 
-                       default='/inspire/hdd/project/robot-action/wangzheng-240308120196/act-plus-plus-main/data/sim_insertion_scripted',
-                       help='Dataset directory')
+    parser.add_argument('--dataset_id', type=str, default='',
+                       help='Dataset ID to use (if multiple datasets, defaults to first)')
     parser.add_argument('--task', type=str, default='sim_transfer_cube_scripted',
                        help='Task config (name under configs/task or absolute path to yaml)')
     
@@ -75,9 +66,6 @@ def parse_param():
     
     # Parse arguments
     args, unknown = parser.parse_known_args()
-    from configs.loader import ConfigLoader
-    cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
-    
     return args
 
 
@@ -138,27 +126,16 @@ if __name__ == '__main__':
     
     # For evaluation, parameters will be loaded from saved model config
     # No need to load task config parameters
+    policy = load_policy(args)
     
-    normalizers, ctrl_space, ctrl_type = load_normalizers(args)
-    args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
-    
-    # --- 1. Load Policy ---
-    # Load policy directly from checkpoint
-    print(f"Loading model from checkpoint: {args.model_name_or_path}")
-    from policy.direct_loader import load_model_from_checkpoint
-    model_components = load_model_from_checkpoint(args.model_name_or_path, args)
-    model = model_components['model'].to('cuda')
-    config = model_components.get('config', None)
-    if config:
-        print(f"Loaded config from checkpoint: {type(config).__name__}")
-    if args.image_size and isinstance(args.image_size, str): args.image_size = eval(args.image_size0)
-    else: args.image_size = None
-    policy = MetaPolicy(policy=model, chunk_size=args.chunk_size, action_normalizer=normalizers['action'],
-                        state_normalizer=normalizers['state'], ctrl_space=ctrl_space, ctrl_type=ctrl_type, img_size=args.image_size)
+    # check policy
+    if not hasattr(args, 'ctrl_space'):
+        args.ctrl_space = policy.ctrl_space
+        args.ctrl_type = policy.ctrl_type
 
     # --- 2. Create Real-World Environment ---
     # Load the robot-specific configuration from the provided YAML file
-    from configs.utils import resolve_yaml, parse_overrides, apply_overrides_to_mapping
+    from configs.utils import apply_overrides_to_mapping
     from data_utils.utils import _convert_to_type
     # parse unknown overrides here as well
     # use overrides parsed by ConfigLoader

@@ -17,6 +17,14 @@
                 "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
+            // policy client
+            // "args": [
+            //     "--output_dir", "results/test_act_remote","--model_name_or_path","localhost:21000", "--use_spawn",
+            // ],
+            //policy server
+            // "args": [
+            //     "--model_name_or_path", "ckpt/act_dataloader/checkpoint-100", "--host", "0.0.0.0", "--port", "21000", "--chunk_size", "64"
+            // ],
             // train
             // "args": [
             //     "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_dataloader",
@@ -24,7 +32,7 @@
             // ],
             // eval
             "args": [
-                "--output_dir", "results/test_act_norm","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn"
+                "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
             ]
             // "args": [
             //     "--policy", "octo_aloha",

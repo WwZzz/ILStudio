@@ -318,7 +318,7 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
         src_dir: Source directory where normalize.json and stats files are located.
                  If empty or stats not found, will fallback to cache directory.
         dataset_id: Specific dataset_id to load. If None, loads the first dataset from metadata.
-                    Note: This is read from metadata, not from args.dataset_dir.
+                    Note: This is read from metadata, not from args.dataset_id.
     
     Returns:
         Dictionary with 'state' and 'action' normalizers
@@ -673,6 +673,9 @@ def load_normalizers(args):
     
     Loads normalizers using dataset_id as key with per-dataset ctrl_space/ctrl_type.
     
+    Args:
+        args: Arguments object with model_name_or_path and optional dataset_id
+    
     Returns:
         tuple: (normalizers_dict, ctrl_space, ctrl_type) or (normalizers_dict, datasets_info)
                For new format, returns list of dataset info dicts
@@ -687,22 +690,41 @@ def load_normalizers(args):
         with open(policy_normalize_file, 'r') as f:
             norm_meta = json.load(f)
         
-        # Load normalizer from metadata (uses first dataset by default)
-        # dataset_id is determined from metadata, not from args
+        # Get dataset_id from args if specified, otherwise use first dataset
+        dataset_id = getattr(args, 'dataset_id', None)
+        if dataset_id == '':  # Empty string means not specified
+            dataset_id = None
+        
+        # Load normalizer from metadata
         normalizers = load_normalizer_from_meta(
             norm_meta, 
             src_dir=os.path.dirname(policy_normalize_file),
-            dataset_id=None  # Let it auto-select from metadata
+            dataset_id=dataset_id  # Will use first dataset if None
         )
         
-        # Get ctrl info from the loaded dataset (first dataset)
+        # Get ctrl info from the specified dataset or first dataset
         datasets_info = norm_meta.get('datasets', [])
         if datasets_info:
-            first_dataset = datasets_info[0]
-            ctrl_space = first_dataset.get('ctrl_space', 'ee')
-            ctrl_type = first_dataset.get('ctrl_type', 'delta')
+            # Find the dataset that was actually loaded
+            target_dataset = None
+            if dataset_id:
+                # Look for the specified dataset
+                for dataset in datasets_info:
+                    if dataset.get('dataset_id') == dataset_id:
+                        target_dataset = dataset
+                        break
+            
+            # If not found or no dataset_id specified, use first dataset
+            if target_dataset is None:
+                target_dataset = datasets_info[0]
+            
+            ctrl_space = target_dataset.get('ctrl_space', 'ee')
+            ctrl_type = target_dataset.get('ctrl_type', 'delta')
+            
+            print(f"   ✓ Using ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}' from dataset '{target_dataset.get('dataset_id', 'unknown')}'")
         else:
             ctrl_space, ctrl_type = 'ee', 'delta'
+            print(f"   ⚠ No dataset info found, using default ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}'")
         
         return normalizers, ctrl_space, ctrl_type
             
