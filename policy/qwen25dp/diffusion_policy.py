@@ -330,7 +330,7 @@ class ConditionalUnet1D(nn.Module):
         global_cond = global_cond.squeeze(1)
 
         global_cond = self.norm_after_pool(global_cond)
-        global_cond = torch.cat([global_cond, states], dim=-1) if states is not None else global_cond
+        global_cond = torch.cat([global_cond, states.to(dtype=global_cond.dtype)], dim=-1) if states is not None else global_cond
         global_cond = self.combine(global_cond)
         # 1. time This is the diffusion step number, not real time
         timesteps = timestep

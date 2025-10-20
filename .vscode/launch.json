@@ -17,34 +17,36 @@
                 "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
-            // policy client
-            // "args": [
+            // "args": [ // policy client
             //     "--output_dir", "results/test_act_remote","--model_name_or_path","localhost:21000", "--use_spawn",
             // ],
-            //policy server
-            // "args": [
+            // "args": [ //policy server
             //     "--model_name_or_path", "ckpt/act_dataloader/checkpoint-100", "--host", "0.0.0.0", "--port", "21000", "--chunk_size", "64"
             // ],
-            // train
-            // "args": [
+            // "args": [ // train
             //     "-c", "default", "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_dataloader",
             //     "--training.save_steps", "100", 
             // ],
-            // eval
-            "args": [
-                "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
-            ]
-            // "args": [
+            // "args": [ // eval
+            //     "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
+            // ],
+            "args": [ // Qwen25VL+DP
+                "-p", "qwen25dp", "-t", "sim_transfer_cube_scripted", "-c", "debug", "-o", "ckpt/tmp"
+            ],
+            // "args": [ //lerobot libero test
+            //     "-p", "act_droid", "-t", "lerobot_libero", "-c", "debug", "-o", "ckpt/tmp_libero"
+            // ],
+            // "args": [ //test octo
             //     "--policy", "octo_aloha",
             //     "--task", "sim_transfer_cube_scripted",
             //     "--output_dir", "ckpt/debug_octo",
             //     "--training_config", "debug"
             // ],
-            // "args": [
+            // "args": [ //test openvla
             //     "--output_dir", "results/test_openvla",
             //     "--model_name_or_path", "ckpt/openvla_debug/checkpoint-200", "--use_spawn"
             // ],
-            // "args": [
+            // "args": [ //test full finetune 
             //     "--policy", "openvla_full",
             //     "--task", "sim_transfer_cube_scripted",
             //     "--output_dir", "ckpt/openvla_full",

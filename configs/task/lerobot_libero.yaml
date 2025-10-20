@@ -1,0 +1,18 @@
+# 新的灵活数据集配置格式
+datasets:
+  - name: "lerobot_libero_from_openpi"
+    class: "data_utils.datasets.libero_lerobot.LerobotLIBERO"
+    args:
+      dataset_path_list: [physical-intelligence/libero]
+      chunk_size: 64
+      ctrl_space: 'ee'
+      ctrl_type: 'delta'
+      camera_names: "image"
+
+# Task-specific parameters
+action_dim: 8
+state_dim: 8
+image_size: [256, 256]
+action_normalize: "percentile"
+state_normalize: "percentile"
+

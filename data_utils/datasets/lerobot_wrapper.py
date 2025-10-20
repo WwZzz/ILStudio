@@ -53,7 +53,7 @@ class WrappedLerobotDataset(tud.Dataset):
         self.per_dataset_frame_start = self.cumulative_num_frames - np.array(self.per_dataset_num_frames)
         self.total_frames = sum(self.per_dataset_num_frames)
         self.total_episodes = sum(num_episodes)
-        self.camera_names = camera_names
+        self.camera_names = camera_names if isinstance(camera_names, list) else [camera_names]
         self.episode_ids = np.arange(sum(self.per_dataset_num_episodes))
         self.image_size = image_size
         self.ctrl_space = ctrl_space  # ['ee', 'joint', 'other']

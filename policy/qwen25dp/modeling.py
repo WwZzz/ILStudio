@@ -11,7 +11,7 @@ from PIL import Image
 import requests
 from typing import Any, Dict, List, Optional, Tuple, Union
 from qwen_vl_utils import process_vision_info
-from .policy import ConditionalUnet1D
+from .diffusion_policy import ConditionalUnet1D
 from .data_utils import QwenVLAProcess, QwenVLADataCollatorForSupervisedDataset
 # =============================================================================
 # Step 1: Create custom Config class
@@ -92,6 +92,9 @@ class QwenVLForPolicy(PreTrainedModel):
         # 2. Define Policy Head
         policy_config_dict = {k[7:]:v for k,v in self.config.to_dict().items() if 'policy_' in k}
         self.policy_head = ConditionalUnet1D(**policy_config_dict)
+    
+    def get_input_embeddings(self):
+        return self.vlm.get_input_embeddings()
     
     def set_requires_grad(self, training_args):
         if not training_args.lora_enable:

@@ -27,6 +27,7 @@ def find_all_linear_names(model, lora_module=None):
     return list(lora_module_names)
 
 def load_model(args):
+    args.device = "cuda"
     # Load config first
     if args.is_pretrained: # Load during testing
         config = QwenVLPolicyConfig.from_pretrained(args.model_name_or_path)
@@ -60,7 +61,6 @@ def load_model(args):
                 target_modules=find_all_linear_names(model, args.lora_module), # Default only vit
                 lora_dropout=args.lora_dropout,
                 bias=args.lora_bias,
-                task_type=args.lora_task_type,
             )
             if args.bits == 16:
                 if args.bf16: model.to(torch.bfloat16)
@@ -105,13 +105,14 @@ def load_model(args):
 #     processor = Qwen2VLAProcess(tokenizer=model_components['tokenizer'], multimodal_processor=model_components['multimodal_processor'], camera_names=dataset.camera_names)
 #     return WrappedDataset(dataset, processor)
 
-def get_data_processor(dataset, args, model_components):
-    return QwenVLAProcess(tokenizer=model_components['tokenizer'], multimodal_processor=model_components['multimodal_processor'], camera_names=dataset.camera_names)
+def get_data_processor(args, model_components):
+    return QwenVLAProcess(tokenizer=model_components['tokenizer'], multimodal_processor=model_components['multimodal_processor'])
 
 def get_data_collator(args, model_components):
     return QwenVLADataCollatorForSupervisedDataset(
         multimodal_processor=model_components.get('multimodal_processor'),
         computed_type=(torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         tokenizer=model_components.get('tokenizer'),
-        video=(args.history_images_length>=2)
+        video=False,
+        dtype=(torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
     )

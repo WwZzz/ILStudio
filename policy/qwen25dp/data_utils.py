@@ -158,6 +158,7 @@ class QwenVLADataCollatorForSupervisedDataset(object):
     computed_type: torch.dtype=None
     tokenizer: transformers.AutoTokenizer=None
     video: bool=False
+    dtype: torch.dtype=torch.float32
 
     # @profile
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
@@ -220,8 +221,8 @@ class QwenVLADataCollatorForSupervisedDataset(object):
             labels=labels,
             image_grid_thw=image_grid_thw,
             pixel_values_videos=pixel_values_videos,
-            actions=actions,
-            states=states,
+            actions=actions.to(dtype=self.dtype),
+            states=states.to(dtype=self.dtype),
             video_grid_thw=video_grid_thw,
             pixel_values=pixel_values,
             is_pad=is_pad_all
@@ -237,5 +238,4 @@ class QwenVLADataCollatorForSupervisedDataset(object):
         del image_grid_thw
         del is_pad_all
         gc.collect()
-        torch.cuda.empty_cache()
         return batch
