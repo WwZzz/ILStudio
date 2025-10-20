@@ -42,16 +42,14 @@ def load_model(args):
             if os.path.exists(extra_path):
                 extra_state = load_file(extra_path, device="cpu")
                 missing, unexpected = model.load_state_dict(extra_state, strict=False)
-            model = model.merge_and_unload().to(torch.bfloat16)
+            model = model.merge_and_unload()
         else:
-            model = QwenVLForPolicy.from_pretrained(args.model_name_or_path, config=config).to(torch.bfloat16)
+            model = QwenVLForPolicy.from_pretrained(args.model_name_or_path, config=config)
     else: # Load during training
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path) # load qwen2_vl tokenizer
-        multimodal_processor = AutoProcessor.from_pretrained(args.model_name_or_path) # load qwen2_vl input processor
-        config = QwenVLPolicyConfig(vlm_model_name_or_path=args.model_name_or_path, policy_action_dim = args.action_dim, policy_state_dim = args.state_dim, policy_prediction_horizon = args.chunk_size) 
-        # config.llm_loss_weight = args.llm_loss_weight
-        model = QwenVLForPolicy(config=config).to(torch.bfloat16)
-        # model.requires_grad_(not args.freeze_backbone)
+        tokenizer = AutoTokenizer.from_pretrained(args.vlm_model_name_or_path) # load qwen2_vl tokenizer
+        multimodal_processor = AutoProcessor.from_pretrained(args.vlm_model_name_or_path) # load qwen2_vl input processor
+        config = QwenVLPolicyConfig(vlm_model_name_or_path=args.vlm_model_name_or_path, policy_action_dim = args.action_dim, policy_state_dim = args.state_dim, policy_prediction_horizon = args.chunk_size) 
+        model = QwenVLForPolicy(config=config)
         # Load lora
         if args.lora_enable:
             # Load LoRA parameters
@@ -99,11 +97,6 @@ def load_model(args):
         'tokenizer': tokenizer,
         'multimodal_processor': multimodal_processor,
     }
-
-
-# def wrap_data(dataset, args, model_components):
-#     processor = Qwen2VLAProcess(tokenizer=model_components['tokenizer'], multimodal_processor=model_components['multimodal_processor'], camera_names=dataset.camera_names)
-#     return WrappedDataset(dataset, processor)
 
 def get_data_processor(args, model_components):
     return QwenVLAProcess(tokenizer=model_components['tokenizer'], multimodal_processor=model_components['multimodal_processor'])
