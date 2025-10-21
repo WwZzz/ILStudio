@@ -28,6 +28,7 @@ def find_all_linear_names(model, lora_module=None):
 
 def load_model(args):
     # Load config first
+    args.device = "cuda"
     if args.is_pretrained: # Load during testing
         config = QwenVLPolicyConfig.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(config.vlm_model_name_or_path)
@@ -112,5 +113,6 @@ def get_data_collator(args, model_components):
         multimodal_processor=model_components.get('multimodal_processor'),
         computed_type=(torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         tokenizer=model_components.get('tokenizer'),
-        video=False
+        video=False,
+        dtype=(torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         )

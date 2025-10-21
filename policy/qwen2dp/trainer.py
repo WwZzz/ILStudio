@@ -82,11 +82,12 @@ class Trainer(BaseTrainer):
     def _load_from_checkpoint(self, resume_from_checkpoint):
         """override: Load PEFT first, then load non-PEFT weights"""
         super()._load_from_checkpoint(resume_from_checkpoint)
-
         extra_path = os.path.join(resume_from_checkpoint, self.EXTRA_FILE)
+        trainable_keys = [n for n,p in self.accelerator.unwrap_model(self.model).named_parameters() if "lora_" not in n and p.requires_grad]
         if os.path.exists(extra_path):
             extra_state = load_file(extra_path, device="cpu")
             missing, unexpected = self.accelerator.unwrap_model(self.model).load_state_dict(extra_state, strict=False)
+            missing = [k for k in missing if k in trainable_keys]
             if missing:
                 self.control.should_training_stop = True
                 raise RuntimeError(f"Missing non-PEFT keys: {missing}")
