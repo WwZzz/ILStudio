@@ -60,3 +60,7 @@ class MyDataset(EpisodicDataset):
 - **Extensibility**: Easy to add new datasets without modifying existing code
 - **Maintainability**: Clear separation of concerns
 - **Backward Compatibility**: Existing code continues to work through `data_utils/dataset.py`
+
+# Gallary
+
+## RLDSWrapper

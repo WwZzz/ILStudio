@@ -77,6 +77,10 @@ class RLDSDataset(IterableDataset):
         shuffle_buffer_size: int = 256_000,
         train: bool = True,
         image_aug: bool = False,
+        chunk_size: int = 16,
+        load_proprio: bool=True,
+        load_depth: bool=False,
+        camera_names: Tuple[str] = ('primary',),
     ) -> None:
         """Lightweight wrapper around RLDS TFDS Pipeline for use with PyTorch/OpenVLA Data Loaders."""
         self.data_root_dir, self.data_mix, self.batch_transform = data_root_dir, data_mix, batch_transform
@@ -92,16 +96,16 @@ class RLDSDataset(IterableDataset):
         per_dataset_kwargs, weights = get_oxe_dataset_kwargs_and_weights(
             self.data_root_dir,
             mixture_spec,
-            load_camera_views=("primary",),
-            load_depth=False,
-            load_proprio=False,
+            load_camera_views=camera_names,
+            load_depth=load_depth,
+            load_proprio=load_proprio,
             load_language=True,
             action_proprio_normalization_type=NormalizationType.BOUNDS_Q99,
         )
         rlds_config = dict(
             traj_transform_kwargs=dict(
                 window_size=1,                                      # If we wanted to feed / predict more than one step
-                future_action_window_size=0,                        # For action chunking
+                future_action_window_size=chunk_size-1,                        # For action chunking
                 skip_unlabeled=True,                                # Skip trajectories without language labels
                 goal_relabeling_strategy="uniform",                 # Goals are currently unused
             ),

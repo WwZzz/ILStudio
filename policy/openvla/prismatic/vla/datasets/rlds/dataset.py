@@ -184,6 +184,7 @@ def make_dataset_from_rlds(
             "task": task,
             "action": tf.cast(traj["action"], tf.float32),
             "dataset_name": tf.repeat(name, traj_len),
+            "traj_index": traj['_traj_index']
         }
 
         if absolute_action_mask is not None:
@@ -239,14 +240,17 @@ def make_dataset_from_rlds(
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads)
 
     dataset = dataset.traj_map(restructure, num_parallel_calls)
-    dataset = dataset.traj_map(
-        partial(
-            normalize_action_and_proprio,
-            metadata=dataset_statistics,
-            normalization_type=action_proprio_normalization_type,
-        ),
-        num_parallel_calls,
-    )
+    
+    # Comment to use the ilstudio's normalization method
+    
+    # dataset = dataset.traj_map(
+    #     partial(
+    #         normalize_action_and_proprio,
+    #         metadata=dataset_statistics,
+    #         normalization_type=action_proprio_normalization_type,
+    #     ),
+    #     num_parallel_calls,
+    # )
 
     return dataset, dataset_statistics
 

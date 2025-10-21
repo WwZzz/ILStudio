@@ -67,7 +67,9 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
     # actions past the goal timestep become neutral
     action_past_goal = action_chunk_indices > goal_timestep[:, None]
     traj["action"] = tf.where(action_past_goal[:, :, None], neutral_actions, traj["action"])
-
+    traj["action_pad_mask"] = tf.logical_and(
+        action_chunk_indices >= 0, action_chunk_indices <= goal_timestep[:, None]
+    )
     return traj
 
 

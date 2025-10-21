@@ -210,6 +210,12 @@ class BaseNormalizer:
         """
         all_data = defaultdict(list)
         num_trajectories = None
+        # Method 0: Check if dataset has get_dataset_statistics()
+        if hasattr(self.dataset, 'get_dataset_statistics') and callable(getattr(self.dataset, 'get_dataset_statistics')):
+            print(f"Using get_dataset_statistics() method")
+            all_stats = self.dataset.get_dataset_statistics()
+            self.save_stats(all_stats)
+            return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         
         # Method 1: Check if dataset has num_episodes and extract_from_episode
         if hasattr(self.dataset, 'num_episodes') and hasattr(self.dataset, 'extract_from_episode'):

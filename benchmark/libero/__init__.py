@@ -66,23 +66,16 @@ class LiberoEnv(MetaEnv):
         return env
         
     def meta2act(self, maction: MetaAction):
-        # MetaAct to action of libero
-        # 先看MetaAct是什么类型的，再转成libero需要的类型: LIBERO 用的相对动作控制
         assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
-        # TODO: 如何MetaAct不是相对的，先转成相对的
-        # 先假定action都是相对的
         assert maction['ctrl_type']==self.ctrl_type, "Action must be delta action for LIBERO"
         actions = maction['action'] # (action_dim, )
-        actions[:6] = actions[:6]/np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5]) # LIBERO内部会乘上该缩放值实现控制，所以提前抵消该缩放值保证能够正确执行
-        actions[6] = 1.-2.*actions[6] # LIBERO使用01二元控制信号，实现
+        actions[:6] = actions[:6]/np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5])
+        actions[6] = 1.-2.*actions[6]
         return actions
         
     def obs2meta(self, obs):
-        # gripper state
         gpos = obs['robot0_gripper_qpos']
-        # gripper_state = np.array([(gpos[0]-gpos[1])/0.08]) # (1,) with normalization
         gripper_state = np.array([gpos[0]-gpos[1]]) # (1,) without normalization
-        # ee state
         xyz = obs['robot0_eef_pos'] # (3,)
         euler = quat2axisangle(obs['robot0_eef_quat']) # (3,)
         state_ee = np.concatenate([xyz, euler, gripper_state], axis=0).astype(np.float32)

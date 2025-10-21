@@ -45,9 +45,6 @@ openvla = [
     "tensorflow_graphics",
 ]
 
-lerobot = [          
-    "lerobot==0.3.3",
-]
 
 [tool.uv.sources]
 dlimp = { git = "https://github.com/kvablack/dlimp", rev = "ad72ce3a9b414db2185bc0b38461d4101a65477a" }
