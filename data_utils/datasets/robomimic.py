@@ -10,6 +10,25 @@ from collections import OrderedDict
 from data_utils.rotate import quat2axisangle
 from .base import EpisodicDataset
 
+MODALITIES = {
+    "obs": {
+        "low_dim": [
+            "object",
+            "robot0_eef_pos",
+            "robot0_eef_quat",
+            "robot0_gripper_qpos",
+        ],
+        "rgb": [],
+        "depth": [],
+        "scan": []
+    },
+    "goal": {
+        "low_dim": [],
+        "rgb": [],
+        "depth": [],
+        "scan": []
+    }
+}
 
 class RobomimicDataset(EpisodicDataset):
     """
@@ -22,6 +41,9 @@ class RobomimicDataset(EpisodicDataset):
     def initialize(self):
         """Initialize the RoboMimic dataset with sequence datasets."""
         from robomimic.utils.dataset import SequenceDataset
+        import robomimic.utils.obs_utils as ObsUtils
+        
+        ObsUtils.initialize_obs_utils_with_obs_specs(MODALITIES)
         self._datasets = [SequenceDataset(**self.create_config(di)) for di in self.dataset_path_list if 'image' in di]
         self._languages = [self.get_raw_lang(di) for di in self.dataset_path_list if 'image' in di]
         self._dataset_dir = os.path.dirname(self.dataset_path_list[0])

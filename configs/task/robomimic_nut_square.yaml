@@ -9,3 +9,7 @@ datasets:
       ctrl_type: 'delta'
 
 episode_len: 400
+action_dim: 8
+state_dim: 8
+action_normalize: "zscore"
+state_normalize: "zscore"
