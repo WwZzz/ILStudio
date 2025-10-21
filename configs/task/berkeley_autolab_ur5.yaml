@@ -1,9 +1,9 @@
 datasets:
-  - name: "bc_z"
+  - name: "berkeley_autolab_ur5"
     class: "data_utils.datasets.rlds_wrapper.WrappedRLDSDataset"
     args:
       dataset_dir: '/inspire/hdd/global_public/public_datas/Robotics_Related/Open-X-Embodiment/openx/'
-      data_mix: "bc_z"
+      data_mix: "berkeley_autolab_ur5"
       chunk_size: 16
       image_size: [256, 256]
 

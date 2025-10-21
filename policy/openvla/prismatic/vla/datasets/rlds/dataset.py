@@ -573,15 +573,15 @@ def make_interleaved_dataset(
 
     # Shuffle the Dataset
     #   =>> IMPORTANT :: Shuffle AFTER .cache(), or else memory will still leak!
-    dataset = dataset.shuffle(shuffle_buffer_size)
+    # dataset = dataset.shuffle(shuffle_buffer_size)
 
     # Apply Frame Transforms
     overwatch.info("Applying frame transforms on dataset...")
     dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)
 
-    # [Contract] When training VLA Policies, we let the Collator handle Batching!
-    if batch_size is not None:
-        dataset = dataset.batch(batch_size)
+    # # [Contract] When training VLA Policies, we let the Collator handle Batching!
+    # if batch_size is not None:
+    #     dataset = dataset.batch(batch_size)
 
     # Note =>> Seems to reduce memory usage without affecting speed?
     dataset = dataset.with_ram_budget(1)

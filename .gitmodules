@@ -13,3 +13,6 @@
 [submodule "third_party/lerobot"]
 	path = third_party/lerobot
 	url = git@github.com:WwZzz/IL-Studio.git
+[submodule "third_party/libero"]
+	path = third_party/libero
+	url = https://github.com/Lifelong-Robot-Learning/LIBERO.git
