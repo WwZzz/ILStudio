@@ -124,10 +124,10 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         loader = DataLoader(
             wrapped_data,
             batch_size=args.per_device_train_batch_size,
-            num_workers=args.dataloader_num_workers,
+            # num_workers=args.dataloader_num_workers,
             collate_fn=collator,
             drop_last=is_training,
-            pin_memory=args.dataloader_pin_memory,
+            # pin_memory=args.dataloader_pin_memory,
         )
         
         if is_training:

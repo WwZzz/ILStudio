@@ -30,12 +30,10 @@ class DroidDataset:
         dataset_dir: str,
         name: str = "droid_100",
         version: str = "1.0.0",
-        batch_size: int = -1,
         shuffle: bool = True,
         chunk_size: int = 16,
         ctrl_space: str = 'joint',
         ctrl_type: str = 'abs', 
-        shuffle_buffer_size: int = 20_000,
         num_parallel_reads: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         num_parallel_calls: int = -1,  # -1 == tf.data.AUTOTUNE -- hack to not import tf at top level
         filter_dict_path=None,  # Path to json file with indices to sample during training
@@ -47,12 +45,10 @@ class DroidDataset:
         self.dataset_dir = dataset_dir
         self.name = name
         self.version = version
-        self.batch_size = batch_size
         self.shuffle = shuffle
         self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
-        self.shuffle_buffer_size = shuffle_buffer_size
         self.num_parallel_reads = num_parallel_reads
         self.num_parallel_calls = num_parallel_calls
         self.filter_dict_path = filter_dict_path
@@ -63,9 +59,7 @@ class DroidDataset:
         # Load dataset
         dataset = self.load_data()
         # Shuffle, batch
-        dataset = dataset.shuffle(shuffle_buffer_size)
-        if self.batch_size>0:
-            dataset = dataset.batch(batch_size)
+        # dataset = dataset.shuffle(shuffle_buffer_size)
         # Note =>> Seems to reduce memory usage without affecting speed?
         dataset = dataset.with_ram_budget(1)
         self.dataset = dataset
@@ -99,11 +93,9 @@ class DroidDataset:
 
     def load_data(self, *args, **kwargs):
         data_dir=self.dataset_dir
-        batch_size=self.batch_size
         shuffle=self.shuffle
         action_chunk_size=self.chunk_size
         action_space=self.ctrl_space
-        shuffle_buffer_size=self.shuffle_buffer_size
         num_parallel_reads=self.num_parallel_reads
         num_parallel_calls=self.num_parallel_calls
         filter_dict_path=self.filter_dict_path
@@ -298,19 +290,15 @@ class DroidDataset:
         
     def __iter__(self):
         for data in self.dataset.as_numpy_iterator():
-            # process data here
-            if self.batch_size>0:
-                yield data
-            else:
-                data['raw_lang'] = data['raw_lang'].decode('utf-8')
-                data['episode_id'] = data['episode_id'].decode('utf-8')
-                data['image'] = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['image']))
-                data['state'] = torch.from_numpy(data['state']).float()
-                data['action'] = torch.from_numpy(data['action']).float()
-                data['is_pad'] = torch.from_numpy(data['is_pad']).bool()
-                if self.data_processor is not None:
-                    data = self.data_processor(data)
-                yield data
+            data['raw_lang'] = data['raw_lang'].decode('utf-8')
+            data['episode_id'] = data['episode_id'].decode('utf-8')
+            data['image'] = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['image']))
+            data['state'] = torch.from_numpy(data['state']).float()
+            data['action'] = torch.from_numpy(data['action']).float()
+            data['is_pad'] = torch.from_numpy(data['is_pad']).bool()
+            if self.data_processor is not None:
+                data = self.data_processor(data)
+            yield data
 
     def download(self, url: str, cache_dir: str, force_download: bool = False, **kwargs) -> pathlib.Path:
         # Don't use fsspec to parse the url to avoid unnecessary connection to the remote filesystem.
@@ -362,6 +350,9 @@ class DroidDataset:
         return local_path
     
 if __name__=='__main__':
-    ds = DroidDataset(dataset_dir="/inspire/hdd/project/robot-action/public/data/droid", shuffle_buffer_size=10000,filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json")
+    ds = DroidDataset(dataset_dir="/inspire/hdd/project/robot-action/public/data/droid", name='droid_100')
     data = next(iter(ds))
-    print(data)
+
+    ds_full = DroidDataset(dataset_dir="/inspire/hdd/project/robot-action/public/data/droid", name='droid', version="1.0.1",filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json")
+    data2 = next(iter(ds))
+    print('ok')

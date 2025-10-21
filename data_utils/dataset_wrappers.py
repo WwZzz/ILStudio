@@ -73,11 +73,11 @@ class NormalizedMapDataset(Dataset):
         
         # Apply action normalization if available
         if self.action_normalizer is not None and 'action' in sample:
-            sample['action'] = self.action_normalizer.normalize(sample['action'])
+            sample['action'] = self.action_normalizer.normalize(sample['action'], datatype='action')
         
         # Apply state normalization if available
         if self.state_normalizer is not None and 'state' in sample:
-            sample['state'] = self.state_normalizer.normalize(sample['state'])
+            sample['state'] = self.state_normalizer.normalize(sample['state'], datatype='state')
         
         return sample
     
@@ -155,7 +155,7 @@ class NormalizedIterableDataset(IterableDataset):
             
             # Apply state normalization if available
             if self.state_normalizer is not None and 'state' in sample:
-                sample['state'] = self.state_normalizer.normalize(sample['state'])
+                sample['state'] = self.state_normalizer.normalize(sample['state'], datatype='state')
             
             yield sample
     

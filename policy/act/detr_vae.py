@@ -47,7 +47,7 @@ class DETRVAE(nn.Module):
         self.transformer = transformer
         self.encoder = encoder
         hidden_dim = transformer.d_model
-        self.action_head = nn.Linear(hidden_dim, state_dim)
+        self.action_head = nn.Linear(hidden_dim, action_dim)
         self.is_pad_head = nn.Linear(hidden_dim, 1)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
         if backbones is not None:
