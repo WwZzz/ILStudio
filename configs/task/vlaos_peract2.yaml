@@ -1,0 +1,13 @@
+# 新的灵活数据集配置格式
+datasets:
+  - name: "vlaos_peract2"
+    class: "data_utils.datasets.vlaos.VLAOSDataset"
+    args:
+      dataset_dir: "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/perac"
+      data_mix: "libero_object"
+
+episode_len: 1000
+action_dim: 8
+state_dim: 8
+ctrl_space: "ee"
+ctrl_type: "delta"

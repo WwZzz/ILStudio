@@ -206,5 +206,57 @@ OXE_NAMED_MIXTURES: Dict[str, List[Tuple[str, float]]] = {
     "libero_10_no_noops": [
         ("libero_10_no_noops", 1.0),
     ],
+        # === LIBERO Datasets (Modified Versions) ===
+    "libero_spatial": [
+        ("libero_spatial", 1.0),
+    ],
+    "libero_object": [
+        ("libero_object", 1.0),
+    ],
+    "libero_goal": [
+        ("libero_goal", 1.0),
+    ],
+    "libero_10": [
+        ("libero_10", 1.0),
+    ],
+    "libero_90": [
+        ("libero_90", 1.0),
+    ],
+    
+    #  === Deformable Datasets ===
+    "deformable": [
+        ("fold", 1.0),
+        ("jean", 1.0),
+        ("rope", 1.0),
+    ],
+    
+    # === DexArt Datasets ===
+    "dexart": [
+        ("bucket_dex_art_dataset", 1.0),
+        ("faucet_dex_art_dataset", 1.0),
+        ("laptop_dex_art_dataset", 1.0),
+        ("toilet_dex_art_dataset", 1.0),
+    ],
+    
+    # === Colosseum Datasets ===
+    "colosseum": [
+        ("colosseum", 1.0),
+    ],
+    
+    # === FurnitureBench Datasets ===
+    "furniturebench": [
+        ("cabinet", 1.0),
+        ("lamp", 1.0),
+        ("one_leg", 1.0),
+        ("round_table", 1.0),
+    ],
+
+    # === PerAct2 Datasets ===
+    "peract2": [
+        ("bimanual_handover_item", 1.0),
+        ("bimanual_lift_ball", 1.0),
+        ("bimanual_straighten_rope", 1.0),
+        ("bimanual_sweep_to_dustpan", 1.0),
+    ],
 }
 # fmt: on

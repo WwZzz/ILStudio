@@ -8,6 +8,9 @@ import numpy as np
 import os
 import h5py
 from tqdm import tqdm
+from policy.openvla.prismatic.vla.datasets.datasets import RLDSDataset
+from torch.utils.data import IterableDataset
+import torch
 
 def load_json(file_path):
     with open(file_path, 'r') as f:
@@ -15,22 +18,55 @@ def load_json(file_path):
     return data
 
 class VLAOSDataset(IterableDataset):
-    def __init__(self, dataset_dir:str, dname:str, num_parallel_reads: int=4, *args, **kwargs):
+    def __init__(self, dataset_dir:str, data_mix:str, image_size=(256, 256), chunk_size=16, ctrl_type='delta', ctrl_space='ee', use_state=True, use_depth=False, shuffle_buffer_size: int=10, *args, **kwargs):
         super().__init__()
-        builder = tfds.builder(dname, data_dir=dataset_dir)
-        self.dataset = dl.DLataset.from_rlds(builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads)
+        self.chunk_size = chunk_size
+        self.ctrl_space = ctrl_space
+        self.ctrl_type = ctrl_type
         self.dataset_dir = dataset_dir
-        self.dname = dname
-        self.reasoning_file = os.path.join(dataset_dir, dname, "reasoning.json")
-        if not os.path.exists(self.reasoning_file):
-            raise FileNotFoundError(f"Reasoning file not found: {self.reasoning_file}")
-        self.reasoning_data = load_json(self.reasoning_file)
+        if not isinstance(image_size, tuple): image_size = tuple(image_size)
+        self.data_mix = data_mix
+        self.dataset = RLDSDataset(
+            data_root_dir=dataset_dir,
+            data_mix=data_mix,
+            batch_transform=lambda x: x,
+            resize_resolution=image_size,
+            load_proprio=use_state,
+            load_depth=use_depth,
+            *args,
+            **kwargs
+        )
+        # load reasoning data
+        self.reasoning_file = os.path.join(dataset_dir, data_mix, "reasoning.json")
         
+    
     def __iter__(self):
-        for data in self.dataset.as_numpy_iterator():
-            yield data
+        for data in self.dataset:
+            data_dict = dict(
+                raw_lang=data["task"]["language_instruction"].decode(),
+                action=torch.from_numpy(data["action"]),
+                image = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['observation']['image_primary'])),
+                is_pad=torch.from_numpy(~data['action_pad_mask']),
+                reasoning={},
+                state=torch.from_numpy(data['observation']['proprio'][0]),
+                timestamp=data['observation']['timestep'].item(),
+                episode_id=data['traj_index'],
+                dataset_id=data["dataset_name"].decode(),
+            )
+            yield data_dict
             
+    def get_dataset_statistics(self, keyname=None):
+        if keyname is None:
+            keyname = self.data_mix
+        stats = self.dataset.dataset_statistics[keyname]
+        stats['state'] = stats['proprio']
+        return stats
+    
 if __name__=='__main__':
-    ds = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero', 'libero_object')
-    data = next(iter(ds))
+    # dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero', data_mix='libero_object', image_size=(256, 256))
+    # d = next(iter(dataset))
+    # dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/peract2', data_mix='peract2', image_size=(256, 256))
+    # d = next(iter(dataset)) # state_dim=74
+    dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/colosseum', data_mix='colosseum', image_size=(256, 256))
+    d = next(iter(dataset)) # state_dim=37
     print('ok')

@@ -47,7 +47,11 @@ class ActionEncoding(IntEnum):
     JOINT_POS = 2           # Joint Delta Position (7) + Gripper Open/Close (1)
     JOINT_POS_BIMANUAL = 3  # Joint Delta Position (2 x [ Joint Delta Position (6) + Gripper Open/Close (1) ])
     EEF_R6 = 4              # EEF Delta XYZ (3) + R6 (6) + Gripper Open/Close (1)
+    DEXTEROUS = 5           # 22 dim dexterous action for dexart
+    EEF_POSE = 6           # EEF Delta XYZ (3) + Quaternion (4) + Gripper Open/Close (1)
+    BIMANUAL_EEF_POSE = 7  # EEF Delta XYZ (2 x [ XYZ (3) + Quaternion (4) ] + Gripper Open/Close (1))
     # fmt: on
+
 
 
 # === Individual Dataset Configs ===
@@ -670,4 +674,312 @@ OXE_DATASET_CONFIGS = {
         "state_encoding": StateEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+        ### LIBERO datasets (modified versions)
+    "libero_spatial": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+    "libero_object": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+    "libero_goal": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+    "libero_10": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+   "libero_90": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+   ### Deformable Datasets
+   "fold": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+   "jean": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+   "rope": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["EEF_state", None, "gripper_state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+    # DexArt datasets
+    "bucket_dex_art_dataset": {
+        # "image_obs_keys": {"toilet": "toilet_viz", "secondary": None, "wrist": None, "laptop": "laptop_viz", "bucket": "bucket_viz", "faucet": "faucet_viz"},
+        "image_obs_keys": {"primary": "bucket_viz", "secondary": None, "wrist": None},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.DEXTEROUS,
+    },
+    "faucet_dex_art_dataset": {
+        # "image_obs_keys": {"toilet": "toilet_viz", "secondary": None, "wrist": None, "laptop": "laptop_viz", "bucket": "bucket_viz", "faucet": "faucet_viz"},
+        "image_obs_keys": {"primary": "faucet_viz", "secondary": None, "wrist": None},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.DEXTEROUS,
+    },
+    "laptop_dex_art_dataset": {
+        # "image_obs_keys": {"toilet": "toilet_viz", "secondary": None, "wrist": None, "laptop": "laptop_viz", "bucket": "bucket_viz", "faucet": "faucet_viz"},
+        "image_obs_keys": {"primary": "laptop_viz", "secondary": None, "wrist": None},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.DEXTEROUS,
+    },
+    "toilet_dex_art_dataset": {
+        # "image_obs_keys": {"toilet": "toilet_viz", "secondary": None, "wrist": None, "laptop": "laptop_viz", "bucket": "bucket_viz", "faucet": "faucet_viz"},
+        "image_obs_keys": {"primary": "toilet_viz", "secondary": None, "wrist": None},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.DEXTEROUS,
+    },
+    # Colosseum datasets
+    "colosseum": {
+        "image_obs_keys": {
+            "primary": "front_rgb", 
+            "secondary": None, 
+            "wrist": "wrist_rgb",
+            "left": "left_shoulder_rgb",
+            "right": "right_shoulder_rgb",
+        },
+        "depth_obs_keys": {
+            "primary": "front_depth", 
+            "secondary": None, 
+            "wrist": "wrist_depth",
+            "left": "left_shoulder_depth",
+            "right": "right_shoulder_depth",
+        },
+        "state_obs_keys": [
+            "state",
+            "front_camera_extrinsics",
+            "wrist_camera_extrinsics",
+            "left_shoulder_camera_extrinsics",
+            "right_shoulder_camera_extrinsics",
+            "front_camera_intrinsics",
+            "wrist_camera_intrinsics",
+            "left_shoulder_camera_intrinsics",
+            "right_shoulder_camera_intrinsics",
+        ],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.EEF_POSE,
+    },
+    ### FurnitureBench Datasets
+    "cabinet": {
+        "image_obs_keys": {"front": "front_image", "rear": "rear_image", "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POSE,
+    },
+    "lamp": {
+        "image_obs_keys": {"front": "front_image", "rear": "rear_image", "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POSE,
+    },
+    "one_leg": {
+        "image_obs_keys": {"front": "front_image", "rear": "rear_image", "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POSE,
+    },
+    "round_table": {
+        "image_obs_keys": {"front": "front_image", "rear": "rear_image", "wrist": "wrist_image"},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POSE,
+    },
+    ### PerAct2 Datasets
+    "bimanual_handover_item": {
+        "image_obs_keys": {
+            "primary": "front_image", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_image",
+            "wrist_left": "wrist_left_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "overhead": "overhead_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "wrist_right": "wrist_right_image",
+        },
+        "depth_obs_keys": {
+            "primary": "front_depth", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_depth",
+            "wrist_left": "wrist_left_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "overhead": "overhead_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "wrist_right": "wrist_right_depth",
+        },
+        "state_obs_keys": [
+            "state",
+            "over_shoulder_left_camera_extrinsics",
+            "wrist_left_camera_extrinsics",
+            "front_camera_extrinsics",
+            "overhead_camera_extrinsics",
+            "over_shoulder_right_camera_extrinsics",
+            "wrist_right_camera_extrinsics",
+            "over_shoulder_left_camera_intrinsics",
+            "wrist_left_camera_intrinsics",
+            "front_camera_intrinsics",
+            "overhead_camera_intrinsics",
+            "over_shoulder_right_camera_intrinsics",
+            "wrist_right_camera_intrinsics",
+        ],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.BIMANUAL_EEF_POSE,
+    },
+    "bimanual_lift_ball": {
+        "image_obs_keys": {
+            "primary": "front_image", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_image",
+            "wrist_left": "wrist_left_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "overhead": "overhead_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "wrist_right": "wrist_right_image",
+        },
+        "depth_obs_keys": {
+            "primary": "front_depth", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_depth",
+            "wrist_left": "wrist_left_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "overhead": "overhead_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "wrist_right": "wrist_right_depth",
+        },
+        "state_obs_keys": [
+            "state",
+            "over_shoulder_left_camera_extrinsics",
+            "wrist_left_camera_extrinsics",
+            "front_camera_extrinsics",
+            "overhead_camera_extrinsics",
+            "over_shoulder_right_camera_extrinsics",
+            "wrist_right_camera_extrinsics",
+            "over_shoulder_left_camera_intrinsics",
+            "wrist_left_camera_intrinsics",
+            "front_camera_intrinsics",
+            "overhead_camera_intrinsics",
+            "over_shoulder_right_camera_intrinsics",
+            "wrist_right_camera_intrinsics",
+        ],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.BIMANUAL_EEF_POSE,
+    },
+    "bimanual_straighten_rope": {
+        "image_obs_keys": {
+            "primary": "front_image", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_image",
+            "wrist_left": "wrist_left_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "overhead": "overhead_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "wrist_right": "wrist_right_image",
+        },
+        "depth_obs_keys": {
+            "primary": "front_depth", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_depth",
+            "wrist_left": "wrist_left_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "overhead": "overhead_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "wrist_right": "wrist_right_depth",
+        },
+        "state_obs_keys": [
+            "state",
+            "over_shoulder_left_camera_extrinsics",
+            "wrist_left_camera_extrinsics",
+            "front_camera_extrinsics",
+            "overhead_camera_extrinsics",
+            "over_shoulder_right_camera_extrinsics",
+            "wrist_right_camera_extrinsics",
+            "over_shoulder_left_camera_intrinsics",
+            "wrist_left_camera_intrinsics",
+            "front_camera_intrinsics",
+            "overhead_camera_intrinsics",
+            "over_shoulder_right_camera_intrinsics",
+            "wrist_right_camera_intrinsics",
+        ],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.BIMANUAL_EEF_POSE,
+    },
+    "bimanual_sweep_to_dustpan": {
+        "image_obs_keys": {
+            "primary": "front_image", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_image",
+            "wrist_left": "wrist_left_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "overhead": "overhead_image",
+            "over_shoulder_right": "over_shoulder_right_image",
+            "wrist_right": "wrist_right_image",
+        },
+        "depth_obs_keys": {
+            "primary": "front_depth", 
+            "secondary": None, 
+            "over_shoulder_left": "over_shoulder_left_depth",
+            "wrist_left": "wrist_left_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "overhead": "overhead_depth",
+            "over_shoulder_right": "over_shoulder_right_depth",
+            "wrist_right": "wrist_right_depth",
+        },
+        "state_obs_keys": [
+            "state",
+            "over_shoulder_left_camera_extrinsics",
+            "wrist_left_camera_extrinsics",
+            "front_camera_extrinsics",
+            "overhead_camera_extrinsics",
+            "over_shoulder_right_camera_extrinsics",
+            "wrist_right_camera_extrinsics",
+            "over_shoulder_left_camera_intrinsics",
+            "wrist_left_camera_intrinsics",
+            "front_camera_intrinsics",
+            "overhead_camera_intrinsics",
+            "over_shoulder_right_camera_intrinsics",
+            "wrist_right_camera_intrinsics",
+        ],
+        "state_encoding": StateEncoding.POS_EULER,  # will not be used
+        "action_encoding": ActionEncoding.BIMANUAL_EEF_POSE,
+    },
+    # Add more datasets here as needed
 }

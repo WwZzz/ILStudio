@@ -840,6 +840,104 @@ def libero_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, -2:]  # 2D gripper state
     return trajectory
 
+def deformable_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # no transformations for action of deformable datasets
+
+    trajectory["observation"]["EEF_state"] = trajectory["observation"]["state"][:, :6]
+    trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, -1:]  # 2D gripper state
+    
+    # replace the langauge instruction
+    instr = trajectory["language_instruction"]    # shape [N], dtype=tf.string
+    N = tf.shape(instr)[0]
+    first = instr[0]                              
+
+    rope_instr = tf.fill([N], "straighten the rope")
+    jean_instr = tf.fill([N], "unfold the jeans")
+    fold_instr = tf.fill([N], "fold the handkerchief")
+
+    new_instr = tf.case(
+        [
+            (tf.equal(first, "rope"), lambda: rope_instr),
+            (tf.equal(first, "jean"), lambda: jean_instr),
+            (tf.equal(first, "fold"), lambda: fold_instr),
+        ],
+        default=lambda: instr,
+        exclusive=True
+    )
+
+    trajectory["language_instruction"] = new_instr
+    
+    return trajectory
+
+def dexart_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # no transformations for action of dexart datasets
+
+    trajectory["observation"]["state"] = trajectory["state"]
+    
+    return trajectory
+
+def colosseum_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # no transformations for action of colosseum datasets
+    trajectory["observation"]["state"] = tf.concat(
+        [
+            trajectory["observation"]["gripper_pose"],
+            trajectory["observation"]["gripper_open"],
+            trajectory["observation"]["joint_positions"],
+            trajectory["observation"]["joint_velocities"],
+            trajectory["observation"]["joint_forces"],
+            trajectory["observation"]["gripper_joint_positions"],
+            trajectory["observation"]["gripper_touch_forces"],
+        ],
+        axis=1,
+    )
+    
+    trajectory["observation"]["front_camera_extrinsics"] = trajectory["front_camera_extrinsics"]
+    trajectory["observation"]["wrist_camera_extrinsics"] = trajectory["wrist_camera_extrinsics"]
+    trajectory["observation"]["left_shoulder_camera_extrinsics"] = trajectory["left_shoulder_camera_extrinsics"]
+    trajectory["observation"]["right_shoulder_camera_extrinsics"] = trajectory["right_shoulder_camera_extrinsics"]
+    trajectory["observation"]["front_camera_intrinsics"] = trajectory["front_camera_intrinsics"]
+    trajectory["observation"]["wrist_camera_intrinsics"] = trajectory["wrist_camera_intrinsics"]
+    trajectory["observation"]["left_shoulder_camera_intrinsics"] = trajectory["left_shoulder_camera_intrinsics"]
+    trajectory["observation"]["right_shoulder_camera_intrinsics"] = trajectory["right_shoulder_camera_intrinsics"]
+
+    return trajectory
+
+def furniturebench_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # no transformations for action of furniturebench datasets
+    # no transformations for state of furniturebench datasets
+
+    return trajectory
+
+def peract2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    trajectory["observation"]["state"] = tf.concat(
+        [
+            trajectory["observation"]["left_gripper_pose"],
+            trajectory["observation"]["right_gripper_pose"],
+            trajectory["observation"]["left_gripper_open"],
+            trajectory["observation"]["right_gripper_open"],
+            trajectory["observation"]["left_joint_positions"],
+            trajectory["observation"]["right_joint_positions"],
+            trajectory["observation"]["left_joint_velocities"],
+            trajectory["observation"]["right_joint_velocities"],
+            trajectory["observation"]["left_joint_forces"],
+            trajectory["observation"]["right_joint_forces"],
+            trajectory["observation"]["left_gripper_joint_positions"],
+            trajectory["observation"]["right_gripper_joint_positions"],
+            trajectory["observation"]["left_gripper_touch_forces"],
+            trajectory["observation"]["right_gripper_touch_forces"],
+        ],
+        axis=1,
+    )
+
+    trajectory['action'] = tf.concat(
+        [
+            trajectory['left_action'],
+            trajectory['right_action'],
+        ],
+        axis=1,
+    )
+    
+    return trajectory
 
 # === Registry ===
 OXE_STANDARDIZATION_TRANSFORMS = {
@@ -919,4 +1017,31 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "libero_object_no_noops": libero_dataset_transform,
     "libero_goal_no_noops": libero_dataset_transform,
     "libero_10_no_noops": libero_dataset_transform,
+        ### LIBERO datasets (modified versions)
+    "libero_spatial": libero_dataset_transform,
+    "libero_object": libero_dataset_transform,
+    "libero_goal": libero_dataset_transform,
+    "libero_10": libero_dataset_transform,
+    "libero_90": libero_dataset_transform,
+    # deformable datasets
+    "fold": deformable_dataset_transform,
+    "jean": deformable_dataset_transform,
+    "rope": deformable_dataset_transform,
+    # dexart datasets
+    "bucket_dex_art_dataset": dexart_dataset_transform,
+    "faucet_dex_art_dataset": dexart_dataset_transform,
+    "laptop_dex_art_dataset": dexart_dataset_transform,
+    "toilet_dex_art_dataset": dexart_dataset_transform,
+    # colosseum datasets
+    "colosseum": colosseum_dataset_transform,
+    # furniturebench datasets
+    "cabinet": furniturebench_dataset_transform,
+    "lamp": furniturebench_dataset_transform,
+    "one_leg": furniturebench_dataset_transform,
+    "round_table": furniturebench_dataset_transform,
+    # peract2
+    "bimanual_handover_item": peract2_dataset_transform,
+    "bimanual_lift_ball": peract2_dataset_transform,
+    "bimanual_straighten_rope": peract2_dataset_transform,
+    "bimanual_sweep_to_dustpan": peract2_dataset_transform,
 }
