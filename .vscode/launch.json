@@ -31,7 +31,7 @@
             //     "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
             // ],
             "args": [ // Qwen25VL+DP
-                "-p", "qwen25dp", "-t", "sim_transfer_cube_scripted", "-c", "debug", "-o", "ckpt/tmp"
+                "-p", "qwen25dp", "-t", "sim_transfer_cube_scripted", "-c", "default", "-o", "ckpt/tmp_qqwen"
             ],
             // "args": [ //lerobot libero test
             //     "-p", "act_droid", "-t", "lerobot_libero", "-c", "debug", "-o", "ckpt/tmp_libero"
