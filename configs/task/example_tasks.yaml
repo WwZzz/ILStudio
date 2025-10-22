@@ -1,9 +1,0 @@
-# 新的灵活数据集配置格式
-datasets:
-  - name: "example_tasks"
-    class: "EpisodicDataset"
-    args:
-      dataset_path_list: ["/inspire/hdd/global_user/wangzheng-240308120196/DexVLA/data"]
-      camera_names: ['cam_high', 'cam_left_wrist', 'cam_right_wrist']
-
-episode_len: 1000

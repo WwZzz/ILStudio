@@ -9,5 +9,7 @@ datasets:
 episode_len: 1000
 action_dim: 8
 state_dim: 8
+action_normalize: "zscore"
+state_normalize: "zscore"
 ctrl_space: "ee"
 ctrl_type: "delta"

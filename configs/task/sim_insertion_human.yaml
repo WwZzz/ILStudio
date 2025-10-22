@@ -1,20 +1,18 @@
 # 新的灵活数据集配置格式
+# 数据集列表 - 支持多个不同类型的数据集
 datasets:
-  - name: "sim_transfer_scripted"
+  - name: "sim_insertion_human"
     class: "AlohaSimDataset"
     args:
-      dataset_path_list: ['data/sim_transfer_scripted']
+      dataset_path_list: ['data/sim_insertion_human']
       camera_names: ['primary']
       chunk_size: 100
       ctrl_space: 'joint'
       ctrl_type: 'abs'
 
-# Task-specific parameters that will override policy configs
 action_dim: 14
 state_dim: 14
-image_size: [256, 256]
+image_size: [640, 480]
 action_normalize: "zscore"
 state_normalize: "zscore"
-episode_len: 400
 
-# Data processing parameters moved to training config

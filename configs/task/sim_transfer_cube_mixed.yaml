@@ -1,5 +1,3 @@
-# 新的灵活数据集配置格式
-# 数据集列表 - 支持多个不同类型的数据集
 datasets:
   - name: "sim_transfer_cube_scripted"
     class: "AlohaSimDataset"
@@ -18,14 +16,12 @@ datasets:
       ctrl_space: 'joint'
       ctrl_type: 'abs'
 
-# 任务特定参数
 action_dim: 14
 state_dim: 14
 image_size: [640, 480]
 action_normalize: "zscore"
 state_normalize: "zscore"
 
-# 其他任务参数
 episode_len: 400
 use_reasoning: false
 use_prev_subtask: false
