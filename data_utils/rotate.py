@@ -6,10 +6,8 @@ import time
 from collections import OrderedDict, defaultdict
 from tqdm import tqdm
 import h5py
-import tensorflow as tf
 import torch
 import collections
-import tensorflow_datasets as tfds
 import numpy as np
 from PIL import Image
 import time

@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'third_party', 'libero'))
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'third_party', 'libero'))
 from benchmark.base import MetaAction, MetaEnv, MetaObs
 from libero.libero import benchmark as libero_bench
 from libero.libero import get_libero_path
@@ -13,7 +13,6 @@ import pickle
 import time
 import copy
 import json
-import tensorflow as tf
 from PIL import Image, ImageDraw, ImageFont
 from typing import List
 from pathlib import Path
@@ -71,7 +70,7 @@ class LiberoEnv(MetaEnv):
         assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
         assert maction['ctrl_type']==self.ctrl_type, "Action must be delta action for LIBERO"
         actions = maction['action'] # (action_dim, )
-        actions[:6] = actions[:6]/np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5])
+        # actions[:6] = actions[:6]
         actions[6] = 1.-2.*actions[6]
         return actions
         
@@ -95,6 +94,6 @@ class LiberoEnv(MetaEnv):
         # depth_primary = obs["agentview_depth"][::-1, ::-1]
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
-        return MetaObs(state_ee=state_ee, state_joint=state_joint, image=image, raw_lang=self.raw_lang)
+        return MetaObs(state=state_ee, state_ee=state_ee, state_joint=state_joint, image=image, raw_lang=self.raw_lang)
     
     

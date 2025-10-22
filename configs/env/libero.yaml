@@ -1,5 +1,5 @@
 type: libero
-task: libero_object_10
+task: libero_object_9
 max_timesteps: 400
 ctrl_space: ee
 image_size: [480, 640]

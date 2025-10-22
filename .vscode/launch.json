@@ -17,6 +17,9 @@
                 "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
+            "args": [
+                "-m", "ckpt/act_libero_obj2" 
+            ]
             // "args": [ // policy client
             //     "--output_dir", "results/test_act_remote","--model_name_or_path","localhost:21000", "--use_spawn",
             // ],
@@ -30,9 +33,9 @@
             // "args": [ // eval
             //     "--output_dir", "results/test_act_local","--model_name_or_path","ckpt/act_dataloader/checkpoint-100", "--use_spawn",
             // ],
-            "args": [// bc-z
-                "-t", "bc_z", "-p", "act_bz", "-c", "debug", "-o", "ckpt/act_bc_z"
-            ],
+            // "args": [// bc-z
+            //     "-t", "bc_z", "-p", "act_bz", "-c", "debug", "-o", "ckpt/act_bc_z"
+            // ],
             // "args": [ // Qwen25VL+DP
             //     "-p", "qwen25dp", "-t", "sim_transfer_cube_scripted", "-c", "default", "-o", "ckpt/tmp_qqwen"
             // ],

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.8,<3.11"
 
 dependencies = [
-    "torch",
+    "torch<2.6",
     "torchvision",
     "torchaudio",
     "hydra-core==1.2.0",
@@ -32,4 +32,4 @@ dependencies = [
 default-groups = []
 
 [tool.uv.sources]
-libero = { git = "https://github.com/Lifelong-Robot-Learning/LIBERO" }
+libero = { path = "../../third_party/libero", editable = true }
