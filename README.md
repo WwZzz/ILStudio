@@ -19,7 +19,7 @@
 
 IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
 
-# Installation
+## 🛠️ Installation
 
 ### uv
 We recommend using [uv](https://docs.astral.sh/uv/) to manage Python dependencies. See the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/) to set it up. Once uv is installed, you can set up the environment.
@@ -40,9 +40,9 @@ uv sync
 ### pip
 If `uv` is not preferred, just use `pip install -r requirements.txt` to use this repo.
 
-# Quick Start
+## 🚀 Quick Start
 
-## ACT on AlohaSim
+### ACT on AlohaSim
 
 ```shell
 uv run python train.py --policy act --task sim_transfer_cube_scripted --output_dir ckpt/act_aloha_sim_transfer
@@ -61,7 +61,7 @@ uv run python train.py --policy diffusion_policy --task sim_transfer_cube_script
 un run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
 
-# Policy Server
+## 🌐 Policy Server
 
 ```shell
 # Start policy server (localhost:5000 as default)
@@ -81,13 +81,13 @@ To eval policy running on the server, please run command below
 python eval_sim.py -e aloha -m localhost:5000 
 ```
 
-# Deploy in the Real World
+## 🤖 Deploy in the Real World
 ```shell
 # aloha corresponds to configs/env/aloha.yaml
 python eval_real.py -m /path/to/ckpt -c so101_follower 
 ```
 
-# Teleoperation for Data Collection
+## 🎮 Teleoperation for Data Collection
 ```shell
 # Before run the two commands below, you need to carefully check the port following the instructions provided by lerobot
 # start the teleoperator
@@ -98,7 +98,7 @@ python start_teleop_recorder.py -c so101_follower
 ```
 
 
-# Policy Gallery:
+## 🎨 Policy Gallery:
 
 | **Policy**            | **Reference**                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -114,7 +114,7 @@ python start_teleop_recorder.py -c so101_follower
 | SMolVLA               | [[8]](https://arxiv.org/abs/2506.01844)                                                                |
 | Octo                  | [[9]](https://octo-models.github.io/)    |
 
-# Benchmark Gallery
+## 🏆 Benchmark Gallery
 - aloha_sim
 - gymnasium_robotics
 - libero
@@ -124,15 +124,15 @@ python start_teleop_recorder.py -c so101_follower
 - simplerenv
 - robotwin (Under Development)
 
-# Robot Gallery
+## 🦾 Robot Gallery
 
 SO101, BimanualSO101, Kochv1.1, AgilexAloha (CobotMagic), 
 
-# Overview
+## 📝 Overview
 We show the architecture as below:
 ![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_il.png)
 
-# Policy
+## 📜 Policy
 important APIs from each `policy.algo_name.__init__`
 - `def load_model(args) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
 - (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> function` # sample-level data processing
@@ -144,7 +144,7 @@ The model returned by `load_model` should implement:
 
 
 
-# Dataset
+## 📊 Dataset
 Currently we support three types of dataset:
 
 - h5py
@@ -154,7 +154,7 @@ Currently we support three types of dataset:
 We align the format of the data at the level of dataloader, thus is compatible to any format of datasets. This enables the framework to be flexible any composint different data sources.
 
 
-# TroubleShooting
+## 🩹 TroubleShooting
 
 - aloha env raises error 'mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called'. 
 
@@ -162,7 +162,7 @@ if the platform is headless, please use the command below to solve this issue:
 ```shell
 export MUJOCO_GL=egl
 ```
-# Acknowledge
+## 🙏 Acknowledge
 This repo is built on the open source codebases below. Thanks to the authors' wonderful contributions.
 
 - [Lerobot](https://github.com/huggingface/lerobot/tree/main)
