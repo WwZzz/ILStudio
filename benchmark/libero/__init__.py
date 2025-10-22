@@ -1,10 +1,12 @@
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'third_party', 'libero'))
 from benchmark.base import MetaAction, MetaEnv, MetaObs
 from libero.libero import benchmark as libero_bench
 from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 from dataclasses import dataclass, field, fields, asdict
 from data_utils.rotate import quat2axisangle
-import os
 import numpy as np
 from torchvision import transforms
 import pickle

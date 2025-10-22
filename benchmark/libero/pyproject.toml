@@ -1,9 +1,9 @@
 [project]
-name = "libero"
+name = "libero-project"
 version = "0.1.0"
 description = "libero"
 readme = "README.md"
-requires-python = ">=3.10.14,<3.11"
+requires-python = ">=3.8,<3.11"
 
 dependencies = [
     "torch",
@@ -24,7 +24,12 @@ dependencies = [
     "matplotlib==3.5.3",
     "cloudpickle==2.1.0",
     "gym==0.25.2",
+    "tianshou==0.2.0",
+    "libero",
 ]
 
 [tool.uv]
 default-groups = []
+
+[tool.uv.sources]
+libero = { git = "https://github.com/Lifelong-Robot-Learning/LIBERO" }

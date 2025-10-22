@@ -22,11 +22,11 @@ def parse_param():
     parser = argparse.ArgumentParser(description='Evaluate a policy model on real robot')
     
     # Robot configuration
-    parser.add_argument('--robot_config', type=str, default='robot/dummy',
+    parser.add_argument('-c', '--robot_config', type=str, default='robot/dummy',
                        help='Robot config (name under configs/robot or absolute path to yaml)')
-    parser.add_argument('--publish_rate', type=int, default=25,
+    parser.add_argument('-pr', '--publish_rate', type=int, default=25,
                        help='Action publishing rate (Hz)')
-    parser.add_argument('--sensing_rate', type=int, default=20,
+    parser.add_argument('-sr', '--sensing_rate', type=int, default=20,
                        help='Sensing rate (Hz)')
     
     # Model arguments
@@ -36,7 +36,7 @@ def parse_param():
                        help='Device to use for evaluation')
     
     # Direct checkpoint loading
-    parser.add_argument('--model_name_or_path', type=str, 
+    parser.add_argument('-m', '--model_name_or_path', type=str, 
                        default='localhost:5000',
                        help='Path to model checkpoint OR server address (host:port) for remote policy server')
     parser.add_argument('--norm_path', type=str, default='',

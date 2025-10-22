@@ -25,7 +25,7 @@ def parse_param():
     # Server arguments
     parser.add_argument('--host', type=str, default='0.0.0.0',
                        help='Host address to bind (default: 0.0.0.0 for all interfaces)')
-    parser.add_argument('--port', type=int, default=5000,
+    parser.add_argument('-p', '--port', type=int, default=5000,
                        help='Port to listen on (default: 5000)')
     
     # Model arguments
