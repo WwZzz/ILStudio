@@ -51,7 +51,7 @@ uv run python train.py --policy act --task sim_transfer_cube_scripted --output_d
 un run python eval.py --model_name_or_path ckpt/act_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
 
-## DP on AlohaSim
+### DP on AlohaSim
 
 ```shell
 # You can use --training.xxx to update the training parameters
@@ -114,7 +114,7 @@ python start_teleop_recorder.py -c so101_follower
 | SMolVLA               | [[8]](https://arxiv.org/abs/2506.01844)                                                                |
 | Octo                  | [[9]](https://octo-models.github.io/)    |
 
-## 🏆 Benchmark Gallery
+## 🏆 Simulation Benchmark Gallery
 - aloha_sim
 - gymnasium_robotics
 - libero
@@ -125,8 +125,10 @@ python start_teleop_recorder.py -c so101_follower
 - robotwin (Under Development)
 
 ## 🦾 Robot Gallery
-
-SO101, BimanualSO101, Kochv1.1, AgilexAloha (CobotMagic), 
+- SO101
+- BimanualSO101
+- Kochv1.1
+- AgilexAloha (CobotMagic)
 
 ## 📝 Overview
 We show the architecture as below:
