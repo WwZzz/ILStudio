@@ -17,9 +17,7 @@
                 "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_ENDPOINT": "https://hf-mirror.com",
             },
-            "args": [
-                "-m", "ckpt/act_libero_obj2" 
-            ]
+            
             // "args": [ // policy client
             //     "--output_dir", "results/test_act_remote","--model_name_or_path","localhost:21000", "--use_spawn",
             // ],
