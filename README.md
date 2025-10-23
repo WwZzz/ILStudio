@@ -7,7 +7,7 @@
 
 </div>
 
-![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
+
 
 | ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |
 |----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
@@ -60,6 +60,8 @@ uv run python train.py --policy diffusion_policy --task sim_transfer_cube_script
 # Evaluation at local 
 un run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
+## Overview
+![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
 ## 🌐 Policy Server
 
