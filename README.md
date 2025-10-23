@@ -1,6 +1,6 @@
 <div align="center">
   <img src='https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_ilstd_logo.png'  width="200"/>
-<h1> ILStudio: A Modular Imitation-Learning Playground for Robotics
+<h1> ILStudio: A Modular Imitation Learning Playground for Robotics
 </h1>
 
 
