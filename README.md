@@ -6,8 +6,8 @@
 
 
 </div>
-![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
+![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
 | ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |
 |----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|
