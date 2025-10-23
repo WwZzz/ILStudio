@@ -6,7 +6,7 @@
 
 
 </div>
-
+![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
 
 | ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |
@@ -130,9 +130,6 @@ python start_teleop_recorder.py -c so101_follower
 - Kochv1.1
 - AgilexAloha (CobotMagic)
 
-## 📝 Overview
-We show the architecture as below:
-![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_il.png)
 
 ## 📜 Policy
 important APIs from each `policy.algo_name.__init__`
