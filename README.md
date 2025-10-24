@@ -1,6 +1,6 @@
 <div align="center">
   <img src='https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_ilstd_logo.png'  width="200"/>
-<h1> ILStudio: A Modular Imitation-Learning Playground for Robotics
+<h1> ILStudio: A Modular Imitation Learning Playground for Robotics
 </h1>
 
 
@@ -60,6 +60,8 @@ uv run python train.py --policy diffusion_policy --task sim_transfer_cube_script
 # Evaluation at local 
 un run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
+## Overview
+![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
 ## 🌐 Policy Server
 
@@ -130,9 +132,6 @@ python start_teleop_recorder.py -c so101_follower
 - Kochv1.1
 - AgilexAloha (CobotMagic)
 
-## 📝 Overview
-We show the architecture as below:
-![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_il.png)
 
 ## 📜 Policy
 important APIs from each `policy.algo_name.__init__`
