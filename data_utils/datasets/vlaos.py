@@ -63,10 +63,10 @@ class VLAOSDataset(IterableDataset):
         return stats
     
 if __name__=='__main__':
-    # dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero', data_mix='libero_object', image_size=(256, 256))
-    # d = next(iter(dataset))
+    dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero', data_mix='libero_object', image_size=(256, 256))
+    d = next(iter(dataset))
     # dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/peract2', data_mix='peract2', image_size=(256, 256))
     # d = next(iter(dataset)) # state_dim=74
-    dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/colosseum', data_mix='colosseum', image_size=(256, 256))
-    d = next(iter(dataset)) # state_dim=37
+    # dataset = VLAOSDataset('/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/colosseum', data_mix='colosseum', image_size=(256, 256))
+    # d = next(iter(dataset)) # state_dim=37
     print('ok')

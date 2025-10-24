@@ -22,7 +22,7 @@ model_args:
   lr_backbone: 0.00001  # 1e-5 as float
   kl_weight: 10
   # Task parameters (will be overridden by args if provided)
-  state_dim: 9
+  state_dim: 8
   action_dim: 7
   # Extras
   history_len: 1

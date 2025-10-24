@@ -162,7 +162,8 @@ def make_dataset_from_rlds(
                         if key is None
                         else tf.cast(old_obs[key], tf.float32)
                     )
-                    for key in state_obs_keys if key is None or "trinsics" not in key 
+                    for key in state_obs_keys if "trinsics" not in key 
+                    # for key in state_obs_keys
                 ],
                 axis=1,
             )

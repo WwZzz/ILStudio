@@ -46,6 +46,6 @@ class WrappedRLDSDataset(IterableDataset):
 if __name__=='__main__':
     # dataset = WrappedRLDSDataset('/inspire/hdd/global_public/public_datas/Robotics_Related/Open-X-Embodiment/openx/', data_mix='bc_z', image_size=(256, 256))
     # d = next(iter(dataset))
-    dataset = WrappedRLDSDataset('/inspire/hdd/project/robot-action/wangzheng-240308120196/data/bridge_data_v2', data_mix="bridge_orig", image_size=(256, 256))
+    dataset = WrappedRLDSDataset('/inspire/hdd/project/robot-action/public/data/libero/openvla', data_mix="libero_object_no_noops", image_size=(256, 256))
     d = next(iter(dataset))
     print('ok')
