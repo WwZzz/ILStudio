@@ -15,7 +15,7 @@ def find_all_linear_names(model, lora_module=[]):
     return list(lora_module_names)
 
 def load_model(args):
-    if args.is_pretrained:
+    if not args.is_training:
         import json
         checkpoint_path = args.model_name_or_path
         # Check if this is a PEFT checkpoint or a full model checkpoint

@@ -1,9 +1,10 @@
-target: deploy.teleoperator.bi_so101_leader.BiSO101Leader
-
+type: deploy.teleoperator.bi_so101_leader.BiSO101Leader
+name: bi_so101_leader
+args:
 # Controller settings
-shm_name: "ilstd_teleop_controller"
+  shm_name: ilstd_teleop_controller
 action_dim: 12
-action_dtype: "float64"
+  action_dtype: float64
 freq: 100.0
 
 # Device-specific settings

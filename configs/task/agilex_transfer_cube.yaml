@@ -1,17 +1,22 @@
-# 新的灵活数据集配置格式
-datasets:
-  - name: "agilex_transfer_cube"
-    class: "AlohaSimDataset"
-    args:
-      dataset_path_list: ['/home/agilex/wz/data/aloha_sim/sim_transfer_cube_scripted']
-      camera_names: ['primary']
-      chunk_size: 50
-      ctrl_space: 'joint'
-      ctrl_type: 'abs'
+name: agilex_transfer_cube
 
-# Task-specific parameters that will override policy configs
+# 数据集列表
+datasets:
+  - type: data_utils.datasets.AlohaSimDataset
+    name: agilex_transfer_cube
+    args:
+      dataset_path_list:
+        - /home/agilex/wz/data/aloha_sim/sim_transfer_cube_scripted
+      camera_names:
+        - primary
+      chunk_size: 50
+      ctrl_space: joint
+      ctrl_type: abs
+
+# Task metadata (这些参数会被展平到顶层供代码使用)
+meta:
 action_dim: 14
 state_dim: 14
 image_size: [640, 480]
-action_normalize: "zscore"
-state_normalize: "zscore"
+  action_normalize: zscore
+  state_normalize: zscore

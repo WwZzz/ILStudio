@@ -2,6 +2,7 @@
 ```
 cd benchmark/metaworld
 uv sync
+uv pip install metaworld
 ```
 
 # Trouble Shooting

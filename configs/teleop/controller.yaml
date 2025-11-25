@@ -1,12 +1,10 @@
 # Teleoperation Controller Configuration
 # This file contains the default settings for the teleoperation controller
 
-# Shared memory configuration
-shm_name: "ilstd_teleop_controller"  # Default shared memory name
-action_dim: 7                        # Dimensionality of the action space
-action_dtype: "float64"              # Numpy dtype used for action values
+type: deploy.teleoperator.keyboard.KeyboardTeleop
+name: keyboard
+args:
+  shm_name: ilstd_teleop_controller  # Default shared memory name
+  action_dim: 7                       # Dimensionality of the action space
+  action_dtype: float64               # Numpy dtype used for action values
 freq: 10.0                          # Teleoperation update frequency in Hz
-
-# Teleoperator device configuration
-# This will be overridden by the specific teleop device config (e.g., keyboard.yaml, iphone.yaml)
-target: "deploy.teleoperator.keyboard.KeyboardTeleop"

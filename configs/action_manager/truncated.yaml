@@ -1,48 +1,8 @@
-# Truncated Action Manager Configuration
-# Truncates action chunks by dropping the first and last portions,
-# then executes like OlderFirstManager
-
+type: deploy.action_manager.truncated.TruncatedManager
 name: truncated
-manager_name: TruncatedManager
-
-# Dynamic class loading (allows custom managers without hardcoding)
-module_path: deploy.action_manager.truncated
-class_name: TruncatedManager
-
-# start_ratio: ratio of actions to drop from the beginning (0.0 to 1.0)
-# The first len(chunk) * start_ratio actions are discarded
-# IMPORTANT: This is NOT applied to the first chunk (to ensure smooth startup)
-# Only subsequent chunks will have their beginning truncated
-# Use case: Skip warm-up actions that may be unstable
-# Default: 0.0 (no truncation at start)
-start_ratio: 0.0
-
-# end_ratio: ratio of actions to drop from the end (0.0 to 1.0)
-# The last len(chunk) * end_ratio actions are discarded
-# Use case: Skip uncertain far-future predictions
-# Default: 0.0 (no truncation at end)
-end_ratio: 0.0
-
-# older_coef: threshold coefficient for accepting new chunks (0.0 to 1.0)
-# New chunks are only accepted if current_step >= len(truncated_chunk) * older_coef
-# This follows the OlderFirstManager pattern
-# Default: 1.0 (only accept new chunk after current chunk is fully executed)
-older_coef: 1.0
-
-# Example configurations:
-# 
-# 1. Drop first 10% and last 20% (common use case):
-#    start_ratio: 0.1
-#    end_ratio: 0.2
-#    older_coef: 1.0
-#
-# 2. Drop last 30% and allow early updates:
-#    start_ratio: 0.0
-#    end_ratio: 0.3
-#    older_coef: 0.75
-#
-# 3. Conservative: drop extremes and wait for full execution:
-#    start_ratio: 0.15
-#    end_ratio: 0.15
-#    older_coef: 1.0
-
+args:
+  module_path: deploy.action_manager.truncated
+  class_name: TruncatedManager
+  start_ratio: 0.0
+  end_ratio: 0.0
+  older_coef: 1.0

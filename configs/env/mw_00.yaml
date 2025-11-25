@@ -1,10 +1,12 @@
-type: metaworld
-# Example fields consumed by benchmark.aloha.AlohaSimEnv
-task: assembly-v3
-max_timesteps: 128
-ctrl_space: ee
-ctrl_type: abs
-use_camera: True
-camera_name: 'corner4'
-image_size: [480, 480]
-
+type: benchmark.metaworld.MetaworldEnv
+name: assembly-v3
+args:
+  task: assembly-v3
+  max_timesteps: 128
+  ctrl_space: ee
+  ctrl_type: abs
+  use_camera: true
+  camera_name: corner4
+  image_size:
+  - 480
+  - 480

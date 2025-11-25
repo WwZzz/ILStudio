@@ -1,15 +1,12 @@
-target: deploy.robot.bi_so101_follwer.BiSo101FollowerWithCamera
-left_arm_port: /dev/ttyACM0
-right_arm_port: /dev/ttyACM3
-robot_id: bi_so101_follower
-camera_configs:
-  # front_camera:
-  #   index_or_path: /dev/video2
-  #   width: 640
-  #   height: 480
-  #   fps: 30
-  right_wrist_camera:
-    index_or_path: /dev/video4
-    width: 320
-    height: 240
-    fps: 30
+type: deploy.robot.bi_so101_follwer.BiSo101FollowerWithCamera
+name: biso101followerwithcamera
+args:
+  left_arm_port: /dev/ttyACM0
+  right_arm_port: /dev/ttyACM3
+  robot_id: bi_so101_follower
+  camera_configs:
+    right_wrist_camera:
+      index_or_path: /dev/video4
+      width: 320
+      height: 240
+      fps: 30

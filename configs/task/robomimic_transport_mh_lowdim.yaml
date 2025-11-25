@@ -1,19 +1,17 @@
-# 新的灵活数据集配置格式
 datasets:
-  - name: "robomimic_transport_mh_lowdim_only"
-    class: "RobomimicDataset"
-    args:
-      dataset_path_list: ['/inspire/hdd/project/robot-action/public/data/robomimic/transport/mh']
-      ctrl_space: 'ee'
-      ctrl_type: 'delta'
-      use_wrist_img: false
-      chunk_size: 1
-      use_img: false
-      use_low_dim: true
-    action_norm_mask: [6, 13]
-
-episode_len: 400
-action_dim: 14
-state_dim: 57
-action_normalize: "identity"
-state_normalize: "identity"
+- type: data_utils.datasets.RobomimicDataset
+  name: robomimic_transport_mh_lowdim_only
+  args:
+    dataset_path_list:
+    - /inspire/hdd/project/robot-action/public/data/robomimic/transport/mh
+    ctrl_space: ee
+    ctrl_type: delta
+    use_wrist_img: false
+    chunk_size: 1
+    use_img: false
+    use_low_dim: true
+meta:
+  action_dim: 14
+  state_dim: 57
+  action_normalize: identity
+  state_normalize: identity

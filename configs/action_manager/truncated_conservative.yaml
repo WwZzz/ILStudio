@@ -1,13 +1,8 @@
-# Conservative Truncated Manager
-# Drops the first 10% and last 20% of actions
-# Useful for avoiding unstable warm-up and uncertain far-future predictions
-
+type: deploy.action_manager.truncated.TruncatedManager
 name: truncated_conservative
-manager_name: TruncatedManager
-module_path: deploy.action_manager.truncated
-class_name: TruncatedManager
-
-start_ratio: 0.1   # Drop first 10% (warm-up phase)
-end_ratio: 0.2     # Drop last 20% (uncertain predictions)
-older_coef: 1.0    # Wait for full execution before accepting new chunk
-
+args:
+  module_path: deploy.action_manager.truncated
+  class_name: TruncatedManager
+  start_ratio: 0.1
+  end_ratio: 0.2
+  older_coef: 1.0

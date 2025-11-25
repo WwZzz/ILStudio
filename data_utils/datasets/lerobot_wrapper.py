@@ -11,7 +11,8 @@ except ImportError:
     from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 import numpy as np
 import warnings
-# from benchmark.utils import resize_with_pad
+from benchmark.utils import resize_with_pad
+from data_utils.utils import ensure_uint8_image
 
 class WrappedLerobotDataset(tud.Dataset):
     def __init__(self, 
@@ -195,6 +196,10 @@ class WrappedLerobotDataset(tud.Dataset):
             images = torch.cat([resize_with_pad(sample[cam_key].unsqueeze(0), height=self.image_size[1], width=self.image_size[0]) for cam_key in cam_keys], dim=0)
         else:
             images = torch.stack([sample[cam_key] for cam_key in cam_keys])
+        
+        # Safety check: ensure images are uint8 with values in [0, 255]
+        images = ensure_uint8_image(images)
+        
         data_dict = {
             'image': images,
             'state': state,
@@ -224,12 +229,10 @@ class WrappedLerobotDataset(tud.Dataset):
     
         
 if __name__=='__main__':
-    dataset = WrappedLerobotDataset(["HuggingFaceVLA/metaworld_mt50", ], tolerance_s=10.0)
+    dataset = WrappedLerobotDataset(["lerobot/metaworld_mt50", ], tolerance_s=10.0)
     # d = dataset.extract_from_episode(86, ['state', 'action'])
     d = dataset.get_dataset_statistics()
     loader = tud.DataLoader(dataset, batch_size=4, shuffle=True, num_workers=32)
     from tqdm import tqdm
     for i, batch in tqdm(enumerate(loader), total=len(loader)):
-        # pprint({k: v.shape if isinstance(v, torch.Tensor) else type(v) for k,v in batch.items()})
         continue
-    print('ok')

@@ -18,7 +18,7 @@ def load_model(args):
     Returns:
         dict: Dictionary containing at least 'model' key with the model instance
     """
-    if args.is_pretrained:
+    if not args.is_training:
         # Load from pretrained checkpoint
         model = MLPPolicy.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         model.to(args.device if hasattr(args, 'device') else 'cuda')

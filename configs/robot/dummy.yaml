@@ -1,23 +1,25 @@
-target: deploy.robot.dummy_robot.DummyRobot
-obs_config:
-  image:
-    primary:
-      shape: (640,480, 3)
-      dtype: uint8
-    wrist_left:
-      shape: (640, 480, 3)
-      dtype: uint8
-    wrist_right:
-      shape: (640, 480, 3)
-      dtype: uint8
-  qpos:
+type: deploy.robot.dummy_robot.DummyRobot
+name: dummy
+args:
+  obs_config:
+    image:
+      primary:
+        shape: (640,480, 3)
+        dtype: uint8
+      wrist_left:
+        shape: (640, 480, 3)
+        dtype: uint8
+      wrist_right:
+        shape: (640, 480, 3)
+        dtype: uint8
+    qpos:
+      shape: (14,)
+      dtype: float32
+    qvel:
+      shape: (14,)
+      dtype: float32
+  action_config:
     shape: (14,)
     dtype: float32
-  qvel:
-    shape: (14,)
-    dtype: float32
-action_config:
-  shape: (14,)
-  dtype: float32
-ctrl_type: abs
-ctrl_space: joint
+  ctrl_type: abs
+  ctrl_space: joint

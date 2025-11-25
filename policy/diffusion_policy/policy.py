@@ -3,6 +3,7 @@ from typing import Union
 
 import torch
 import torch.nn as nn
+from loguru import logger
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -188,7 +189,7 @@ class ConditionalUnet1D(nn.Module):
         self.down_modules = down_modules
         self.final_conv = final_conv
 
-        print("number of parameters: {:e}".format(
+        logger.info("number of parameters: {:e}".format(
             sum(p.numel() for p in self.parameters()))
         )
 

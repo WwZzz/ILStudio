@@ -17,12 +17,7 @@ class SmolVLAProcess:
         #     return_tensors="pt",
         # )
         if sample['image'].max()>1.0:
-            if isinstance(sample['image'], np.ndarray):
-                image_data = sample['image'].astype(np.float32) / 255.0 # k,c,h,w
-            else:
-                image_data = sample['image'] / 255.0 # k,c,h,w
-        else:
-            image_data = sample['image']
+            image_data = sample['image'] / 255.0 # k,c,h,w
         # organize data
         data_dict = {}
         data_dict['state'] = sample.get('state', None)

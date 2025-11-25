@@ -1,9 +1,9 @@
+import os
 import threading
 import time
 import numpy as np
 import itertools
 import torch
-import os
 import fnmatch
 import queue
 import json
@@ -16,14 +16,6 @@ from torch.utils.data import DataLoader, Sampler
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
-try:
-    from torchdata.datapipes.iter import IterableWrapper, Cycler, ShardingFilter, Shuffler, Batcher, Prefetcher, Multiplexer, SampleMultiplexer
-    TORCHDATA_AVAILABLE = True
-except ImportError:
-    TORCHDATA_AVAILABLE = False
-    warnings.warn("torchdata not available. Multi-dataset mixing will not be supported.")
-# import logging
-# logger = logging.getLogger(__name__)
 
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
@@ -273,7 +265,6 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
     if isinstance(train_dataset, list):
         # Multiple datasets - use torchdata for mixing
         
-        print(f"Using mixed dataset pipeline with {len(train_dataset)} datasets")
         train_loader = _create_mixed_dataloader(train_dataset, processor, collator, args)
         
         # Handle validation dataset
@@ -340,6 +331,14 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         else:
             # Pytorch Iterable dataset
             # Wrap iterable dataset with processor
+            try:
+                from torchdata.datapipes.iter import IterableWrapper
+            except ImportError:
+                raise ImportError(
+                    "torchdata is required for iterable dataset support. "
+                    "Install it with: pip install torchdata"
+                )
+            
             wrapped_data = WrappedIterableDataset(dataset, processor)
             pipe = IterableWrapper(wrapped_data, deepcopy=False)
             # For iterable datasets, we cannot use DistributedSampler

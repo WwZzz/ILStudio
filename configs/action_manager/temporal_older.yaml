@@ -1,17 +1,5 @@
-# Temporal Older Action Manager Configuration
-# Combine temporal aggregation with older-first strategy
-# Refuse newly coming chunks until the last chunk ends x%
-
+type: deploy.action_manager.temporal_older.TemporalOlderManager
 name: temporal_older
-manager_name: TemporalOlderManager
-
-# coef: exponential averaging coefficient (0.0 to 1.0)
-# action = (1 - coef) * new_action + coef * old_action
-# Default: 0.1
-coef: 0.1
-
-# older_coef: threshold coefficient for accepting new chunks (0.0 to 1.0)
-# New chunks are only accepted if current_step >= len(chunk) * older_coef
-# Default: 0.75
-older_coef: 0.75
-
+args:
+  coef: 0.1
+  older_coef: 0.75

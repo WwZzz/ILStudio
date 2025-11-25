@@ -1,15 +1,11 @@
-# 新的灵活数据集配置格式
 datasets:
-  - name: "libero_object"
-    class: "data_utils.datasets.vlaos.VLAOSDataset"
-    args:
-      dataset_dir: "/inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero"
-      data_mix: "libero_object"
-
-episode_len: 1000
-action_dim: 8
-state_dim: 8
-action_normalize: "zscore"
-state_normalize: "zscore"
-ctrl_space: "ee"
-ctrl_type: "delta"
+- type: data_utils.datasets.vlaos.VLAOSDataset
+  name: libero_object
+  args:
+    dataset_dir: /inspire/hdd/project/robot-action/public/data/VLA-OS-Dataset/libero
+    data_mix: libero_object
+meta:
+  action_dim: 8
+  state_dim: 8
+  action_normalize: zscore
+  state_normalize: zscore

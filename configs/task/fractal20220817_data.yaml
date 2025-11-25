@@ -1,15 +1,15 @@
 datasets:
-  - name: "fractal20220817_data"
-    class: "data_utils.datasets.rlds_wrapper.WrappedRLDSDataset"
-    args:
-      dataset_dir: '/inspire/hdd/global_public/public_datas/Robotics_Related/Open-X-Embodiment/openx/'
-      data_mix: "fractal20220817_data"
-      chunk_size: 1
-      image_size: [256, 256]
-
-# Task-specific parameters that will override policy configs
-action_dim: 7
-state_dim: 8
-action_normalize: "percentile"
-state_normalize: "percentile"
-episode_len: 400
+- type: data_utils.datasets.rlds_wrapper.WrappedRLDSDataset
+  name: fractal20220817_data
+  args:
+    dataset_dir: /inspire/hdd/global_public/public_datas/Robotics_Related/Open-X-Embodiment/openx/
+    data_mix: fractal20220817_data
+    chunk_size: 1
+    image_size:
+    - 256
+    - 256
+meta:
+  action_dim: 7
+  state_dim: 8
+  action_normalize: percentile
+  state_normalize: percentile

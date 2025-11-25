@@ -89,6 +89,7 @@ import warnings
 import torch.distributed as dist
 import torch
 import json
+from loguru import logger
 
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
@@ -213,14 +214,14 @@ class BaseNormalizer:
         num_trajectories = None
         # Method 0: Check if dataset has get_dataset_statistics()
         if hasattr(self.dataset, 'get_dataset_statistics') and callable(getattr(self.dataset, 'get_dataset_statistics')):
-            print(f"Using get_dataset_statistics() method")
+            logger.info(f"Using get_dataset_statistics() method")
             all_stats = self.dataset.get_dataset_statistics()
             self.save_stats(all_stats)
             return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         
         # Method 1: Check if dataset has num_episodes and extract_from_episode
         if hasattr(self.dataset, 'num_episodes') and hasattr(self.dataset, 'extract_from_episode'):
-            print(f"Using episodic extraction: {self.dataset.num_episodes} episodes")
+            logger.info(f"Using episodic extraction: {self.dataset.num_episodes} episodes")
             num_trajectories = self.dataset.num_episodes
             for idx in range(self.dataset.num_episodes):
                 res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
@@ -229,7 +230,7 @@ class BaseNormalizer:
         
         # Method 2: Check if dataset has extract_all() method
         elif hasattr(self.dataset, 'extract_all') and callable(getattr(self.dataset, 'extract_all')):
-            print("Using extract_all() method")
+            logger.info("Using extract_all() method")
             try:
                 extracted = self.dataset.extract_all(['state', 'action'])
                 for k, v in extracted.items():
@@ -239,7 +240,7 @@ class BaseNormalizer:
                     else:
                         all_data[k] = [v]
             except Exception as e:
-                print(f"extract_all() failed: {e}, falling back to iteration")
+                logger.warning(f"extract_all() failed: {e}, falling back to iteration")
                 all_data = None
         
         # Method 3 & 4: Use DataLoader for map-style or iterable datasets
@@ -253,12 +254,12 @@ class BaseNormalizer:
             returns_batches = self._detect_if_returns_batches()
             
             if is_map_style:
-                print(f"Using DataLoader for map-style dataset: {len(self.dataset)} samples")
+                logger.info(f"Using DataLoader for map-style dataset: {len(self.dataset)} samples")
                 batch_size = 1 if returns_batches else 32
                 if returns_batches:
-                    print("  Detected: Dataset returns batches, using batch_size=1")
+                    logger.info("  Detected: Dataset returns batches, using batch_size=1")
                 else:
-                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                    logger.info(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
                 
                 dataloader = DataLoader(
                     self.dataset,
@@ -268,12 +269,12 @@ class BaseNormalizer:
                     collate_fn=None if returns_batches else self._collate_for_stats
                 )
             else:
-                print("Using DataLoader for iterable dataset")
+                logger.info("Using DataLoader for iterable dataset")
                 batch_size = 1 if returns_batches else 32
                 if returns_batches:
-                    print("  Detected: Dataset returns batches, using batch_size=1")
+                    logger.info("  Detected: Dataset returns batches, using batch_size=1")
                 else:
-                    print(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
+                    logger.info(f"  Detected: Dataset returns samples, using batch_size={batch_size}")
                 
                 dataloader = DataLoader(
                     self.dataset,
@@ -323,9 +324,9 @@ class BaseNormalizer:
                 
                 batch_count += 1
                 if batch_count % 100 == 0:
-                    print(f"Processed {batch_count} batches...")
+                    logger.info(f"Processed {batch_count} batches...")
             
-            print(f"Total batches processed: {batch_count}")
+            logger.info(f"Total batches processed: {batch_count}")
         
         # Concatenate all collected data
         for k in all_data:
@@ -346,7 +347,7 @@ class BaseNormalizer:
             dict_k = {k.split('/')[-1]: self.compute_stats_for_array(data_k)}
             all_stats.update(dict_k)
         
-        print(f"Statistics computed: {all_stats.get('num_transitions', 0)} transitions")
+        logger.info(f"Statistics computed: {all_stats.get('num_transitions', 0)} transitions")
         self.save_stats(all_stats)
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
     
@@ -368,14 +369,14 @@ class BaseNormalizer:
         """
         # Rule 1: Map-style datasets always return samples
         if hasattr(self.dataset, '__len__') and hasattr(self.dataset, '__getitem__'):
-            print(f"    Map-style dataset always returns samples")
+            logger.debug(f"    Map-style dataset always returns samples")
             return False
         
         # Rule 2: For iterable datasets, check raw_lang field
         # Strategy 1: Check for explicit attributes first
         if hasattr(self.dataset, 'returns_batches'):
             result = bool(self.dataset.returns_batches)
-            print(f"    Explicit attribute returns_batches={result}")
+            logger.debug(f"    Explicit attribute returns_batches={result}")
             return result
         
         # Strategy 2: Peek at the first item and check raw_lang
@@ -386,26 +387,26 @@ class BaseNormalizer:
                 sample = next(iterator)
             else:
                 # Can't detect, assume returns samples
-                print(f"    Cannot iterate dataset, assuming samples")
+                logger.debug(f"    Cannot iterate dataset, assuming samples")
                 return False
             
             # Check raw_lang field
             if isinstance(sample, dict) and 'raw_lang' in sample:
                 raw_lang = sample['raw_lang']
                 if isinstance(raw_lang, list):
-                    print(f"    Detected batch: raw_lang is a list (length={len(raw_lang)})")
+                    logger.debug(f"    Detected batch: raw_lang is a list (length={len(raw_lang)})")
                     return True
                 elif isinstance(raw_lang, str):
-                    print(f"    Detected sample: raw_lang is a string")
+                    logger.debug(f"    Detected sample: raw_lang is a string")
                     return False
             
             # If no raw_lang field, assume returns samples
-            print(f"    No raw_lang field found, assuming samples")
+            logger.debug(f"    No raw_lang field found, assuming samples")
             return False
             
         except Exception as e:
             # If peek fails, assume returns samples (safer default)
-            print(f"    Could not detect batch/sample format ({e}), assuming samples")
+            logger.debug(f"    Could not detect batch/sample format ({e}), assuming samples")
             return False
     
     def _collate_for_stats(self, batch):
@@ -727,7 +728,7 @@ class ZScoreNormalizer(BaseNormalizer):
     
 class Identity(BaseNormalizer):
     def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):
-        print("Perform no normalization on actions and state")
+        logger.info("Perform no normalization on actions and state")
         self.ctrl_type = ctrl_type
         self.ctrl_space = ctrl_space
 
@@ -784,7 +785,7 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
         dataset_meta = datasets_info[0]
         dataset_id = dataset_meta['dataset_id']
         if len(datasets_info) > 1:
-            print(f"Multiple datasets found in metadata. Using first: {dataset_id}")
+            logger.info(f"Multiple datasets found in metadata. Using first: {dataset_id}")
     else:
         # Find the matching dataset by dataset_id
         dataset_meta = None
@@ -806,11 +807,11 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
     
     # Log mask information for transparency
     if action_norm_mask is not None or state_norm_mask is not None:
-        print(f"Loading normalizers with mask configuration for dataset '{dataset_id}':")
+        logger.info(f"Loading normalizers with mask configuration for dataset '{dataset_id}':")
         if action_norm_mask is not None:
-            print(f"  - action_norm_mask: {action_norm_mask}")
+            logger.info(f"  - action_norm_mask: {action_norm_mask}")
         if state_norm_mask is not None:
-            print(f"  - state_norm_mask: {state_norm_mask}")
+            logger.info(f"  - state_norm_mask: {state_norm_mask}")
     
     # Get normalizer types from metadata
     state_norm_type = norm_meta['state'].get(dataset_id, 'zscore')
@@ -911,10 +912,10 @@ def load_normalizers(args):
             ctrl_space = target_dataset.get('ctrl_space', 'ee')
             ctrl_type = target_dataset.get('ctrl_type', 'delta')
             
-            print(f"   ✓ Using ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}' from dataset '{target_dataset.get('dataset_id', 'unknown')}'")
+            logger.info(f"   ✓ Using ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}' from dataset '{target_dataset.get('dataset_id', 'unknown')}'")
         else:
             ctrl_space, ctrl_type = 'ee', 'delta'
-            print(f"   ⚠ No dataset info found, using default ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}'")
+            logger.warning(f"   ⚠ No dataset info found, using default ctrl_space='{ctrl_space}', ctrl_type='{ctrl_type}'")
         
         return normalizers, ctrl_space, ctrl_type
             

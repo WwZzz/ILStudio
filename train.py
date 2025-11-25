@@ -1,6 +1,8 @@
+import configs 
 import os
 import argparse
 import json
+from loguru import logger
 import policy.utils as ml_utils
 from data_utils.utils import set_seed, load_data, save_example_data
 from data_utils.data_loader import get_dataloader
@@ -14,8 +16,8 @@ from policy.policy_loader import (
 from policy.trainer import BaseTrainer
 import torch
 import numpy
+torch.serialization.add_safe_globals([numpy.ndarray])
 torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
-torch.serialization.safe_globals([numpy.core.multiarray._reconstruct])
 
 def parse_param():
     """
@@ -83,6 +85,7 @@ def main(args):
         None. The trained model and statistics are saved to the output directory
         specified in training_args.
     """
+    args.is_training = True
     set_seed(1)
     
     # Load all configurations in one place
@@ -100,12 +103,12 @@ def main(args):
             }, f, indent=2)
     
     # Load model 
-    print(f"Loading policy config: {config_paths['policy']}")
+    logger.info(f"Loading policy config: {config_paths['policy']}")
     model_components = load_policy_model_for_training(config_paths['policy'], args, task_config)
     model = model_components['model']
     config = model_components.get('config', None)
     if config:
-        print(f"Loaded config from YAML: {type(config).__name__}") 
+        logger.info(f"Loaded config from YAML: {type(config).__name__}") 
     ml_utils.print_model_trainable_information(model)
     
     # Load dataset
@@ -113,11 +116,11 @@ def main(args):
     train_data, val_data = data_dict['train'], data_dict['eval']
     
     # Save example data from the first training dataset for debugging
-    print("\n" + "="*80)
-    print(f"Saving example data to {training_args.output_dir}...")
-    print("="*80)
+    logger.info("="*80)
+    logger.info(f"Saving example data to {training_args.output_dir}...")
+    logger.info("="*80)
     save_example_data(train_data, training_args.output_dir)
-    print("="*80 + "\n")
+    logger.info("="*80)
     
     # Create data loader with policy-spefific data processor and collator
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)

@@ -1,6 +1,7 @@
 # start_teleop_recorder_simple_multithread.py - Simplified multi-threaded teleoperation data recorder
-import yaml
+import configs 
 import os
+import yaml
 import time
 import importlib
 import numpy as np
@@ -12,6 +13,7 @@ import threading
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import traceback
+from loguru import logger
 from deploy.robot.base import RateLimiter, make_robot
 from deploy.teleoperator.base import generate_shm_info
 from deploy.controller import KBHit, infer_action_params_from_shm
@@ -22,9 +24,9 @@ shutdown_event = threading.Event()
 def signal_handler(sig, frame):
     """Handle shutdown signals gracefully."""
     if not shutdown_event.is_set():
-        print("\nCtrl+C detected! Shutting down gracefully...", flush=True)
-        print("Note: This will only close the recorder process and its connection to shared memory.", flush=True)
-        print("The shared memory block will remain available for other processes.", flush=True)
+        logger.info("Ctrl+C detected! Shutting down gracefully...")
+        logger.info("Note: This will only close the recorder process and its connection to shared memory.")
+        logger.info("The shared memory block will remain available for other processes.")
         shutdown_event.set()
 
 def parse_param():
@@ -71,7 +73,7 @@ def save_episode_to_hdf5(output_dir, episode_id, observations, actions):
                     try:
                         group.create_dataset(key, data=np.stack(sub_list))
                     except (TypeError, ValueError) as e:
-                        print(f"Warning: Could not stack data for key '{key}'. Skipping. Error: {e}")
+                        logger.warning(f"Could not stack data for key '{key}'. Skipping. Error: {e}")
         else:
             # If not dict, just create dataset
             try:
@@ -80,7 +82,7 @@ def save_episode_to_hdf5(output_dir, episode_id, observations, actions):
                 else:
                     group.create_dataset(key_prefix, data=np.stack(data_list))
             except (TypeError, ValueError) as e:
-                print(f"Warning: Could not stack data for key '{key_prefix}'. Skipping. Error: {e}")
+                logger.warning(f"Could not stack data for key '{key_prefix}'. Skipping. Error: {e}")
 
     with h5py.File(file_path, 'w') as f:
         f.create_dataset('actions', data=np.array(actions, dtype=np.float32))
@@ -112,7 +114,7 @@ class SimpleMultiThreadTeleopRecorder:
             cfg_path = ConfigLoader()._resolve('robot', self.args.config)
         except Exception:
             cfg_path = self.args.config
-        print(f"Loading robot configuration from {cfg_path}")
+        logger.info(f"Loading robot configuration from {cfg_path}")
         with open(cfg_path, 'r') as f:
             robot_cfg = yaml.safe_load(f)
         # apply overrides passed via CLI
@@ -122,14 +124,14 @@ class SimpleMultiThreadTeleopRecorder:
         robot_cfg['use_gui'] = False
         
         self.robot = make_robot(robot_cfg, self.args)
-        print("Robot successfully loaded.")
+        logger.info("Robot successfully loaded.")
         
     def setup_action_buffer(self):
         """Setup action buffer"""
         if self.args.shm_name and self.args.shm_name.strip():
             # Infer action parameters
             action_dim, action_dtype = infer_action_params_from_shm(self.args.shm_name)
-            print(f"Inferred action_dim: {action_dim}, action_dtype: {action_dtype}")
+            logger.info(f"Inferred action_dim: {action_dim}, action_dtype: {action_dtype}")
             
             shm_info = generate_shm_info(self.args.shm_name, action_dim, action_dtype)
             
@@ -140,28 +142,28 @@ class SimpleMultiThreadTeleopRecorder:
                 try:
                     self.action_shm = shared_memory.SharedMemory(name=shm_info['name'])
                     self.action_buffer = np.ndarray(shm_info['shape'], dtype=shm_info['dtype'], buffer=self.action_shm.buf)
-                    print("Main process connected to shared memory.")
+                    logger.info("Main process connected to shared memory.")
                     
                     # Verify shared memory accessibility
                     try:
                         _ = self.action_buffer[0]
-                        print("Shared memory is accessible and ready for use.")
+                        logger.info("Shared memory is accessible and ready for use.")
                     except Exception as e:
-                        print(f"Warning: Shared memory connected but not accessible: {e}")
+                        logger.warning(f"Shared memory connected but not accessible: {e}")
                         self.action_shm = None
                         self.action_buffer = None
                     break
                 except (FileNotFoundError, TypeError):
                     if attempt < max_retries - 1:
-                        print(f"Main process: Shared memory not found, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                        logger.info(f"Main process: Shared memory not found, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
                         time.sleep(retry_delay)
                     else:
-                        print("Warning: Could not connect to shared memory. Actions will not be saved.")
-                        print("Make sure the controller process (start_teleop_controller.py) is running.")
+                        logger.warning("Could not connect to shared memory. Actions will not be saved.")
+                        logger.warning("Make sure the controller process (start_teleop_controller.py) is running.")
                         self.action_shm = None
                         self.action_buffer = None
         else:
-            print("No shared memory name provided or empty. Action publishing will be disabled.")
+            logger.info("No shared memory name provided or empty. Action publishing will be disabled.")
             self.action_buffer = None
             self.action_shm = None
     
@@ -169,10 +171,10 @@ class SimpleMultiThreadTeleopRecorder:
         """Action publisher worker thread"""
         # Check if action buffer exists, exit directly if not
         if self.action_buffer is None:
-            print("[ActionPublisher] No action buffer available, skipping action publishing thread")
+            logger.info("[ActionPublisher] No action buffer available, skipping action publishing thread")
             return
             
-        print(f"[ActionPublisher] Thread started, publishing at {self.args.action_frequency}Hz")
+        logger.info(f"[ActionPublisher] Thread started, publishing at {self.args.action_frequency}Hz")
         rate_limiter = RateLimiter()
         last_timestamp = 0
         
@@ -188,15 +190,15 @@ class SimpleMultiThreadTeleopRecorder:
                 rate_limiter.sleep(self.args.action_frequency)
                 
             except Exception as e:
-                print(f"[ActionPublisher] Error: {e}")
+                logger.error(f"[ActionPublisher] Error: {e}")
                 traceback.print_exc()
                 time.sleep(0.1)
                 
-        print("[ActionPublisher] Thread stopped")
+        logger.info("[ActionPublisher] Thread stopped")
     
     def observation_collector_worker(self):
         """Observation collector worker thread"""
-        print(f"[ObservationCollector] Thread started, collecting at {self.args.observation_frequency}Hz")
+        logger.info(f"[ObservationCollector] Thread started, collecting at {self.args.observation_frequency}Hz")
         rate_limiter = RateLimiter()
         
         while self.running and not shutdown_event.is_set():
@@ -211,11 +213,11 @@ class SimpleMultiThreadTeleopRecorder:
                 rate_limiter.sleep(self.args.observation_frequency)
                 
             except Exception as e:
-                print(f"[ObservationCollector] Error: {e}")
+                logger.error(f"[ObservationCollector] Error: {e}")
                 traceback.print_exc()
                 time.sleep(0.1)
                 
-        print("[ObservationCollector] Thread stopped")
+        logger.info("[ObservationCollector] Thread stopped")
     
     def start_threads(self):
         """Start background threads"""
@@ -228,9 +230,9 @@ class SimpleMultiThreadTeleopRecorder:
                 daemon=True
             )
             self.action_publisher_thread.start()
-            print("Action publisher thread started")
+            logger.info("Action publisher thread started")
         else:
-            print("Action publisher thread skipped (no action buffer)")
+            logger.info("Action publisher thread skipped (no action buffer)")
         
         # Start observation collector thread
         self.observation_collector_thread = threading.Thread(
@@ -238,9 +240,9 @@ class SimpleMultiThreadTeleopRecorder:
             daemon=True
         )
         self.observation_collector_thread.start()
-        print("Observation collector thread started")
+        logger.info("Observation collector thread started")
         
-        print("Background threads started successfully")
+        logger.info("Background threads started successfully")
     
     def stop_threads(self):
         """Stop background threads"""
@@ -248,20 +250,20 @@ class SimpleMultiThreadTeleopRecorder:
         
         if self.action_publisher_thread:
             self.action_publisher_thread.join(timeout=2)
-            print("Action publisher thread stopped")
+            logger.info("Action publisher thread stopped")
             
         if self.observation_collector_thread:
             self.observation_collector_thread.join(timeout=2)
-            print("Observation collector thread stopped")
+            logger.info("Observation collector thread stopped")
     
     def collect_episode_data(self, kb_hit):
         """Collect data for one episode"""
-        print(f"Starting episode {self.episode_count}. Recording...")
+        logger.info(f"Starting episode {self.episode_count}. Recording...")
         
         observations, actions = [], []
         all_timestamps = []
         
-        print("Press Enter to STOP recording...")
+        logger.info("Press Enter to STOP recording...")
         # Consume any prior input
         while kb_hit.get_input() is not None: 
             pass
@@ -294,9 +296,9 @@ class SimpleMultiThreadTeleopRecorder:
             
         if all_timestamps:
             actual_frequency = len(all_timestamps) / (all_timestamps[-1] - all_timestamps[0])
-            print(f"Episode {self.episode_count} finished at {actual_frequency:.2f}Hz ({self.args.frequency}Hz expected). Collected {len(observations)} timesteps.")
+            logger.info(f"Episode {self.episode_count} finished at {actual_frequency:.2f}Hz ({self.args.frequency}Hz expected). Collected {len(observations)} timesteps.")
         else:
-            print(f"Episode {self.episode_count} finished. No data collected.")
+            logger.info(f"Episode {self.episode_count} finished. No data collected.")
             
         return observations, actions
     
@@ -311,10 +313,10 @@ class SimpleMultiThreadTeleopRecorder:
                 )
             else:
                 save_episode_to_hdf5(self.args.output_dir, self.episode_count, observations, actions)
-            print(f"Episode {self.episode_count} was successfully saved to {self.args.output_dir}.")
+            logger.info(f"Episode {self.episode_count} was successfully saved to {self.args.output_dir}.")
             self.episode_count += 1
         else:
-            print("No data collected, skipping save.")
+            logger.info("No data collected, skipping save.")
     
     def run(self):
         """Main run loop"""
@@ -335,7 +337,9 @@ class SimpleMultiThreadTeleopRecorder:
             # Main data collection loop
             while not shutdown_event.is_set():
                 # Wait for user to start episode
-                print(f"\n{'='*10}\nPress Enter to START episode {self.episode_count}...\n{'='*10}")
+                logger.info(f"{'='*10}")
+                logger.info(f"Press Enter to START episode {self.episode_count}...")
+                logger.info(f"{'='*10}")
                 while not shutdown_event.is_set():
                     if kb_hit.get_input() is not None:
                         break
@@ -351,7 +355,7 @@ class SimpleMultiThreadTeleopRecorder:
                     break
 
                 # Ask whether to save
-                print("Save this episode? (Press Enter to SAVE, or type anything and press Enter to DISCARD)")
+                logger.info("Save this episode? (Press Enter to SAVE, or type anything and press Enter to DISCARD)")
                 saving_prompt = None
                 while saving_prompt is None and not shutdown_event.is_set():
                     saving_prompt = kb_hit.get_input()
@@ -364,15 +368,15 @@ class SimpleMultiThreadTeleopRecorder:
                 if len(saving_prompt) == 0:
                     self.save_episode(observations, actions)
                 else:
-                    print("Discarding episode.")
+                    logger.info("Discarding episode.")
 
         except KeyboardInterrupt:
-            print("\n[Main Process] Exit by KeyboardInterrupt (fallback).")
+            logger.info("[Main Process] Exit by KeyboardInterrupt (fallback).")
         finally:
             # Graceful shutdown
-            print("\n[Main Process] Shutting down...")
-            print("[Main Process] Note: Only closing recorder connection to shared memory.")
-            print("[Main Process] The shared memory block will remain available for other processes.")
+            logger.info("[Main Process] Shutting down...")
+            logger.info("[Main Process] Note: Only closing recorder connection to shared memory.")
+            logger.info("[Main Process] The shared memory block will remain available for other processes.")
             shutdown_event.set()
             kb_hit.set_normal_term()
 
@@ -381,39 +385,39 @@ class SimpleMultiThreadTeleopRecorder:
 
             # Close shared memory connection (do not destroy shared memory block)
             if self.action_shm:
-                print("Closing shared memory connection (NOT destroying the memory block)...")
+                logger.info("Closing shared memory connection (NOT destroying the memory block)...")
                 try:
                     # Check if shared memory is still valid
                     try:
                         # Try to access shared memory to check if it still exists
                         _ = self.action_buffer[0]
-                        print("Shared memory is still accessible before closing connection.")
+                        logger.info("Shared memory is still accessible before closing connection.")
                     except Exception as e:
-                        print(f"Warning: Shared memory may have been closed by another process: {e}")
+                        logger.warning(f"Shared memory may have been closed by another process: {e}")
                     
                     # Prevent resource tracker from automatically cleaning up shared memory
                     try:
                         import multiprocessing.resource_tracker
                         if hasattr(multiprocessing.resource_tracker._resource_tracker, 'unregister'):
                             multiprocessing.resource_tracker._resource_tracker.unregister(self.action_shm._name, 'shared_memory')
-                            print("Successfully unregistered shared memory from resource tracker.")
+                            logger.info("Successfully unregistered shared memory from resource tracker.")
                     except Exception as e:
-                        print(f"Warning: Could not unregister from resource tracker: {e}")
+                        logger.warning(f"Could not unregister from resource tracker: {e}")
                     
                     self.action_shm.close()  # Only close connection, do not destroy shared memory block
-                    print("Main process shared memory connection closed.")
-                    print("Shared memory block should remain available for other processes.")
-                    print("Note: If shared memory is no longer available, it may have been closed by the controller process.")
+                    logger.info("Main process shared memory connection closed.")
+                    logger.info("Shared memory block should remain available for other processes.")
+                    logger.info("Note: If shared memory is no longer available, it may have been closed by the controller process.")
                 except Exception as e:
-                    print(f"Warning: Error closing shared memory connection: {e}")
-                    print("Shared memory block should still be available for other processes.")
+                    logger.warning(f"Error closing shared memory connection: {e}")
+                    logger.info("Shared memory block should still be available for other processes.")
 
             # Close robot
             if self.robot:
                 self.robot.shutdown()
-                print("Robot shutdown command sent.")
+                logger.info("Robot shutdown command sent.")
                 
-            print("Cleanup complete. Exiting.")
+            logger.info("Cleanup complete. Exiting.")
 
 if __name__ == '__main__':
     # Use spawn method to avoid resource tracker issues

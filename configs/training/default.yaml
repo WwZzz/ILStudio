@@ -76,7 +76,7 @@ seed: 0
 
 # Training duration
 num_train_epochs: 3
-max_steps: 30000
+max_steps: 10000
 
 # Batch sizes (typically determined by hardware)
 per_device_train_batch_size: 32

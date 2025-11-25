@@ -192,8 +192,10 @@ class PolicyClient:
             while len(self.action_queue) > 0:
                 self.action_queue.popleft()
             
-            # Add actions to queue (limit to chunk_size)
-            for mact in mact_list[:self.chunk_size]:
+            # Add actions to queue
+            # If chunk_size > 0, limit to chunk_size; if chunk_size <= 0, use all actions
+            actions_to_add = mact_list[:self.chunk_size] if self.chunk_size > 0 else mact_list
+            for mact in actions_to_add:
                 self.action_queue.append(mact)
         
         # Return actions from queue

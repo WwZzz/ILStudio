@@ -1,4 +1,5 @@
 import os
+import warnings
 import torch.nn as nn
 import torch
 import numpy as np
@@ -78,7 +79,10 @@ class DiffusionPolicyModel(PreTrainedModel):
         for cam_id, cam_name in enumerate(self.camera_names):
             img_size = self.config.image_sizes[cam_id]
             if isinstance(img_size, str): img_size = eval(img_size)
-            backbones.append(ResNet18Conv(input_channel=3, pretrained= True, input_coord_conv=False))
+            # Suppress torchvision pretrained parameter deprecation warning from robomimic
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
+                backbones.append(ResNet18Conv(input_channel=3, pretrained=True, input_coord_conv=False))
             feat_shape = list(backbones[-1](torch.rand((1, 3, img_size[1], img_size[0])))[0].shape)
             # feat_shape = [512, 8, 8]
             pools.append(SpatialSoftmax(input_shape=feat_shape, num_kp=self.num_kp, temperature=1.0,
@@ -308,4 +312,3 @@ def replace_bn_with_gn(
             num_channels=x.num_features)
     )
     return root_module
-

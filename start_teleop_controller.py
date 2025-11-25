@@ -1,3 +1,5 @@
+import configs 
+import os
 import time
 import numpy as np
 import multiprocessing as mp
@@ -6,6 +8,7 @@ from abc import ABC, abstractmethod
 import importlib
 import argparse
 import yaml
+from loguru import logger
 from configs.utils import resolve_yaml, parse_overrides, apply_overrides_to_mapping
 from data_utils.utils import _convert_to_type
 from deploy.teleoperator.base import str2dtype, BaseTeleopDevice, generate_shm_info, dtype2code
@@ -35,7 +38,7 @@ def load_teleoperator(teleop_cfg: dict, shm_info: dict, action_dim: int, action_
     module_path, class_name = full_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     TeleOpCls = getattr(module, class_name)
-    print(f"Creating Teleop Device: {full_path}")
+    logger.info(f"Creating Teleop Device: {full_path}")
     # Filter out 'target' and any keys that are already explicitly passed
     excluded_keys = {'target', 'shm_name', 'action_dim', 'action_dtype', 'freq'}
     teleop_kwargs = {k: v for k, v in teleop_cfg.items() if k not in excluded_keys}
@@ -70,7 +73,7 @@ def main():
         cfg_path = cfg_loader._resolve('teleop', args.config)
     except Exception:
         cfg_path = args.config
-    print(f"Loading teleop device configuration from {cfg_path}")
+    logger.info(f"Loading teleop device configuration from {cfg_path}")
     with open(cfg_path, 'r') as f:
         teleop_cfg = yaml.safe_load(f)
 
@@ -97,28 +100,28 @@ def main():
         shm_array = np.ndarray((1,), dtype=shm_info['dtype'], buffer=shm.buf)
         shm_array['action_dim'][0] = action_dim
         shm_array['action_dtype_code'][0] = dtype2code(action_dtype)
-        print(f"Main: created shared-memory '{shm_info['name']}' "
+        logger.info(f"Main: created shared-memory '{shm_info['name']}' "
               f"({shm_info['size']} bytes) with action_dim={action_dim}, action_dtype={action_dtype}")
     except FileExistsError:
-        print(f"Main: shared-memory '{shm_info['name']}' already exists; attaching")
+        logger.info(f"Main: shared-memory '{shm_info['name']}' already exists; attaching")
         shm = shared_memory.SharedMemory(name=shm_info['name'])
 
     # Instantiate the teleoperator device using teleop configuration
     teleop_dev = load_teleoperator(teleop_cfg, shm_info, action_dim, action_dtype, freq)
     if hasattr(teleop_dev, 'get_doc'):
-        print(teleop_dev.get_doc())
+        logger.info(teleop_dev.get_doc())
 
     try:
         # Start the teleoperation loop
         teleop_dev.run()
     except KeyboardInterrupt:
-        print("\nMain: Ctrl+C received; requesting all processes to stop...")
+        logger.info("Main: Ctrl+C received; requesting all processes to stop...")
     finally:
         teleop_dev.stop()
-        print("Main: all processes have stopped.")
+        logger.info("Main: all processes have stopped.")
         shm.close()
         shm.unlink()
-        print(f"Main: shared-memory '{shm_info['name']}' has been cleaned up.")
+        logger.info(f"Main: shared-memory '{shm_info['name']}' has been cleaned up.")
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ from peft import LoraConfig, get_peft_model, PeftModel
 
 def load_model(args):
     """Load OpenVLA model components."""
-    if args.is_pretrained:
+    if not args.is_training:
         config = OpenConfig.from_pretrained(args.model_name_or_path)
         if config.training_mode == "lora":  
             base_model = OpenPolicy(config)

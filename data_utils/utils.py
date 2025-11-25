@@ -5,6 +5,7 @@ import fnmatch
 import json
 import warnings
 import importlib
+from loguru import logger
 import torch
 import torch.distributed as dist
 try:
@@ -34,7 +35,7 @@ def save_example_data(train_data, output_dir):
             # Check if any example files exist
             existing_files = os.listdir(examples_dir)
             if len(existing_files) > 0:
-                print(f"Example data already exists in {examples_dir}, skipping save.")
+                logger.info(f"Example data already exists in {examples_dir}, skipping save.")
                 return
         
         os.makedirs(examples_dir, exist_ok=True)
@@ -42,13 +43,13 @@ def save_example_data(train_data, output_dir):
         # Handle list of datasets or single dataset
         if isinstance(train_data, list):
             if len(train_data) == 0:
-                print("Warning: Empty dataset list provided")
+                logger.warning("Empty dataset list provided")
                 return
             dataset = train_data[0]  # Use first dataset
-            print(f"Saving example from first dataset (list of {len(train_data)} datasets)")
+            logger.info(f"Saving example from first dataset (list of {len(train_data)} datasets)")
         else:
             dataset = train_data
-            print("Saving example from single dataset")
+            logger.info("Saving example from single dataset")
         
         # Get one sample from the dataset
         # Check if dataset is map-style (has __getitem__) or iterable
@@ -58,18 +59,18 @@ def save_example_data(train_data, output_dir):
             try:
                 sample = dataset[0]
             except Exception as e:
-                print(f"Warning: Could not get sample from map-style dataset: {e}")
+                logger.warning(f"Could not get sample from map-style dataset: {e}")
                 return
         else:
             # Iterable dataset
             try:
                 sample = next(iter(dataset))
             except Exception as e:
-                print(f"Warning: Could not get sample from iterable dataset: {e}")
+                logger.warning(f"Could not get sample from iterable dataset: {e}")
                 return
         
         if sample is None:
-            print("Warning: Could not retrieve sample from dataset")
+            logger.warning("Could not retrieve sample from dataset")
             return
         
         # Save raw language instruction
@@ -77,7 +78,7 @@ def save_example_data(train_data, output_dir):
             lang_file = os.path.join(examples_dir, 'raw_lang.txt')
             with open(lang_file, 'w', encoding='utf-8') as f:
                 f.write(str(sample['raw_lang']))
-            print(f"Saved language instruction to: {lang_file}")
+            logger.info(f"Saved language instruction to: {lang_file}")
         
         # Save images - save each camera view separately
         if 'image' in sample and sample['image'] is not None:
@@ -106,7 +107,7 @@ def save_example_data(train_data, output_dir):
                     image_file = os.path.join(examples_dir, f'camera_{cam_idx}.png')
                     pil_image = Image.fromarray(img)
                     pil_image.save(image_file)
-                    print(f"Saved camera {cam_idx} image (shape: {img.shape}) to: {image_file}")
+                    logger.info(f"Saved camera {cam_idx} image (shape: {img.shape}) to: {image_file}")
                 
             elif len(image_data.shape) == 3:  # Single camera: (C, H, W)
                 img = image_data
@@ -122,9 +123,9 @@ def save_example_data(train_data, output_dir):
                 image_file = os.path.join(examples_dir, 'camera_0.png')
                 pil_image = Image.fromarray(img)
                 pil_image.save(image_file)
-                print(f"Saved single camera image (shape: {img.shape}) to: {image_file}")
+                logger.info(f"Saved single camera image (shape: {img.shape}) to: {image_file}")
             else:
-                print(f"Warning: Unexpected image shape: {image_data.shape}")
+                logger.warning(f"Unexpected image shape: {image_data.shape}")
         
         # Save state and action as CSV
         state_action_data = {}
@@ -159,7 +160,7 @@ def save_example_data(train_data, output_dir):
                 
                 df = pd.DataFrame(df_data)
                 df.to_csv(csv_file, index=False)
-                print(f"Saved state and action (action shape: {action.shape}) to: {csv_file}")
+                logger.info(f"Saved state and action (action shape: {action.shape}) to: {csv_file}")
             else:
                 # Single action vector
                 action = action.flatten()
@@ -169,7 +170,7 @@ def save_example_data(train_data, output_dir):
                 csv_file = os.path.join(examples_dir, 'state_action.csv')
                 df = pd.DataFrame([state_action_data])
                 df.to_csv(csv_file, index=False)
-                print(f"Saved state and action to: {csv_file}")
+                logger.info(f"Saved state and action to: {csv_file}")
         
         # Save reasoning as JSON if not empty
         if 'reasoning' in sample and sample['reasoning']:
@@ -182,12 +183,12 @@ def save_example_data(train_data, output_dir):
                         json.dump(reasoning, f, indent=2, ensure_ascii=False)
                     else:
                         json.dump({'reasoning': str(reasoning)}, f, indent=2, ensure_ascii=False)
-                print(f"Saved reasoning to: {reasoning_file}")
+                logger.info(f"Saved reasoning to: {reasoning_file}")
         
-        print("Successfully saved example data from first dataset")
+        logger.info("Successfully saved example data from first dataset")
         
     except Exception as e:
-        print(f"Error saving example data: {e}")
+        logger.error(f"Error saving example data: {e}")
         import traceback
         traceback.print_exc()
 
@@ -200,10 +201,56 @@ def safe_decode(value):
     else:
         return str(value)
 
+def ensure_uint8_image(image_array):
+    """
+    Ensure image array is uint8 with values in [0, 255] range.
+    Handles conversion from normalized float images (0-1) or other formats.
+    
+    Args:
+        image_array: numpy array or torch tensor
+        
+    Returns:
+        Image array in uint8 format with values [0, 255]
+    """
+    # Handle torch tensors directly without numpy conversion
+    if isinstance(image_array, torch.Tensor):
+        if image_array.dtype == torch.uint8:
+            return image_array
+        
+        if image_array.dtype in [torch.float32, torch.float64, torch.float16]:
+            # Normalized float image (0-1)
+            if image_array.max() <= 1.0 and image_array.min() >= 0.0:
+                return (image_array * 255).clamp(0, 255).to(torch.uint8)
+            # Float image already in [0, 255] range
+            else:
+                return image_array.clamp(0, 255).to(torch.uint8)
+        else:
+            # Other dtypes (int32, int64, etc.)
+            return image_array.clamp(0, 255).to(torch.uint8)
+    
+    # Handle numpy arrays
+    else:
+        if image_array.dtype == np.uint8:
+            return image_array
+        
+        if image_array.dtype in [np.float32, np.float64, np.float16]:
+            # Normalized float image (0-1)
+            if image_array.max() <= 1.0 and image_array.min() >= 0.0:
+                return (image_array * 255).clip(0, 255).astype(np.uint8)
+            # Float image already in [0, 255] range
+            else:
+                return image_array.clip(0, 255).astype(np.uint8)
+        else:
+            # Other dtypes (int32, int64, etc.)
+            return image_array.clip(0, 255).astype(np.uint8)
+
 def convert_rlds_sample(data):
+    # Ensure images are uint8 [0, 255]
+    image_data = ensure_uint8_image(data['image'])
+    
     data_dict = dict(
         raw_lang = safe_decode(data['raw_lang']),
-        image = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['image'])),
+        image = torch.einsum('k h w c -> k c h w', torch.from_numpy(image_data) if isinstance(image_data, np.ndarray) else image_data),
         state = torch.from_numpy(data['state']).float(),
         action = torch.from_numpy(data['action']).float(),
     )
@@ -273,8 +320,8 @@ def _create_dataset_from_config(dataset_config: dict, args):
     Returns:
         Dataset instance with added 'name' and 'dataset_id' attributes
     """
-    # Get dataset class
-    class_path = dataset_config.get('class', dataset_config.get('dataset_class', 'EpisodicDataset'))
+    # Get dataset class - support both new 'type' and old 'class' fields
+    class_path = dataset_config.get('type') or dataset_config.get('class') or dataset_config.get('dataset_class', 'EpisodicDataset')
     dataset_class = _import_class_from_path(class_path)
     
     # Extract dataset name from config (required for identification)
@@ -403,11 +450,11 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         
         # Log mask configuration for transparency
         if action_norm_mask is not None or state_norm_mask is not None:
-            print(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
+            logger.info(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
             if action_norm_mask is not None:
-                print(f"  - action_norm_mask: {action_norm_mask}")
+                logger.info(f"  - action_norm_mask: {action_norm_mask}")
             if state_norm_mask is not None:
-                print(f"  - state_norm_mask: {state_norm_mask}")
+                logger.info(f"  - state_norm_mask: {state_norm_mask}")
         
         # Create normalizers with masks
         action_normalizers[dataset_id] = action_normalizer_class(
@@ -464,14 +511,14 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         # Log mask information being saved
         has_mask = any('action_norm_mask' in ds or 'state_norm_mask' in ds for ds in datasets_meta)
         if has_mask:
-            print(f"\nSaving normalizer metadata with mask configurations to: {os.path.join(args.output_dir, 'normalize.json')}")
+            logger.info(f"Saving normalizer metadata with mask configurations to: {os.path.join(args.output_dir, 'normalize.json')}")
             for ds_meta in datasets_meta:
                 if 'action_norm_mask' in ds_meta or 'state_norm_mask' in ds_meta:
-                    print(f"  Dataset '{ds_meta['dataset_id']}':")
+                    logger.info(f"  Dataset '{ds_meta['dataset_id']}':")
                     if 'action_norm_mask' in ds_meta:
-                        print(f"    - action_norm_mask: {ds_meta['action_norm_mask']}")
+                        logger.info(f"    - action_norm_mask: {ds_meta['action_norm_mask']}")
                     if 'state_norm_mask' in ds_meta:
-                        print(f"    - state_norm_mask: {ds_meta['state_norm_mask']}")
+                        logger.info(f"    - state_norm_mask: {ds_meta['state_norm_mask']}")
         
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
         
@@ -480,7 +527,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             try:
                 normalizer.save_stats_to_(args.output_dir)
             except Exception as e:
-                print(f"Failed to save normalizer stats of {dataset_id} because {e}")
+                logger.warning(f"Failed to save normalizer stats of {dataset_id} because {e}")
     
     # Wrap datasets with normalizers
     from data_utils.dataset_wrappers import wrap_dataset_with_normalizers

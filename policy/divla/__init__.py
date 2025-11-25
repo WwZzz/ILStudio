@@ -29,7 +29,7 @@ def find_all_linear_names(model, lora_module=None):
 
 def load_model(args):
     # Load config first
-    if args.is_pretrained: # Load during testing
+    if not args.is_training: # Load during testing
         config = QwenVLPolicyConfig.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(config.vlm_model_name_or_path)
         multimodal_processor = AutoProcessor.from_pretrained(config.vlm_model_name_or_path)

@@ -5,7 +5,7 @@ from transformers import AutoConfig
 from .trainer import Trainer
 
 def load_model(args):
-    if args.is_pretrained:
+    if not args.is_training:
         model = ACTPolicy.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         model.to('cuda')
     else:

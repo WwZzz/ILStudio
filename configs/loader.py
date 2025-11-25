@@ -1,5 +1,6 @@
 import os
 import yaml
+from loguru import logger
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
 
@@ -20,6 +21,82 @@ class ConfigLoader:
             self._overrides = self.unknown_args
         else:
             self._overrides = parse_overrides(self.unknown_args or [])
+
+    @staticmethod
+    def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize config to unified format (type, name, args).
+        Supports both old and new formats for backward compatibility.
+        
+        Args:
+            cfg: Original config dictionary
+            
+        Returns:
+            Normalized config dictionary with type, name, and args
+        """
+        if not isinstance(cfg, dict):
+            return cfg
+        
+        normalized = {}
+        
+        # 1. Extract 'type' field from various sources
+        if 'type' in cfg:
+            normalized['type'] = cfg['type']
+        elif 'module_path' in cfg:  # old policy format
+            normalized['type'] = cfg['module_path']
+        elif 'target' in cfg:  # old teleop/robot format
+            normalized['type'] = cfg['target']
+        elif 'manager_name' in cfg:  # old action_manager format
+            normalized['type'] = cfg['manager_name']
+        elif 'class' in cfg:  # old dataset format
+            normalized['type'] = cfg['class']
+        
+        # 2. Extract 'name'
+        if 'name' in cfg:
+            normalized['name'] = cfg['name']
+        
+        # 3. Extract 'args' or collect parameters
+        if 'args' in cfg:
+            # Already in new format
+            normalized['args'] = cfg['args']
+        elif 'model_args' in cfg:
+            # Old policy format
+            normalized['args'] = cfg['model_args']
+        else:
+            # Collect non-reserved fields as args
+            reserved_keys = {
+                'type', 'name', 'args', 'module_path', 'target', 
+                'manager_name', 'class', 'model_args', 'pretrained_config',
+                'config_class', 'model_class', 'data_processor', 
+                'data_collator', 'trainer_class', 'datasets', 'meta', 'envs'
+            }
+            args_dict = {k: v for k, v in cfg.items() if k not in reserved_keys}
+            if args_dict:
+                normalized['args'] = args_dict
+        
+        # 4. Preserve special fields
+        special_fields = ['pretrained_config', 'config_class', 'model_class', 
+                         'data_processor', 'data_collator', 'trainer_class',
+                         'datasets', 'meta', 'envs']
+        for field in special_fields:
+            if field in cfg:
+                normalized[field] = cfg[field]
+        
+        # 5. Normalize datasets if present
+        if 'datasets' in normalized:
+            normalized['datasets'] = [
+                ConfigLoader.normalize_config(ds) if isinstance(ds, dict) else ds 
+                for ds in normalized['datasets']
+            ]
+        
+        # 6. Normalize envs if present
+        if 'envs' in normalized:
+            normalized['envs'] = [
+                ConfigLoader.normalize_config(env) if isinstance(env, dict) else env
+                for env in normalized['envs']
+            ]
+        
+        return normalized
 
     def get_overrides(self, category: str) -> Dict[str, Any]:
         return self._overrides.get(category, {})
@@ -48,48 +125,142 @@ class ConfigLoader:
         return cfg, path
 
     def load_task(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
-        return self.load_yaml_config('task', name_or_path)
+        cfg, path = self.load_yaml_config('task', name_or_path)
+        
+        # Normalize dataset configs within the task
+        if 'datasets' in cfg:
+            cfg['datasets'] = [self.normalize_config(ds) for ds in cfg['datasets']]
+        
+        # Handle meta field - flatten to top level for backward compatibility
+        if 'meta' in cfg and isinstance(cfg['meta'], dict):
+            for key, value in cfg['meta'].items():
+                if key not in cfg:
+                    cfg[key] = value
+        
+        return cfg, path
 
     def load_policy(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         cfg, path = self.load_yaml_config('policy', name_or_path)
         
-        # Flatten model_args to top level for easier command line access
+        # Normalize to unified format
+        cfg = self.normalize_config(cfg)
+        
+        # Flatten args to top level for easier command line access
         # This allows --policy.camera_names, --policy.chunk_size, etc.
-        if 'model_args' in cfg and isinstance(cfg['model_args'], dict):
-            model_args = cfg['model_args']
-            # Create a flattened copy while preserving the original model_args
+        if 'args' in cfg and isinstance(cfg['args'], dict):
+            args_dict = cfg['args']
+            # Create a flattened copy while preserving the original args
             flattened_cfg = cfg.copy()
-            for key, value in model_args.items():
+            for key, value in args_dict.items():
                 # Only add to top level if not already present at top level
                 if key not in flattened_cfg:
                     flattened_cfg[key] = value
             cfg = flattened_cfg
+            
+            # Also preserve old 'model_args' for backward compatibility
+            cfg['model_args'] = args_dict
+            # Preserve old 'module_path' for backward compatibility
+            if 'type' in cfg:
+                cfg['module_path'] = cfg['type']
         
         return cfg, path
 
     def load_robot(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
-        return self.load_yaml_config('robot', name_or_path)
+        cfg, path = self.load_yaml_config('robot', name_or_path)
+        
+        # Normalize to unified format
+        cfg = self.normalize_config(cfg)
+        
+        # Flatten args to top level for backward compatibility
+        if 'args' in cfg and isinstance(cfg['args'], dict):
+            for key, value in cfg['args'].items():
+                if key not in cfg:
+                    cfg[key] = value
+            # Preserve old 'target' field for backward compatibility
+            if 'type' in cfg:
+                cfg['target'] = cfg['type']
+        
+        return cfg, path
 
     def load_teleop(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
-        return self.load_yaml_config('teleop', name_or_path)
+        cfg, path = self.load_yaml_config('teleop', name_or_path)
+        
+        # Normalize to unified format
+        cfg = self.normalize_config(cfg)
+        
+        # Flatten args to top level for backward compatibility
+        if 'args' in cfg and isinstance(cfg['args'], dict):
+            for key, value in cfg['args'].items():
+                if key not in cfg:
+                    cfg[key] = value
+        
+        # Preserve old 'target' field for backward compatibility
+        if 'type' in cfg:
+            cfg['target'] = cfg['type']
+        
+        return cfg, path
 
     def load_manager(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         """Load action manager config with support for command-line overrides via --manager.xxx"""
-        return self.load_yaml_config('action_manager', name_or_path)
+        cfg, path = self.load_yaml_config('action_manager', name_or_path)
+        
+        # Normalize to unified format
+        cfg = self.normalize_config(cfg)
+        
+        # Flatten args to top level for backward compatibility
+        if 'args' in cfg and isinstance(cfg['args'], dict):
+            for key, value in cfg['args'].items():
+                if key not in cfg:
+                    cfg[key] = value
+        
+        # Preserve old 'manager_name' field for backward compatibility
+        if 'type' in cfg:
+            cfg['manager_name'] = cfg['type']
+        
+        return cfg, path
 
     def load_env(self, name_or_path: str) -> Tuple[Any, str]:
         """Load env config and return a namespace for attribute-style access.
-        Expects a key 'type' in the YAML to indicate which benchmark env to load (e.g., 'aloha', 'libero', 'robomimic').
+        Supports both single environment and multiple environments (envs list).
         """
         cfg, path = self.load_yaml_config('env', name_or_path)
-        # recursive dict -> namespace
+        
+        # Check if it's a multi-env config
+        if isinstance(cfg, list):
+            # Already a list of envs
+            normalized_envs = [self.normalize_config(env) for env in cfg]
+        elif 'envs' in cfg and isinstance(cfg['envs'], list):
+            # Has envs field
+            normalized_envs = [self.normalize_config(env) for env in cfg['envs']]
+        else:
+            # Single env - normalize and wrap in list for consistency
+            normalized_cfg = self.normalize_config(cfg)
+            normalized_envs = [normalized_cfg]
+        
+        # Flatten args for each env to make them accessible at top level
+        flattened_envs = []
+        for env_cfg in normalized_envs:
+            flat_env = env_cfg.copy()
+            if 'args' in env_cfg and isinstance(env_cfg['args'], dict):
+                # Flatten args to top level
+                for key, value in env_cfg['args'].items():
+                    if key not in flat_env:
+                        flat_env[key] = value
+            flattened_envs.append(flat_env)
+        
+        # Convert to namespace
         def to_ns(d):
             if isinstance(d, dict):
                 return SimpleNamespace(**{k: to_ns(v) for k, v in d.items()})
             elif isinstance(d, list):
                 return [to_ns(x) for x in d]
             return d
-        return to_ns(cfg), path
+        
+        # Return single env or list based on original format
+        if len(flattened_envs) == 1:
+            return to_ns(flattened_envs[0]), path
+        else:
+            return [to_ns(env) for env in flattened_envs], path
 
     def load_training(self, name_or_path: str, hyper_args=None):
         """Return (training_config_obj, training_args_obj, resolved_path)."""
@@ -151,7 +322,7 @@ class ConfigLoader:
                 if 'args' in dataset and 'chunk_size' in dataset['args']:
                     task_chunk_size = dataset['args']['chunk_size']
                     if task_chunk_size != policy_chunk_size:
-                        print(f"⚠️  Config Override: chunk_size = {policy_chunk_size} (policy) overrides {task_chunk_size} (task.datasets['{dataset.get('name', 'unnamed')}'])")
+                        logger.warning(f"Config Override: chunk_size = {policy_chunk_size} (policy) overrides {task_chunk_size} (task.datasets['{dataset.get('name', 'unnamed')}'])")
                         dataset['args']['chunk_size'] = policy_chunk_size
         
         # ========== Priority Rule #2: action_normalize, state_normalize (policy > task) ==========
@@ -161,10 +332,10 @@ class ConfigLoader:
         task_state_norm = task_config.get('state_normalize')
         
         if policy_action_norm is not None and task_action_norm is not None and policy_action_norm != task_action_norm:
-            print(f"⚠️  Config Override: action_normalize = '{policy_action_norm}' (policy) overrides '{task_action_norm}' (task)")
+            logger.warning(f"Config Override: action_normalize = '{policy_action_norm}' (policy) overrides '{task_action_norm}' (task)")
         
         if policy_state_norm is not None and task_state_norm is not None and policy_state_norm != task_state_norm:
-            print(f"⚠️  Config Override: state_normalize = '{policy_state_norm}' (policy) overrides '{task_state_norm}' (task)")
+            logger.warning(f"Config Override: state_normalize = '{policy_state_norm}' (policy) overrides '{task_state_norm}' (task)")
         
         # ========== Priority Rule #3: action_norm_mask, state_norm_mask (task > policy) ==========
         # These should be preserved from task config (no override)
@@ -179,12 +350,19 @@ class ConfigLoader:
         policy_state_dim = model_args.get('state_dim')
         
         if task_action_dim is not None and policy_action_dim is not None and task_action_dim != policy_action_dim:
-            print(f"⚠️  Config Override: action_dim = {task_action_dim} (task) overrides {policy_action_dim} (policy.model_args)")
+            logger.warning(f"Config Override: action_dim = {task_action_dim} (task) overrides {policy_action_dim} (policy.model_args)")
             model_args['action_dim'] = task_action_dim
         
         if task_state_dim is not None and policy_state_dim is not None and task_state_dim != policy_state_dim:
-            print(f"⚠️  Config Override: state_dim = {task_state_dim} (task) overrides {policy_state_dim} (policy.model_args)")
+            logger.warning(f"Config Override: state_dim = {task_state_dim} (task) overrides {policy_state_dim} (policy.model_args)")
             model_args['state_dim'] = task_state_dim
+            
+        # Also update top-level policy_config if these keys exist there (due to flattening)
+        # This prevents the flattened old values from overriding the updated model_args later
+        if 'action_dim' in policy_config and 'action_dim' in model_args:
+            policy_config['action_dim'] = model_args['action_dim']
+        if 'state_dim' in policy_config and 'state_dim' in model_args:
+            policy_config['state_dim'] = model_args['state_dim']
 
         # Dynamically extract all model parameters from policy config
         # This includes both model_args and any flattened parameters from command line overrides
@@ -274,6 +452,10 @@ class ConfigLoader:
             elif isinstance(args.image_size, int):
                 args.image_size = [args.image_size, args.image_size]
             args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
+            
+            # IMPORTANT: Update args.model_args for policies that use it directly (like ACT)
+            # This ensures the updated action_dim/state_dim are used during model initialization
+            args.model_args = model_params.copy()
         return all_params
 
 

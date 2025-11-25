@@ -1,59 +1,56 @@
-# 混合数据集示例：结合不同类型的数据集
-
-# 多种数据集混合，每个数据集独立配置
 datasets:
-  # 仿真数据集
-  - name: "simulation_data"
-    class: "AlohaSimDataset"  # 简写形式，会自动补全为 data_utils.datasets.AlohaSimDataset
-    args:
-      dataset_path_list: ['data/sim_transfer_cube_scripted']
-      camera_names: ['primary']
-      chunk_size: 64
-      ctrl_space: 'joint'
-      ctrl_type: 'abs'
-
-  # 真实机器人数据集
-  - name: "real_robot_data"
-    class: "EpisodicDataset"
-    args:
-      dataset_path_list: ['data/real_transfer_cube']
-      camera_names: ['primary', 'wrist', 'overhead']
-      chunk_size: 100
-      ctrl_space: 'ee'
-      ctrl_type: 'delta'
-
-  # RLDS 格式的大规模数据集
-  - name: "large_scale_rlds"
-    class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
-    args:
-      dataset_path_list: ['data/droid_dataset']
-      camera_names: ['primary']
-      chunk_size: 32
-      ctrl_space: 'ee'
-      ctrl_type: 'delta'
-
-  # 人类演示数据集（可能有不同的处理方式）
-  - name: "human_demo_data"
-    class: "data_utils.datasets.HumanDemoDataset"
-    args:
-      dataset_path_list: ['data/human_demonstrations']
-      camera_names: ['primary']
-      chunk_size: 50
-      ctrl_space: 'ee'
-      ctrl_type: 'delta'
-      # 人类演示特有的参数
-      filter_failed_episodes: true
-      smooth_actions: true
-      action_noise_std: 0.01
-
-# 任务参数
-action_dim: 14
-state_dim: 14
-image_size: [256, 256]
-action_normalize: "zscore"
-state_normalize: "zscore"
-chunk_size: 64  # 全局默认值，可被各数据集覆盖
-
-episode_len: 400
-use_reasoning: false
-use_prev_subtask: false
+- type: data_utils.datasets.AlohaSimDataset
+  name: simulation_data
+  args:
+    dataset_path_list:
+    - data/sim_transfer_cube_scripted
+    camera_names:
+    - primary
+    chunk_size: 64
+    ctrl_space: joint
+    ctrl_type: abs
+- type: data_utils.datasets.EpisodicDataset
+  name: real_robot_data
+  args:
+    dataset_path_list:
+    - data/real_transfer_cube
+    camera_names:
+    - primary
+    - wrist
+    - overhead
+    chunk_size: 100
+    ctrl_space: ee
+    ctrl_type: delta
+- type: data_utils.datasets.rlds_wrapper.WrappedTFDSDataset
+  name: large_scale_rlds
+  args:
+    dataset_path_list:
+    - data/droid_dataset
+    camera_names:
+    - primary
+    chunk_size: 32
+    ctrl_space: ee
+    ctrl_type: delta
+- type: data_utils.datasets.HumanDemoDataset
+  name: human_demo_data
+  args:
+    dataset_path_list:
+    - data/human_demonstrations
+    camera_names:
+    - primary
+    chunk_size: 50
+    ctrl_space: ee
+    ctrl_type: delta
+    filter_failed_episodes: true
+    smooth_actions: true
+    action_noise_std: 0.01
+meta:
+  action_dim: 14
+  state_dim: 14
+  image_size:
+  - 256
+  - 256
+  action_normalize: zscore
+  state_normalize: zscore
+  use_reasoning: false
+  use_prev_subtask: false

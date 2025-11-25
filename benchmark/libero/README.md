@@ -1,8 +1,9 @@
 # Installation
 ```shell
 cd benchmark/libero
-uv sync
+uv venv
 source .venv/bin/activate
+uv sync
 cd ../../third_party/libero
 uv pip install -e .
 cd ../..

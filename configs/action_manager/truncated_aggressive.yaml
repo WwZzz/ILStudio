@@ -1,13 +1,8 @@
-# Aggressive Truncated Manager
-# Drops the last 30% of actions and allows early chunk replacement
-# Useful for more responsive behavior while avoiding far-future predictions
-
+type: deploy.action_manager.truncated.TruncatedManager
 name: truncated_aggressive
-manager_name: TruncatedManager
-module_path: deploy.action_manager.truncated
-class_name: TruncatedManager
-
-start_ratio: 0.05   # No truncation at start
-end_ratio: 0.25     # Drop last 30% (aggressive truncation)
-older_coef: 1.0    # Accept new chunk after 70% execution
-
+args:
+  module_path: deploy.action_manager.truncated
+  class_name: TruncatedManager
+  start_ratio: 0.05
+  end_ratio: 0.25
+  older_coef: 1.0

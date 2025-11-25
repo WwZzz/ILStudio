@@ -1,8 +1,2 @@
-# Basic Action Manager Configuration
-# Drop out the previous chunk directly whenever the new one comes
-
+type: deploy.action_manager.basic.BasicActionManager
 name: basic
-manager_name: BasicActionManager
-
-# Basic manager has no additional parameters
-

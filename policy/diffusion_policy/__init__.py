@@ -5,7 +5,7 @@ from .trainer import Trainer
 import torchvision.transforms as transforms
 
 def load_model(args):
-    if not args.is_pretrained:
+    if args.is_training:
         # Use unified image_size for all cameras
         image_sizes = [args.image_size for _ in args.camera_names]
         config = DiffusionPolicyConfig(

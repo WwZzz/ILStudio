@@ -1,6 +1,8 @@
+import configs  # Must be first to suppress TensorFlow logs
 import os
 from tianshou.env import SubprocVectorEnv
 import json
+from loguru import logger
 from data_utils.utils import set_seed
 from tqdm import tqdm
 import imageio
@@ -24,8 +26,6 @@ def parse_param():
     # Model arguments
     parser.add_argument('-s', '--seed', type=int, default=0,
                        help='random seed')
-    parser.add_argument('--is_pretrained', action='store_true', default=True,
-                       help='Whether to use pretrained model')
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use for evaluation')
     # Model loading - can be checkpoint path or server address
@@ -42,8 +42,8 @@ def parse_param():
                        help='Frames per second')
     parser.add_argument('-n', '--num_rollout', type=int, default=4,
                        help='Number of rollouts')
-    parser.add_argument('-ne', '--num_envs', type=int, default=2,
-                       help='Number of environments')
+    parser.add_argument('-bs', '--batch_size', type=int, default=2,
+                       help='Number of parallel environments (batch size)')
     parser.add_argument('--use_spawn', action='store_true',
                        help='Use spawn method for multiprocessing')
     # Model parameters (will be loaded from checkpoint config if not provided)
@@ -57,6 +57,7 @@ def parse_param():
 
 if __name__=='__main__':
     args = parse_param()
+    args.is_training = False
     set_seed(args.seed)
     if args.use_spawn: mp.set_start_method('spawn', force=True)
     policy = load_policy(args)
@@ -65,57 +66,113 @@ if __name__=='__main__':
     from configs.loader import ConfigLoader
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, '_unknown', []))
     env_cfg, env_cfg_path = cfg_loader.load_env(args.env)
-    # sync derived values from env config
-    if hasattr(env_cfg, 'task'):
-        args.task = env_cfg.task
-    if hasattr(env_cfg, 'max_timesteps'):
-        args.max_timesteps = env_cfg.max_timesteps
-    env_module = importlib.import_module(f"benchmark.{env_cfg.type}")
-    if not hasattr(env_module, 'create_env'): raise AttributeError(f"env {env_cfg.type} has no 'create_env'")
+    
+    # Support multiple environments in one config
+    # Check if env_cfg is a list or has an 'envs' attribute for multiple environments
+    if isinstance(env_cfg, list):
+        env_cfgs = env_cfg
+    else:
+        env_cfgs = [env_cfg]
+    
     def env_fn(env_config, env_handler):
         def create_env():
             return env_handler(env_config)
         return create_env
-
-    all_eval_results = []
-    num_iters = args.num_rollout//args.num_envs if args.num_rollout%args.num_envs==0 else args.num_rollout//args.num_envs+1
-    for i in tqdm(range(args.num_rollout//args.num_envs), total=num_iters):
-        num_envs = args.num_envs if i<num_iters-1 else args.num_rollout-i*args.num_envs
-        # init video recorder
-        if args.output_dir!='':
-            video_dir = os.path.join(args.output_dir, env_cfg.type, 'video')
-            os.makedirs(video_dir, exist_ok=True)
-            video_path = os.path.join(video_dir, f"{args.task}_roll{i*args.num_envs}_{i*args.num_envs+num_envs}.mp4") 
-            video_writer = imageio.get_writer(video_path, fps=args.fps)
-        else:
-            video_writer = None
-        env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
-        env = SubprocVectorEnv(env_fns)
-        # evaluate
-        if hasattr(policy, 'policy') and hasattr(policy.policy, 'eval'):
-            # Local model mode
-            policy.policy.eval()
-        # Remote mode doesn't need model.eval()
-        
-        eval_result = evaluate(args, policy, env, video_writer=video_writer)
-        print(eval_result)
-        all_eval_results.append(eval_result)
-        policy.reset()
     
-    eval_result = {
-        'total_success': sum(eri['total_success'] for eri in all_eval_results),
-        'total': sum(eri['total'] for eri in all_eval_results),
-        'horizon': sum([eri['horizon'] for eri in all_eval_results], []),
-        'horizon_success': sum([eri['horizon_success']*eri['total_success'] for eri in all_eval_results])
-    }
-    eval_result['success_rate'] = 1.0*eval_result['total_success']/eval_result['total']    
-    eval_result['horizon_success']/=eval_result['total_success']
-    # save result
-    if args.output_dir!='':
-        env_res_dir = os.path.join(args.output_dir, env_cfg.type)
-        os.makedirs(env_res_dir, exist_ok=True)
-        env_res_file = os.path.join(env_res_dir, f'{args.task}.json')
-        # eval_result = {k:v.astype(np.float32) if isinstance(v, np.ndarray) else v for k,v in eval_result.items()}
-        with open(env_res_file, 'w') as f:
-            json.dump(eval_result, f)
-
+    # Store results for all environments
+    all_env_results = {}
+    
+    # Iterate through each environment configuration
+    for env_idx, env_cfg in enumerate(env_cfgs):
+        logger.info("="*60)
+        logger.info(f"Evaluating environment {env_idx + 1}/{len(env_cfgs)}")
+        logger.info("="*60)
+        
+        # sync derived values from env config
+        if hasattr(env_cfg, 'task'):
+            args.task = env_cfg.task
+        if hasattr(env_cfg, 'max_timesteps'):
+            args.max_timesteps = env_cfg.max_timesteps
+        
+        # Parse env type - support both old format (simple name) and new format (full path)
+        env_type = env_cfg.type
+        if '.' in env_type:
+            # New format: full path like 'benchmark.aloha.AlohaSimEnv'
+            # Extract module path and class name
+            module_path, class_name = env_type.rsplit('.', 1)
+            env_module = importlib.import_module(module_path)
+            # Use the module name (e.g., 'aloha') for directory naming
+            env_name = module_path.split('.')[-1] if '.' in module_path else module_path
+        else:
+            # Old format: simple name like 'aloha'
+            env_module = importlib.import_module(f"benchmark.{env_type}")
+            env_name = env_type
+        
+        if not hasattr(env_module, 'create_env'): 
+            raise AttributeError(f"env module {module_path if '.' in env_type else env_type} has no 'create_env'")
+        
+        all_eval_results = []
+        num_iters = args.num_rollout//args.batch_size if args.num_rollout%args.batch_size==0 else args.num_rollout//args.batch_size+1
+        for i in tqdm(range(args.num_rollout//args.batch_size), total=num_iters, desc=f"Env {env_idx+1} Rollouts"):
+            num_envs = args.batch_size if i<num_iters-1 else args.num_rollout-i*args.batch_size
+            # init video recorder
+            if args.output_dir!='':
+                video_dir = os.path.join(args.output_dir, env_name, 'video')
+                os.makedirs(video_dir, exist_ok=True)
+                video_path = os.path.join(video_dir, f"{args.task}_roll{i*args.batch_size}_{i*args.batch_size+num_envs}.mp4") 
+                video_writer = imageio.get_writer(video_path, fps=args.fps)
+            else:
+                video_writer = None
+            env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
+            env = SubprocVectorEnv(env_fns)
+            # evaluate
+            if hasattr(policy, 'policy') and hasattr(policy.policy, 'eval'):
+                # Local model mode
+                policy.policy.eval()
+            # Remote mode doesn't need model.eval()
+            
+            eval_result = evaluate(args, policy, env, video_writer=video_writer)
+            logger.info(eval_result)
+            all_eval_results.append(eval_result)
+            policy.reset()
+        
+        eval_result = {
+            'total_success': sum(eri['total_success'] for eri in all_eval_results),
+            'total': sum(eri['total'] for eri in all_eval_results),
+            'horizon': sum([eri['horizon'] for eri in all_eval_results], []),
+            'horizon_success': sum([eri['horizon_success']*eri['total_success'] for eri in all_eval_results])
+        }
+        eval_result['success_rate'] = 1.0*eval_result['total_success']/eval_result['total']    
+        eval_result['horizon_success']/=eval_result['total_success']
+        
+        # Store results for this environment
+        env_key = f"{env_name}_{args.task}" if hasattr(env_cfg, 'task') else f"{env_name}_env{env_idx}"
+        all_env_results[env_key] = eval_result
+        
+        # save result
+        if args.output_dir!='':
+            env_res_dir = os.path.join(args.output_dir, env_name)
+            os.makedirs(env_res_dir, exist_ok=True)
+            env_res_file = os.path.join(env_res_dir, f'{args.task}.json')
+            # eval_result = {k:v.astype(np.float32) if isinstance(v, np.ndarray) else v for k,v in eval_result.items()}
+            with open(env_res_file, 'w') as f:
+                json.dump(eval_result, f)
+        
+        logger.info(f"Environment {env_idx + 1} Results:")
+        logger.info(f"  Success Rate: {eval_result['success_rate']:.2%}")
+        logger.info(f"  Total Success: {eval_result['total_success']}/{eval_result['total']}")
+        logger.info(f"  Avg Horizon (Success): {eval_result['horizon_success']:.2f}")
+    
+    # Print summary for all environments
+    if len(env_cfgs) > 1:
+        logger.info("="*60)
+        logger.info("Summary of All Environments:")
+        logger.info("="*60)
+        for env_key, result in all_env_results.items():
+            logger.info(f"{env_key}: Success Rate = {result['success_rate']:.2%} ({result['total_success']}/{result['total']})")
+        
+        # Save combined results
+        if args.output_dir!='':
+            summary_file = os.path.join(args.output_dir, 'all_envs_summary.json')
+            with open(summary_file, 'w') as f:
+                json.dump(all_env_results, f, indent=2)
