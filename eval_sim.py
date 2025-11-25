@@ -171,8 +171,43 @@ if __name__=='__main__':
         for env_key, result in all_env_results.items():
             logger.info(f"{env_key}: Success Rate = {result['success_rate']:.2%} ({result['total_success']}/{result['total']})")
         
+        # Calculate average success rate across all environments
+        total_success_all = sum(result['total_success'] for result in all_env_results.values())
+        total_all = sum(result['total'] for result in all_env_results.values())
+        avg_success_rate_weighted = total_success_all / total_all if total_all > 0 else 0.0
+        
+        # Calculate simple average (unweighted)
+        avg_success_rate_simple = sum(result['success_rate'] for result in all_env_results.values()) / len(all_env_results)
+        
+        # Calculate average horizon for successful episodes across all environments
+        total_horizon_success_weighted = sum(
+            result['horizon_success'] * result['total_success'] 
+            for result in all_env_results.values()
+        )
+        avg_horizon_success = total_horizon_success_weighted / total_success_all if total_success_all > 0 else 0.0
+        
+        logger.info("="*60)
+        logger.info("Overall Statistics:")
+        logger.info(f"  Average Success Rate (Weighted): {avg_success_rate_weighted:.2%} ({total_success_all}/{total_all})")
+        logger.info(f"  Average Success Rate (Simple): {avg_success_rate_simple:.2%}")
+        logger.info(f"  Average Horizon (Success): {avg_horizon_success:.2f}")
+        logger.info("="*60)
+        
+        # Prepare summary with overall statistics
+        summary_data = {
+            'individual_environments': all_env_results,
+            'overall_statistics': {
+                'avg_success_rate_weighted': avg_success_rate_weighted,
+                'avg_success_rate_simple': avg_success_rate_simple,
+                'total_success': total_success_all,
+                'total': total_all,
+                'avg_horizon_success': avg_horizon_success,
+                'num_environments': len(all_env_results)
+            }
+        }
+        
         # Save combined results
         if args.output_dir!='':
             summary_file = os.path.join(args.output_dir, 'all_envs_summary.json')
             with open(summary_file, 'w') as f:
-                json.dump(all_env_results, f, indent=2)
+                json.dump(summary_data, f, indent=2)
