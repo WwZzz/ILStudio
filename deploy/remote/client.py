@@ -13,6 +13,7 @@ import os
 from collections import deque
 from typing import Optional, List
 import numpy as np
+from loguru import logger
 from benchmark.base import MetaObs, MetaAction
 
 
@@ -39,8 +40,8 @@ class PolicyClient:
         # Connect to server
         self._connect()
         
-        print(f"✓ Connected to policy server at {host}:{port}")
-        print(f"  Chunk size: {chunk_size}")
+        logger.info(f"✓ Connected to policy server at {host}:{port}")
+        logger.info(f"  Chunk size: {chunk_size}")
     
     def _connect(self):
         """Connect to the policy server"""
@@ -88,12 +89,12 @@ class PolicyClient:
             return self._receive_mact_list()
             
         except Exception as e:
-            print(f"✗ Error communicating with server: {e}")
+            logger.error(f"✗ Error communicating with server: {e}")
             # Try to reconnect once
             try:
                 self._disconnect()
                 self._connect()
-                print("✓ Reconnected to server, retrying...")
+                logger.info("✓ Reconnected to server, retrying...")
                 return self._send_meta_obs(meta_obs)
             except:
                 raise RuntimeError(f"Failed to communicate with server and reconnection failed: {e}")
@@ -123,7 +124,7 @@ class PolicyClient:
             return mact_list
             
         except Exception as e:
-            print(f"✗ Error receiving MetaAction list: {e}")
+            logger.error(f"✗ Error receiving MetaAction list: {e}")
             return []
     
     def _recv_exactly(self, num_bytes: int) -> Optional[bytes]:
@@ -178,7 +179,7 @@ class PolicyClient:
             else:
                 mobs.timestep = np.array([[t]])
             
-            print(f"  📤 Requesting new action chunk from server (t={t})")
+            logger.debug(f"  📤 Requesting new action chunk from server (t={t})")
             
             # Send observation to server and get action chunk
             mact_list = self._send_meta_obs(mobs)
@@ -186,7 +187,7 @@ class PolicyClient:
             if not mact_list:
                 raise RuntimeError("Server returned empty action list")
             
-            print(f"  📥 Received {len(mact_list)} actions from server")
+            logger.debug(f"  📥 Received {len(mact_list)} actions from server")
             
             # Clear existing queue and add new actions
             while len(self.action_queue) > 0:
@@ -218,7 +219,7 @@ class PolicyClient:
     def reset(self):
         """Reset the policy (clear action queue)"""
         self.action_queue.clear()
-        print("  🔄 Remote policy reset (cleared action queue)")
+        logger.debug("  🔄 Remote policy reset (cleared action queue)")
     
     def __del__(self):
         """Cleanup on destruction"""

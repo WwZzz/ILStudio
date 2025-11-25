@@ -46,6 +46,7 @@ dependencies = [
     "dlimp @ git+https://github.com/kvablack/dlimp@5edaa4691567873d495633f2708982b42edf1972",
     "dm_control==1.0.14",
     "mujoco==2.3.7",
+    "loguru",
 ]
 
 [tool.uv]

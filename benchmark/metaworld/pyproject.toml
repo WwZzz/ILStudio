@@ -35,6 +35,7 @@ dependencies = [
     "timm>=0.9.10",
     "draccus",
     "tensorflow_graphics",
+    "loguru",
 ]
 
 

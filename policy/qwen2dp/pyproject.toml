@@ -37,6 +37,7 @@ dependencies = [
     "torchdata<=0.9.0",
     "lerobot",
     "qwen-vl-utils",
+    "loguru",
 ]
 
 [tool.hatch.build.targets.wheel]
