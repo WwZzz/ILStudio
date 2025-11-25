@@ -1,7 +1,7 @@
 type: metaworld
 # Example fields consumed by benchmark.aloha.AlohaSimEnv
 task: basketball-v3
-max_timesteps: 128
+max_timesteps: 200
 ctrl_space: ee
 ctrl_type: abs
 use_camera: True
