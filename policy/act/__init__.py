@@ -8,6 +8,8 @@ def load_model(args):
     if not args.is_training:
         model = ACTPolicy.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         model.to('cuda')
+        # Only set collator, no processor needed (samples already in correct format)
+        model.data_collator = data_collator
     else:
         model_args = getattr(args, 'model_args', {})
         config = ACTPolicyConfig(**model_args) 

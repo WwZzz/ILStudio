@@ -104,13 +104,24 @@ class ACTPolicy(PreTrainedModel):
             a_hat, _, (_, _) = self.model(qpos, image, env_state) # no action, sample from prior
             return a_hat
 
-    def select_action(self, obs):
-        # process data
-        device = next(self.parameters()).device  # Get model's device
-        obs = {k:torch.from_numpy(v).to(device) if isinstance(v, np.ndarray) else v for k,v in obs.items()}
-        obs['image'] = self.normalize(obs['image']/255.0)
-        # inference
-        a_hat, _, (_, _) = self.model(obs['state'], obs['image'], None)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Collated batch from meta2obs (via data_collator or default_collate)
+        
+        Returns:
+            Action predictions
+        """
+        # Move tensors to device and get data
+        device = next(self.parameters()).device
+        image = batch_obs['image'].to(device)
+        state = batch_obs['qpos'].to(device)
+        # Normalize image (ACT-specific normalization)
+        image = self.normalize(image)
+        # Forward pass
+        a_hat, _, (_, _) = self.model(state, image, None)
         return a_hat
 
 def kl_divergence(mu, logvar):

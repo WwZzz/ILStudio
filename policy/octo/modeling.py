@@ -118,19 +118,33 @@ class OctoPolicy(PreTrainedModel):
         loss = head_outputs['action'][0]
         return {'loss': loss}
     
-    def select_action(self, obs, **kwargs):
+    def select_action(self, batch_obs, **kwargs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
         device = next(self.parameters()).device
+        
+        # Create task for evaluation if not already done
         if self._eval_task is None:
-            self._eval_task = self.model.create_tasks(texts=obs['raw_lang'], device=device)
-        # modify obs
-        num_obs = obs['state'].shape[0]
-        instances = [{'state': obs['state'][i], 'image': obs['image'][i], 'timestamp': obs['timestep'][i].item()} for i in range(num_obs)]
-        processed_obs = [self.data_processor(instance) for instance in instances]
-        batch_obs = self.data_collator(processed_obs)['observation']
-        batch_obs = self.data_processor._pt2dev(batch_obs, device)
-        # obs to device
+            # Extract raw_lang from batch_obs
+            raw_lang = batch_obs.get('raw_lang', [])
+            self._eval_task = self.model.create_tasks(texts=raw_lang, device=device)
+        
+        # Extract observation from batch
+        observation = batch_obs['observation'] if 'observation' in batch_obs else batch_obs
+        
+        # Move observation to device
+        observation = self.data_processor._pt2dev(observation, device)
+        
+        # Sample actions
         actions = self.model.sample_actions(
-            batch_obs, 
+            observation, 
             self._eval_task, 
             unnormalization_statistics=None,
             generator=torch.Generator(device).manual_seed(0),    

@@ -88,7 +88,7 @@ class LiberoEnv(MetaEnv):
         img_primary = obs["agentview_image"][::-1, ::-1]
         all_imgs = [img_primary]
         if self.use_wrist:
-            img_second = obs['robot0_eye_in_hand_image']
+            img_second = obs['robot0_eye_in_hand_image'][::-1, ::-1]
             all_imgs.append(img_second)
         image = np.stack(all_imgs)
         image = image.transpose(0, 3, 1, 2)

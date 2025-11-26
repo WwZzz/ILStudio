@@ -280,19 +280,25 @@ class FlowMatchingPolicy(PreTrainedModel):
         return loss
     
     @torch.no_grad()
-    def select_action(self, obs) -> np.ndarray:
+    def select_action(self, batch_obs) -> np.ndarray:
         """
         Sample action using the learned flow.
         
         Args:
-            state: State tensor, shape [B, state_dim]
+            batch_obs: Processed and collated batch from meta2obs
         
         Returns:
             Sampled action as numpy array, shape [B, chunk_size, action_dim]
         """
         self.eval()
-        state = obs['state']
-        state = torch.from_numpy(state).to('cuda')
+        
+        # Extract state and move to device
+        state = batch_obs['state']
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+        state = state.to('cuda')
+        
+        # Sample action using flow
         if self.config.use_ode_solver and HAS_TORCHDIFFEQ:
             action = self._sample_ode(state)
         else:
