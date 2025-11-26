@@ -110,7 +110,7 @@ class SmolVLAPolicy(PreTrainedModel):
         losses = self.model(images=images, img_masks=img_masks, lang_tokens=lang_tokens, lang_masks=lang_masks,
                             state=state, actions=actions, noise=noise, time=time)
         losses = (losses * ~is_pad.unsqueeze(-1))
-        losses = losses[:, :, : self.config.max_action_dim]
+        losses = losses[:, :, : self.config.action_dim]
         return {"loss": losses.mean()}
     
     def select_action(self, obs):
