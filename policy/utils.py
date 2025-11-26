@@ -26,9 +26,9 @@ def load_policy(args):
         
     else:
         # Local model mode (fallback to original behavior)
-        print("="*60)
-        print("🤖 Local Policy Evaluation")
-        print("="*60)
+        logger.info("="*60)
+        logger.info("🤖 Local Policy Evaluation")
+        logger.info("="*60)
         # Load normalizers and model as before
         from data_utils.utils import load_normalizers
         from benchmark.base import MetaPolicy
@@ -37,30 +37,27 @@ def load_policy(args):
         args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
         
         # Load policy directly from checkpoint
-        print(f"Loading model from checkpoint: {args.model_name_or_path}")
+        logger.info(f"Loading model from checkpoint: {args.model_name_or_path}")
         # Fallback to direct checkpoint loading
-        if not hasattr(args, 'policy_module'):
-            from policy.direct_loader import load_model_from_checkpoint
-            if not hasattr(args, 'is_training'):
-                args.is_training = False
-            model_components = load_model_from_checkpoint(args.model_name_or_path, args)
-            model = model_components['model']
-        else:
-            from policy.direct_loader import load_model_from_checkpoint
-            model_components = load_model_from_checkpoint(args.model_name_or_path, args)
-            model = model_components['model']
-            config = model_components.get('config', None)
-            if config:
-                print(f"Loaded config from checkpoint: {type(config).__name__}")
-            policy = MetaPolicy(
-                policy=model, 
-                chunk_size=getattr(args, 'chunk_size', None), 
-                action_normalizer=normalizers['action'], 
-                state_normalizer=normalizers['state'], 
-                ctrl_space=ctrl_space, 
-                ctrl_type=ctrl_type,
-                img_size = getattr(args, 'image_size', None)
-            )
+        from policy.direct_loader import load_model_from_checkpoint
+        if not hasattr(args, 'is_training'):
+            args.is_training = False
+        model_components = load_model_from_checkpoint(args.model_name_or_path, args)
+        model = model_components['model']
+        config = model_components.get('config', None)
+        if config:
+            logger.info(f"Loaded config from checkpoint: {type(config).__name__}")
+        
+        # Always wrap model in MetaPolicy
+        policy = MetaPolicy(
+            policy=model, 
+            chunk_size=getattr(args, 'chunk_size', None), 
+            action_normalizer=normalizers['action'], 
+            state_normalizer=normalizers['state'], 
+            ctrl_space=ctrl_space, 
+            ctrl_type=ctrl_type,
+            img_size = getattr(args, 'image_size', None)
+        )
     return policy
 
 def print_model_trainable_information(model, rank0_print=None):
