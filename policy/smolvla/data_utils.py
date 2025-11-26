@@ -56,37 +56,6 @@ class SmolVLADataCollator:
         new_vector[..., :current_dim] = vector
         return new_vector
 
-    def resize_with_pad(self, img, width, height, pad_value=-1):
-        # assume no-op when width height fits already
-        if img.ndim != 4:
-            raise ValueError(f"(b,c,h,w) expected, but {img.shape}")
-
-        cur_height, cur_width = img.shape[2:]
-
-        ratio = max(cur_width / width, cur_height / height)
-        resized_height = int(cur_height / ratio)
-        resized_width = int(cur_width / ratio)
-        
-        resized_img = F.interpolate(
-            img, size=(resized_height, resized_width), mode="bilinear", align_corners=False
-        )
-
-        delta_h = max(0, height - resized_height)
-        delta_w = max(0, width - resized_width)
-
-        pad_top = delta_h // 2
-        pad_bottom = delta_h - pad_top
-        
-        pad_left = delta_w // 2
-        pad_right = delta_w - pad_left
-
-        padded_img = F.pad(
-            resized_img, 
-            (pad_left, pad_right, pad_top, pad_bottom), 
-            value=pad_value
-        )
-        return padded_img
-    
     # def resize_with_pad(self, img, width, height, pad_value=-1):
     #     # assume no-op when width height fits already
     #     if img.ndim != 4:
@@ -97,16 +66,47 @@ class SmolVLADataCollator:
     #     ratio = max(cur_width / width, cur_height / height)
     #     resized_height = int(cur_height / ratio)
     #     resized_width = int(cur_width / ratio)
+        
     #     resized_img = F.interpolate(
     #         img, size=(resized_height, resized_width), mode="bilinear", align_corners=False
     #     )
 
-    #     pad_height = max(0, int(height - resized_height))
-    #     pad_width = max(0, int(width - resized_width))
+    #     delta_h = max(0, height - resized_height)
+    #     delta_w = max(0, width - resized_width)
 
-    #     # pad on left and top of image
-    #     padded_img = F.pad(resized_img, (pad_width, 0, pad_height, 0), value=pad_value)
+    #     pad_top = delta_h // 2
+    #     pad_bottom = delta_h - pad_top
+        
+    #     pad_left = delta_w // 2
+    #     pad_right = delta_w - pad_left
+
+    #     padded_img = F.pad(
+    #         resized_img, 
+    #         (pad_left, pad_right, pad_top, pad_bottom), 
+    #         value=pad_value
+    #     )
     #     return padded_img
+    
+    def resize_with_pad(self, img, width, height, pad_value=-1):
+        # assume no-op when width height fits already
+        if img.ndim != 4:
+            raise ValueError(f"(b,c,h,w) expected, but {img.shape}")
+
+        cur_height, cur_width = img.shape[2:]
+
+        ratio = max(cur_width / width, cur_height / height)
+        resized_height = int(cur_height / ratio)
+        resized_width = int(cur_width / ratio)
+        resized_img = F.interpolate(
+            img, size=(resized_height, resized_width), mode="bilinear", align_corners=False
+        )
+
+        pad_height = max(0, int(height - resized_height))
+        pad_width = max(0, int(width - resized_width))
+
+        # pad on left and top of image
+        padded_img = F.pad(resized_img, (pad_width, 0, pad_height, 0), value=pad_value)
+        return padded_img
 
     def __call__(self, instances):
         # process state and action
