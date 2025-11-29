@@ -7,6 +7,7 @@ datasets:
     chunk_size: 50
     ctrl_space: ee
     ctrl_type: delta
+    camera_names: observation.images.image
 meta:
   action_dim: 7
   state_dim: 8

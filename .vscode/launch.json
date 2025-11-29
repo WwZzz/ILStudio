@@ -17,11 +17,11 @@
                 "HF_ENDPOINT": "https://hf-mirror.com",
                 // "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 // "ILSTD_CACHE": "/mnt/model/ilstd/data",
-                "HF_HOME": "/inspire/hdd/global_user/wangzheng-240308120196/huggingface/",
+                "HF_HOME": "/inspire/qb-dev/project/robot-action/public/huggingface",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [
-                "-p", "smolvla_mw", "-t", "lerobot_metaworld", "-o", "ckpt/smolvla_mw1124", "-c", "smolvla"
+                "-m", "ckpt/openvla_1129"
             ],
             // "args": [
             //     "-e", "libero_object_0", "-o", "results/smolvla_liberoobj_primary_0"

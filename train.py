@@ -18,6 +18,8 @@ import torch
 import numpy
 torch.serialization.add_safe_globals([numpy.ndarray])
 torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
+torch.serialization.add_safe_globals([numpy.dtype])
+torch.serialization.safe_globals([numpy.dtype])
 
 def parse_param():
     """

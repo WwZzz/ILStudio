@@ -96,6 +96,14 @@ class ConfigLoader:
                 for env in normalized['envs']
             ]
         
+        # 7. Preserve important top-level parameters that should not be in reserved_keys
+        # These parameters may be defined at policy top-level and need to be accessible
+        # for priority override logic (e.g., policy normalize > task normalize)
+        important_params = ['action_normalize', 'state_normalize']
+        for param in important_params:
+            if param in cfg:
+                normalized[param] = cfg[param]
+        
         return normalized
 
     def get_overrides(self, category: str) -> Dict[str, Any]:
@@ -162,6 +170,18 @@ class ConfigLoader:
             # Preserve old 'module_path' for backward compatibility
             if 'type' in cfg:
                 cfg['module_path'] = cfg['type']
+        else:
+            # If no args dict, create model_args from top-level parameters
+            if 'model_args' not in cfg:
+                cfg['model_args'] = {}
+        
+        # IMPORTANT: Ensure top-level normalize parameters are available in model_args
+        # This allows normalize parameters defined at policy top-level to override task settings
+        for norm_key in ['action_normalize', 'state_normalize']:
+            if norm_key in cfg:
+                # Top-level normalize params should be in model_args for merge_all_parameters
+                if norm_key not in cfg['model_args']:
+                    cfg['model_args'][norm_key] = cfg[norm_key]
         
         return cfg, path
 
@@ -439,6 +459,14 @@ class ConfigLoader:
             all_params['action_norm_mask'] = preferred_action_norm_mask
         if preferred_state_norm_mask is not None:
             all_params['state_norm_mask'] = preferred_state_norm_mask
+        
+        # ========== CRITICAL: Ensure task dimensions override everything ==========
+        # After all merging, force task dimensions to take priority
+        # This is the final enforcement of Priority Rule #4
+        if task_action_dim is not None:
+            all_params['action_dim'] = task_action_dim
+        if task_state_dim is not None:
+            all_params['state_dim'] = task_state_dim
         
         # Remove None values to avoid overriding existing values with None
         all_params = {k: v for k, v in all_params.items() if v is not None}
