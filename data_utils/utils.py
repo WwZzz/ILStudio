@@ -21,6 +21,10 @@ from .normalize import NORMTYPE2CLASS, load_normalizers, save_norm_meta_to_json,
 def save_example_data(train_data, output_dir):
     """
     Save example data from the first dataset for debugging purposes.
+    Saves raw (unnormalized) data to match testing phase format:
+    - Images: original resolution, saved as PNG
+    - State: raw unnormalized values, saved as state_raw.csv
+    - Action: raw unnormalized values, saved as action_raw.csv
     
     Args:
         train_data: The dataset object or list of datasets (can be map-style or iterable)
@@ -51,7 +55,7 @@ def save_example_data(train_data, output_dir):
             dataset = train_data
             logger.info("Saving example from single dataset")
         
-        # Get one sample from the dataset
+        # Get one sample from the dataset (raw, before any processing)
         # Check if dataset is map-style (has __getitem__) or iterable
         sample = None
         if hasattr(dataset, '__getitem__'):
@@ -80,13 +84,16 @@ def save_example_data(train_data, output_dir):
                 f.write(str(sample['raw_lang']))
             logger.info(f"Saved language instruction to: {lang_file}")
         
-        # Save images - save each camera view separately
+        # Save images - save each camera view separately, preserving original resolution
+        # Match testing phase format: save as camera_{i}.png without resizing
         if 'image' in sample and sample['image'] is not None:
             image_data = sample['image']
             
             # Convert tensor to numpy if needed
             if isinstance(image_data, torch.Tensor):
                 image_data = image_data.cpu().numpy()
+            
+            logger.debug(f"Training example - Image shape: {image_data.shape}, dtype: {image_data.dtype}")
             
             # Handle different image formats
             # Expected format: (num_cameras, C, H, W) or (C, H, W)
@@ -127,50 +134,45 @@ def save_example_data(train_data, output_dir):
             else:
                 logger.warning(f"Unexpected image shape: {image_data.shape}")
         
-        # Save state and action as CSV
-        state_action_data = {}
-        
+        # Save state as separate CSV (raw, unnormalized)
+        # Match testing phase format: state_raw.csv
         if 'state' in sample and sample['state'] is not None:
-            state = sample['state']
-            if isinstance(state, torch.Tensor):
-                state = state.cpu().numpy()
-            # Flatten if needed
-            state = state.flatten()
-            state_action_data['state'] = state
+            state_data = sample['state']
+            if isinstance(state_data, torch.Tensor):
+                state_data = state_data.cpu().numpy()
+            
+            # Ensure state_data is at least 2D for np.savetxt
+            if state_data.ndim == 1:
+                state_data = state_data.reshape(1, -1)
+            elif state_data.ndim > 2:
+                # Flatten to 2D if needed
+                state_data = state_data.reshape(1, -1)
+            
+            state_file = os.path.join(examples_dir, 'state_raw.csv')
+            header = ','.join([f'state_{i}' for i in range(state_data.shape[1])])
+            np.savetxt(state_file, state_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw state (unnormalized) to: {state_file}")
         
+        # Save action as separate CSV (raw, unnormalized)
+        # Match testing phase format: action_raw.csv
         if 'action' in sample and sample['action'] is not None:
-            action = sample['action']
-            if isinstance(action, torch.Tensor):
-                action = action.cpu().numpy()
-            # Action might be (chunk_size, action_dim), save each timestep
-            if len(action.shape) == 2:
-                # Save as multiple rows
-                csv_file = os.path.join(examples_dir, 'state_action.csv')
-                df_data = {'timestep': list(range(action.shape[0]))}
-                
-                # Add action columns
-                for i in range(action.shape[1]):
-                    df_data[f'action_{i}'] = action[:, i]
-                
-                # Add state columns (broadcast state to all timesteps)
-                if 'state' in state_action_data:
-                    state = state_action_data['state']
-                    for i in range(len(state)):
-                        df_data[f'state_{i}'] = [state[i]] * action.shape[0]
-                
-                df = pd.DataFrame(df_data)
-                df.to_csv(csv_file, index=False)
-                logger.info(f"Saved state and action (action shape: {action.shape}) to: {csv_file}")
-            else:
-                # Single action vector
-                action = action.flatten()
-                state_action_data['action'] = action
-                
-                # Create DataFrame
-                csv_file = os.path.join(examples_dir, 'state_action.csv')
-                df = pd.DataFrame([state_action_data])
-                df.to_csv(csv_file, index=False)
-                logger.info(f"Saved state and action to: {csv_file}")
+            action_data = sample['action']
+            if isinstance(action_data, torch.Tensor):
+                action_data = action_data.cpu().numpy()
+            
+            # Action might be (chunk_size, action_dim) or (action_dim,)
+            if action_data.ndim == 1:
+                action_data = action_data.reshape(1, -1)
+            elif action_data.ndim > 2:
+                # Flatten higher dimensions
+                original_shape = action_data.shape
+                action_data = action_data.reshape(-1, action_data.shape[-1])
+                logger.debug(f"Reshaped action from {original_shape} to {action_data.shape}")
+            
+            action_file = os.path.join(examples_dir, 'action_raw.csv')
+            header = ','.join([f'action_{i}' for i in range(action_data.shape[1])])
+            np.savetxt(action_file, action_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw action (unnormalized) to: {action_file}")
         
         # Save reasoning as JSON if not empty
         if 'reasoning' in sample and sample['reasoning']:
@@ -185,7 +187,35 @@ def save_example_data(train_data, output_dir):
                         json.dump({'reasoning': str(reasoning)}, f, indent=2, ensure_ascii=False)
                 logger.info(f"Saved reasoning to: {reasoning_file}")
         
-        logger.info("Successfully saved example data from first dataset")
+        # Save metadata info file to match testing phase format
+        info_file = os.path.join(examples_dir, 'info.txt')
+        with open(info_file, 'w') as f:
+            f.write("=== Training Example Data Info ===\n\n")
+            f.write("This example is saved from the raw training dataset (before data_processor).\n")
+            f.write("Data is saved in unnormalized form to match testing phase format.\n\n")
+            
+            # Sample info
+            f.write("Sample keys:\n")
+            for key in sample.keys():
+                value = sample[key]
+                if isinstance(value, (np.ndarray, torch.Tensor)):
+                    shape = value.shape if hasattr(value, 'shape') else 'N/A'
+                    dtype = value.dtype if hasattr(value, 'dtype') else 'N/A'
+                    f.write(f"  {key}: shape={shape}, dtype={dtype}\n")
+                elif value is not None:
+                    f.write(f"  {key}: {type(value).__name__}\n")
+            
+            f.write("\nFiles saved:\n")
+            f.write("  - camera_{i}.png: raw images from dataset (unnormalized, original resolution)\n")
+            f.write("  - state_raw.csv: raw state values (unnormalized)\n")
+            f.write("  - action_raw.csv: raw action values (unnormalized)\n")
+            f.write("  - raw_lang.txt: language instruction (if available)\n")
+            f.write("  - reasoning.json: reasoning data (if available)\n")
+            f.write("  - info.txt: this file\n\n")
+            f.write("Note: These raw values can be directly compared with testing phase examples.\n")
+        
+        logger.info(f"Saved example info to: {info_file}")
+        logger.info("Successfully saved example data from first dataset (raw, unnormalized)")
         
     except Exception as e:
         logger.error(f"Error saving example data: {e}")

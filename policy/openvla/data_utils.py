@@ -39,8 +39,9 @@ class OpenVLAProcessor:
     
     def __call__(self, sample):
         """Process a single sample."""
-        dataset_name = None
-        action = sample['action'][0]
+        action = sample.get('action', None)
+        if action is not None:
+            action = action[0]
         # Handle image format: (num_cameras, C, H, W) -> take first camera
         image_tensor = sample['image'][0]  # Take first camera (primary)
         # Convert from tensor to PIL Image
@@ -50,10 +51,16 @@ class OpenVLAProcessor:
         
         # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
         prompt_builder = self.prompt_builder_fn("openvla")
-        conversation = [
-            {"from": "human", "value": f"What action should the robot take to {lang}?"},
-            {"from": "gpt", "value": self.action_tokenizer(action)},
-        ]
+        if action is not None:
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {lang}?"},
+                {"from": "gpt", "value": self.action_tokenizer(action)},
+            ]
+        else:
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {lang}?"},
+                {"from": "gpt", "value": ""},
+            ]
         for turn in conversation:
             prompt_builder.add_turn(turn["from"], turn["value"])
 
@@ -67,9 +74,10 @@ class OpenVLAProcessor:
         pixel_values = self.image_transform(img)
 
         # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
-        labels[: -(len(action) + 1)] = IGNORE_INDEX
-        if not self.predict_stop_token:
-            labels[-1] = IGNORE_INDEX
-
-        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name)
+        if action is not None:
+            labels[: -(len(action) + 1)] = IGNORE_INDEX
+            if not self.predict_stop_token:
+                labels[-1] = IGNORE_INDEX
+        # Note: Removed dataset_name field to avoid None values causing concatenation errors in accelerate
+        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels)
         

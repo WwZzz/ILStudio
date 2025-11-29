@@ -15,27 +15,26 @@
 # Note: Model-specific data processing parameters are now in configs/model/default.yaml
 
 # Data loading (training process related)
-preload_data: false
-
+preload_data: true
+background_prefetch: false
 # =============================================================================
 # OPTIMIZER CONFIGURATION
 # =============================================================================
 # Core optimizer settings that are typically set once per training setup
 
 # Learning rate and scheduling
-learning_rate: 1e-4
-weight_decay: 1e-10
-warmup_steps: 1000
+learning_rate: 3e-4
+weight_decay: 1e-4
+warmup_steps: 500
 warmup_ratio: 0.0
 lr_scheduler_type: "cosine"
-max_grad_norm: 10.0
 
 # Optimizer settings
 optim: "adamw_torch"
-adam_beta1: 0.9
-adam_beta2: 0.95
+adam_beta1: 0.95
+adam_beta2: 0.999
 adam_epsilon: 1e-8
-bf16: true
+
 # Note: Model architecture, LoRA, and quantization settings are now in configs/model/default.yaml
 
 # =============================================================================
@@ -45,12 +44,12 @@ bf16: true
 
 # Logging settings
 logging_strategy: "steps"
-logging_steps: 100
-report_to: "tensorboard"
+logging_steps: 10
+report_to: "none"
 
 # Saving settings
 save_strategy: "steps"
-save_steps: 5000
+save_steps: 10000
 save_total_limit: 50
 
 # =============================================================================
@@ -61,12 +60,11 @@ save_total_limit: 50
 # DataLoader settings
 dataloader_num_workers: 8
 dataloader_pin_memory: true
-dataloader_persistent_workers: true
 remove_unused_columns: false
 
 # Evaluation settings
 do_eval: false
-eval_steps: 200
+eval_steps: 2000
 
 # System settings
 seed: 0
@@ -84,6 +82,7 @@ max_steps: 100000
 per_device_train_batch_size: 64
 per_device_eval_batch_size: 32
 
+# Logging directory (often derived from output_dir)
 
 # Checkpoint resuming (often handled automatically)
 resume_from_checkpoint: True

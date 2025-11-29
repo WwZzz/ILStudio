@@ -197,15 +197,22 @@ class DiffusionPolicyModel(PreTrainedModel):
                 naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
             return naction
         
-    def select_action(self, obs):
-        # process data
-        # if not hasattr(self, 'ema_copied'): 
-        #     self.ema.copy_to(self.parameters())
-        #     self.ema_copied = True
-        device = next(self.parameters()).device  # Get model's device
-        obs = {k:torch.from_numpy(v).to(device) if isinstance(v, np.ndarray) else v for k,v in obs.items()}
-        obs['image'] = obs['image']/255.0
-        action = self.forward(obs['state'], obs['image'], None, None)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
+        # Move tensors to device and get data
+        device = next(self.parameters()).device
+        image = batch_obs['image'].to(device)
+        state = batch_obs['qpos'].to(device)
+        # Forward pass
+        action = self.forward(state, image, None, None)
         return action
     
     def save_pretrained(self, save_directory, state_dict=None, *args, **kwargs):

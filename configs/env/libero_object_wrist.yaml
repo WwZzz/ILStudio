@@ -4,6 +4,7 @@
     task: libero_object_0
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -17,6 +18,7 @@
     task: libero_object_1
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -30,6 +32,7 @@
     task: libero_object_2
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -43,6 +46,7 @@
     task: libero_object_3
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -56,6 +60,7 @@
     task: libero_object_4
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -69,6 +74,7 @@
     task: libero_object_5
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -82,6 +88,7 @@
     task: libero_object_6
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -94,6 +101,7 @@
     task: libero_object_7
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -107,6 +115,7 @@
     task: libero_object_8
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256
@@ -120,6 +129,7 @@
     task: libero_object_9
     max_timesteps: 400
     ctrl_space: ee
+    use_wrist: True
     image_size:
     - 256
     - 256

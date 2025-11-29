@@ -113,21 +113,25 @@ class SmolVLAPolicy(PreTrainedModel):
         losses = losses[:, :, : self.config.action_dim]
         return {"loss": losses.mean()}
     
-    def select_action(self, obs):
-        num_samples = obs['state'].shape[0]
-        samples = [
-            {'state': obs['state'][i], 
-            'image': obs['image'][i], 
-            'raw_lang': obs['raw_lang'][i],
-            } for i in range(num_samples)]
-        processed_samples = [self.data_processor(sample) for sample in samples]
-        batch_obs = self.data_collator(processed_samples)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
+        # Move batch to device
         device = next(self.parameters()).device
-        for k,v in batch_obs.items():
+        for k, v in batch_obs.items():
             if isinstance(v, torch.Tensor):
                 batch_obs[k] = v.to(device)
             elif isinstance(v, list):
-                batch_obs[k] = [v.to(device) for v in v]
+                batch_obs[k] = [item.to(device) if isinstance(item, torch.Tensor) else item for item in v]
+        
+        # Forward pass
         action = self.forward(**batch_obs)
-        action = action['action'][:,:,:self.model.config.action_dim]
+        action = action['action'][:, :, :self.model.config.action_dim]
         return action

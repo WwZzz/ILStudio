@@ -83,11 +83,22 @@ class CNNMLPPolicy(PreTrainedModel):
             a_hat  = self.model(qpos, image, env_state) # no action, sample from prior
             return a_hat
 
-    def select_action(self, obs):
-        # process data
-        obs = {k:torch.from_numpy(v).to('cuda') if isinstance(v, np.ndarray) else v for k,v in obs.items()}
-        obs['image'] = obs['image']/255.0
-        obs['image'] = self.normalize(obs['image'])
-        # inference
-        a_hat = self.model(obs['state'], obs['image'], None)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Collated batch from meta2obs (via data_collator or default_collate)
+        
+        Returns:
+            Action predictions
+        """
+        # Move tensors to device and get data
+        device = next(self.parameters()).device
+        image = batch_obs['image'].to(device)
+        state = batch_obs['qpos'].to(device)
+        # Normalize image (ResNet-specific normalization)
+        image = self.normalize(image)
+        # Forward pass
+        a_hat = self.model(state, image, None)
         return a_hat

@@ -140,12 +140,12 @@ class MLPPolicy(PreTrainedModel):
         loss = (loss * ~is_pad.unsqueeze(-1)).mean()
         return {"loss": loss}
     
-    def select_action(self, obs):
+    def select_action(self, batch_obs):
         """
-        Select action given observation dictionary (for evaluation/inference).
+        Inference action from processed batch observation.
         
         Args:
-            obs: Dictionary containing observation data
+            batch_obs: Processed and collated batch from meta2obs
             
         Returns:
             numpy array: Predicted actions
@@ -153,25 +153,21 @@ class MLPPolicy(PreTrainedModel):
         # Get model's device
         device = next(self.parameters()).device
         
-        # Process observation data
-        processed_obs = {}
-        for k, v in obs.items():
-            if isinstance(v, np.ndarray):
-                processed_obs[k] = torch.from_numpy(v).to(device)
-            else:
-                processed_obs[k] = v
+        # Move tensors to device
+        for k, v in batch_obs.items():
+            if isinstance(v, torch.Tensor):
+                batch_obs[k] = v.to(device)
         
-        # Extract state from observation dictionary
-        if 'state' not in processed_obs:
-            raise ValueError("No 'state' found in observation dictionary")
-        
-        state = processed_obs['state']
+        # Extract state
+        if 'state' not in batch_obs:
+            raise ValueError("No 'state' found in batch observation")
+        state = batch_obs['state']
         
         # Extract image if using camera
         image = None
-        if self.config.use_camera and 'image' in processed_obs:
-            image = processed_obs['image']
-            # Normalize image if needed (following other policies)
+        if self.config.use_camera and 'image' in batch_obs:
+            image = batch_obs['image']
+            # Normalize image if needed
             if image.dtype == torch.uint8 or image.max() > 1.0:
                 image = image.float() / 255.0
         

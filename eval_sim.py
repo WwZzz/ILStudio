@@ -131,7 +131,12 @@ if __name__=='__main__':
                 policy.policy.eval()
             # Remote mode doesn't need model.eval()
             
-            eval_result = evaluate(args, policy, env, video_writer=video_writer)
+            # Save example batch only for the first rollout
+            save_example_dir = None
+            if i == 0 and args.output_dir != '':
+                save_example_dir = os.path.join(args.output_dir, env_name, 'example_data')
+            
+            eval_result = evaluate(args, policy, env, video_writer=video_writer, save_example_dir=save_example_dir)
             logger.info(eval_result)
             all_eval_results.append(eval_result)
             policy.reset()

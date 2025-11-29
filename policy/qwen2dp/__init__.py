@@ -71,6 +71,19 @@ def load_model(args):
     # Need to get model type here, requires dynamic import
     model.tokenizer = tokenizer
     model.multimodal_processor = multimodal_processor
+    
+    # Initialize data_processor and data_collator for inference
+    if not args.is_training:
+        model.data_processor = Qwen2VLAProcess(
+            tokenizer=tokenizer, 
+            multimodal_processor=multimodal_processor
+        )
+        model.data_collator = Qwen2VLADataCollatorForSupervisedDataset(
+            multimodal_processor=multimodal_processor,
+            tokenizer=tokenizer,
+            computed_type=torch.bfloat16
+        )
+    
     model.config.use_cache = False
     # # Whether to enable gradient checkpointing, recompute activations during backprop to save memory
     if hasattr(args, 'gradient_checkpointing') and args.gradient_checkpointing:
