@@ -450,9 +450,9 @@ class BaseNormalizer:
         
         return collated if collated else None
     
-    def save_stats(self, all_stats):
+    def save_stats(self, all_stats, save_path=None):
         """Save stats to centralized cache directory"""
-        save_path = os.path.join(self.cache_dir, self.stats_filename)
+        if save_path is None: save_path = os.path.join(self.cache_dir, self.stats_filename)
         with open(save_path, 'wb') as file:
             pickle.dump(all_stats, file)
 
@@ -462,26 +462,13 @@ class BaseNormalizer:
         This saves stats to both the target_dir (for checkpoint) and cache_dir (for future use).
         """
         assert hasattr(self, 'all_stats') and self.all_stats is not None, "No stats found."
-        stats_to_save = self.all_stats
-        # stats_to_save = {
-        #     k: {
-        #         kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
-        #     } if isinstance(v, dict) else v for k,v in self.all_stats.items()
-        # }
-        
-        # Save to target_dir (training checkpoint)
         save_path = os.path.join(target_dir, self.stats_filename)
+        # Save to target_dir (training checkpoint)
         if not os.path.exists(save_path):
-            with open(save_path, 'wb') as file:
-                pickle.dump(stats_to_save, file)
+            self.save_stats(self.all_stats, save_path=save_path)
         else:
             warnings.warn(f"Stats file {save_path} already exists in training dir.")
-        
-        # # Also save to cache_dir for future use
-        # cache_path = os.path.join(self.cache_dir, self.stats_filename)
-        # if not os.path.exists(cache_path):
-        #     with open(cache_path, 'wb') as file:
-        #         pickle.dump(stats_to_save, file)
+
 
     def load_stats(self):
         """Load stats from cache directory or dataset directory (backward compat)"""
