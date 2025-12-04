@@ -230,12 +230,45 @@ class WrappedLerobotDataset(tud.Dataset):
                 selected_episodes &= episodes_for_field
         
         return sorted(list(selected_episodes))
-    
+        
     def initialize(self):
         self.episode_len = self.get_episode_len() 
         self.cumulative_len = np.cumsum(self.episode_len)
         self.max_episode_len = max(self.episode_len)
+        
+        # Build index mapping table for fast lookup (critical for performance!)
+        self._build_index_mapping()
+        
+        # Log dataset info
+        logger.info(f"Dataset initialized: {self.total_episodes} episodes, {self.total_frames} frames")
+        logger.info(f"Episode lengths: min={min(self.episode_len)}, max={max(self.episode_len)}, mean={np.mean(self.episode_len):.1f}")
         return
+    
+    def _build_index_mapping(self):
+        """
+        Pre-compute index mapping for filtered datasets to avoid runtime loops.
+        This is CRITICAL for performance with multi-worker dataloaders!
+        """
+        self.index_to_episode_map = []  # [(dataset_idx, episode_idx, frame_offset_in_episode, actual_hf_index), ...]
+        
+        for dataset_idx, dataset in enumerate(self.datasets):
+            if hasattr(dataset, 'episodes') and dataset.episodes is not None:
+                # Filtered dataset - need to build mapping
+                ds_meta = self.dataset_metas[dataset_idx]
+                for ep_idx in dataset.episodes:
+                    ep_len = ds_meta.episodes[ep_idx]['length']
+                    ep_start_in_hf = ds_meta.episodes[ep_idx]['dataset_from_index']
+                    
+                    for frame_offset in range(ep_len):
+                        actual_hf_idx = ep_start_in_hf + frame_offset
+                        self.index_to_episode_map.append((dataset_idx, ep_idx, frame_offset, actual_hf_idx))
+            else:
+                # No filtering - direct 1:1 mapping
+                total_frames = self.per_dataset_num_frames[dataset_idx]
+                for frame_idx in range(total_frames):
+                    self.index_to_episode_map.append((dataset_idx, -1, -1, frame_idx))
+        
+        logger.info(f"Built index mapping table with {len(self.index_to_episode_map)} entries")
         
     def _load_file_into_memory(self, *args, **kwargs):
         warnings.warn("Cannot load LerobotDataset into memory")
@@ -272,6 +305,9 @@ class WrappedLerobotDataset(tud.Dataset):
     
     def __len__(self):
         """Return the total number of samples in the dataset."""
+        # Use index mapping table length for accuracy
+        if hasattr(self, 'index_to_episode_map'):
+            return len(self.index_to_episode_map)
         return self.total_frames
         
     @property
@@ -289,39 +325,14 @@ class WrappedLerobotDataset(tud.Dataset):
     def _locate_dataset_for_transition(self, index):
         """
         Locate which dataset and frame index for a given wrapped index.
-        When episodes are filtered, we need to map wrapped index to actual LeRobot index.
+        Uses pre-computed mapping table for O(1) lookup - FAST!
         """
-        assert index < self.cumulative_num_frames[-1], f"Index {index} out of range {self.cumulative_num_frames[-1]}"
+        assert index < len(self.index_to_episode_map), f"Index {index} out of range {len(self.index_to_episode_map)}"
         
-        # Find which dataset this index belongs to
-        dataset_idx = np.argmax(self.cumulative_num_frames > index)
+        # O(1) lookup from pre-computed table!
+        dataset_idx, ep_idx, frame_offset, actual_hf_idx = self.index_to_episode_map[index]
         
-        # Calculate offset within this dataset (based on filtered frames)
-        offset_in_dataset = index - self.per_dataset_frame_start[dataset_idx]
-        
-        # If dataset has filtered episodes, we need to map to actual frame index
-        dataset = self.datasets[dataset_idx]
-        if hasattr(dataset, 'episodes') and dataset.episodes is not None:
-            # Map offset to actual episode and frame
-            # Find which episode this offset belongs to
-            ds_meta = self.dataset_metas[dataset_idx]
-            cumulative_offset = 0
-            for ep_idx in dataset.episodes:
-                ep_len = ds_meta.episodes[ep_idx]['length']
-                if offset_in_dataset < cumulative_offset + ep_len:
-                    # Found the episode
-                    frame_offset_in_episode = offset_in_dataset - cumulative_offset
-                    # Get actual frame index in LeRobot's hf_dataset
-                    actual_start_ts = ds_meta.episodes[ep_idx]['dataset_from_index'] + frame_offset_in_episode
-                    return int(dataset_idx), int(actual_start_ts)
-                cumulative_offset += ep_len
-            
-            # Should not reach here
-            raise IndexError(f"Failed to map index {index} (offset {offset_in_dataset}) in filtered dataset")
-        else:
-            # No filtering, use offset directly
-            start_ts = offset_in_dataset
-            return int(dataset_idx), int(start_ts)
+        return int(dataset_idx), int(actual_hf_idx)
     
     def _locate_transition(self, index):
         """
@@ -421,10 +432,12 @@ class WrappedLerobotDataset(tud.Dataset):
     def get_dataset_statistics(self):
         state_stats = self.dataset_metas[0].stats[self.state_key]
         action_stats = self.dataset_metas[0].stats[self.action_key]
-        state_stats['q01'] = state_stats['min']
-        state_stats['q99'] = state_stats['max']
-        action_stats['q01'] = action_stats['min']
-        action_stats['q99'] = action_stats['max']
+        if 'q01' not in state_stats:
+            state_stats['q01'] = state_stats['min']
+            state_stats['q99'] = state_stats['max']
+        if 'q01' not in action_stats:
+            action_stats['q01'] = action_stats['min']
+            action_stats['q99'] = action_stats['max']
         stats = {
             'state': state_stats,
             'action': action_stats,
@@ -445,7 +458,7 @@ if __name__=='__main__':
     dataset = WrappedLerobotDataset(
             ["HuggingFaceVLA/libero"], 
             tolerance_s=10.0,
-            episode_filter={"task_index": [0]}
+            episode_filter={"task_index": [24]}
         )
     print(f"Task0 Total episodes: {dataset.total_episodes}")
     print(f"Task0 Total frames: {dataset.total_frames}")

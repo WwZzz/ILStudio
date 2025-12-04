@@ -21,8 +21,11 @@
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [
-                "-m", "ckpt/openvla_1129"
+                "-p", "act", "-t", "libero_obj0", "-c", "act", "-o", "ckpt/liberoact_V4", "--training.per_device_train_batch_size", "16", "--training.max_steps", "20000"
             ],
+            // "args": [
+            //     "-m", "ckpt/openvla_1129"
+            // ],
             // "args": [
             //     "-e", "libero_object_0", "-o", "results/smolvla_liberoobj_primary_0"
             // ],
