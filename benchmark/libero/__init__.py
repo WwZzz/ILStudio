@@ -1,5 +1,6 @@
 import sys
 import os
+import threading
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'third_party', 'libero'))
 from benchmark.base import MetaAction, MetaEnv, MetaObs
 from libero.libero import benchmark as libero_bench
@@ -20,6 +21,7 @@ import argparse
 from collections import deque
 import imageio
 from robosuite.controllers import load_controller_config
+from loguru import logger 
 
 benchmark_dict = libero_bench.get_benchmark_dict()
 
@@ -64,7 +66,10 @@ class LiberoEnv(MetaEnv):
             "camera_widths": width,
         }
         env = OffScreenRenderEnv(**env_args)
-        state = init_states[np.random.choice(len(init_states))]
+        np.random.seed(None)
+        state_index = np.random.choice(len(init_states))
+        state = init_states[state_index]
+        logger.info(f"Setting initial state {state_index} for task {self.task_name}")
         env.set_init_state(state)
         return env
         
