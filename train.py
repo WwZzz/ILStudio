@@ -88,10 +88,15 @@ def main(args):
         specified in training_args.
     """
     args.is_training = True
-    set_seed(1)
     
     # Load all configurations in one place
     task_config, policy_config, training_args, config_paths = load_all_configs(args)
+    
+    # Set random seed
+    seed = getattr(training_args, 'seed', 0)
+    set_seed(seed)
+    logger.info(f"🌱 Set global seed to: {seed} for reproducibility")
+    
     os.makedirs(training_args.output_dir, exist_ok=True)
     all_ckpts = [os.path.join(training_args.output_dir, ckpt_name) for ckpt_name in os.listdir(training_args.output_dir) if ckpt_name.startswith('checkpoint-') and os.path.isdir(os.path.join(training_args.output_dir, ckpt_name))]
     if len(all_ckpts)==0: training_args.resume_from_checkpoint = None
