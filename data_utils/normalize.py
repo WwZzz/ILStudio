@@ -163,10 +163,13 @@ class BaseNormalizer:
         
         rank = dist.get_rank() if is_distributed() else 0
         if rank == 0:
-            if not self.is_stats_exist():
+            if self.is_stats_exist():
+                self.all_stats = self.load_stats()
+            else:
                 assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
-                self.compute_and_save_stats()
-            self.all_stats = self.load_stats()
+                _ = self.compute_and_save_stats()
+                self.all_stats = self.load_stats()
+            
                 
         if is_distributed(): dist.barrier()
         if rank != 0: self.all_stats = self.load_stats()
@@ -500,7 +503,7 @@ class BaseNormalizer:
         
         with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
-        all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
+        # all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         return all_stats
     
     def get_stat_by_key(self, key='action'):

@@ -311,8 +311,28 @@ def find_all_hdf5(dataset_dir):
     return hdf5_files
 
 def set_seed(seed):
-    torch.manual_seed(seed)
+    """Set all random seeds to ensure reproducibility
+    
+    Args:
+        seed: random seed
+    """
+    import random
+    random.seed(seed)
+    # NumPy
     np.random.seed(seed)
+    # PyTorch CPU
+    torch.manual_seed(seed)
+    # PyTorch GPU
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # multiple GPUs
+    
+    # cuDNN deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # environment variable (some libraries will read)
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 def flatten_list(l):

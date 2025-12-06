@@ -1,4 +1,5 @@
 from lerobot.policies.smolvla.modeling_smolvla import VLAFlowMatching
+from lerobot.policies.rtc.configuration_rtc import RTCConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from lerobot.utils.constants import ACTION
@@ -48,6 +49,7 @@ class SmolVLAPolicyConfig(PretrainedConfig):
             min_period: float = 4e-3,
             max_period: float = 4.0,
             device: str = 'cuda',
+            rtc_config: RTCConfig = None,
             **kwargs
         ):
         super().__init__(**kwargs)
@@ -82,6 +84,7 @@ class SmolVLAPolicyConfig(PretrainedConfig):
         self.min_period = min_period
         self.max_period = max_period    
         self.device = device
+        self.rtc_config = rtc_config
 
 
 class SmolVLAPolicy(PreTrainedModel):

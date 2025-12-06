@@ -52,18 +52,21 @@ class LiberoEnv(MetaEnv):
         self.task_name = task.name
         task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
         # step over the environment
-        image_size = getattr(self.config, 'image_size', [480, 640])
-        if isinstance(image_size, (list, tuple)):
-            height, width = image_size
-        elif isinstance(image_size, int):
-            height, width = image_size, image_size
+        image_size = getattr(self.config, 'image_size', None)
+        if image_size is not None:
+            if isinstance(image_size, (list, tuple)):
+                height, width = image_size
+            elif isinstance(image_size, int):
+                height, width = image_size, image_size
+            else:
+                raise ValueError("image_size should be list [height, width] or int")
+            self.image_size = (height, width)
         else:
-            raise ValueError("image_size should be list [height, width] or int")
-        self.image_size = (height, width)
+            self.image_size = None
         env_args = {
             "bddl_file_name": task_bddl_file,
-            "camera_heights": height,
-            "camera_widths": width,
+            "camera_heights": 256,
+            "camera_widths": 256,
         }
         env = OffScreenRenderEnv(**env_args)
         np.random.seed(None)
