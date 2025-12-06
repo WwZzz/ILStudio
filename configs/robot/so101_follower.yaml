@@ -1,5 +1,5 @@
 target: deploy.robot.so101.So101FollowerWithCamera
-com: /dev/ttyACM1
+com: /dev/ttyACM0
 robot_id: so101_follower
 camera_configs:
   front_camera:
