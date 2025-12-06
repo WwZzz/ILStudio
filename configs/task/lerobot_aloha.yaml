@@ -1,17 +1,17 @@
-# 新的灵活数据集配置格式
 datasets:
-  - name: "lerobot_aloha"
-    class: "WrappedLerobotDataset"
-    args:
-      dataset_path_list: [lerobot/aloha_mobile_cabinet]
-      chunk_size: 64
-      ctrl_space: 'joint'
-      ctrl_type: 'abs'
-
-# Task-specific parameters
-action_dim: 14
-state_dim: 14
-image_size: [640, 480]
-action_normalize: "zscore"
-state_normalize: "zscore"
-
+- type: data_utils.datasets.WrappedLerobotDataset
+  name: lerobot_aloha
+  args:
+    dataset_path_list:
+    - lerobot/aloha_mobile_cabinet
+    chunk_size: 64
+    ctrl_space: joint
+    ctrl_type: abs
+meta:
+  action_dim: 14
+  state_dim: 14
+  image_size:
+  - 640
+  - 480
+  action_normalize: zscore
+  state_normalize: zscore

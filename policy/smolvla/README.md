@@ -17,3 +17,7 @@ cd ../..
 python train.py -p smolvla_libero -t libero_object -c default -o ckpt/smolvla_libero
 
 ```
+
+# TroubleShooting
+
+- cannot import name 'AutoModelForImageTextToText' from 'transformers'. 

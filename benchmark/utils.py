@@ -7,6 +7,7 @@ from tianshou.env import SubprocVectorEnv
 import time
 import copy
 import json
+import os
 # import tensorflow as tf
 # from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
@@ -16,6 +17,7 @@ import argparse
 from collections import deque
 import imageio
 import cv2
+from loguru import logger
 
 
 def get_images_from_metaobs(mobs): 
@@ -60,6 +62,227 @@ def resize_with_pad(img, width, height, pad_value=-1, interpolation=cv2.INTER_LI
         return torch.from_numpy(out).to(device=device, dtype=dtype)
     return out.astype(arr.dtype, copy=False)
 
+def _save_example_batch(obs, act, save_dir):
+    """
+    Save example observation (MetaObs) and action (MetaAct) for debugging.
+    Saves only the FIRST environment's data (index 0).
+    Saves images as PNG, states/actions as CSV, and metadata as TXT.
+    
+    Args:
+        obs: MetaObs object containing observations (batch)
+        act: MetaAct object or numpy array containing actions (batch)
+        save_dir: Directory to save the examples
+    """
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Check if example already exists
+        check_file = os.path.join(save_dir, 'info.txt')
+        if os.path.exists(check_file):
+            logger.info(f"Example already exists in {save_dir}, skipping save.")
+            return
+        
+        # 1. Save images
+        if hasattr(obs, 'image') and obs.image is not None:
+            image_data = obs.image
+            # Convert to numpy if tensor
+            if isinstance(image_data, torch.Tensor):
+                image_data = image_data.cpu().numpy()
+            
+            logger.debug(f"Image data shape: {image_data.shape}, dtype: {image_data.dtype}")
+            
+            # Handle different image shapes - ONLY SAVE FIRST ENVIRONMENT (index 0)
+            # Expected formats:
+            # - (batch, cameras, H, W, C) - 5D with channels last
+            # - (batch, cameras, C, H, W) - 5D with channels first
+            # - (batch, H, W, C) - 4D with channels last
+            # - (batch, C, H, W) - 4D with channels first
+            if len(image_data.shape) == 5:
+                # Check if channels first (C, H, W) or channels last (H, W, C)
+                if image_data.shape[-1] in [1, 3, 4]:  # (batch, cameras, H, W, C)
+                    batch_size, num_cameras, H, W, C = image_data.shape
+                    # Only save first environment (b=0)
+                    for c in range(num_cameras):
+                        img = image_data[0, c]  # (H, W, C)
+                        if img.dtype != np.uint8:
+                            img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+                        img_pil = Image.fromarray(img)
+                        img_path = os.path.join(save_dir, f'image_cam{c}.png')
+                        img_pil.save(img_path)
+                    logger.info(f"Saved {num_cameras} images from first environment to {save_dir}")
+                elif image_data.shape[2] in [1, 3, 4]:  # (batch, cameras, C, H, W)
+                    batch_size, num_cameras, C, H, W = image_data.shape
+                    # Only save first environment (b=0)
+                    for c in range(num_cameras):
+                        img = image_data[0, c].transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+                        if img.dtype != np.uint8:
+                            img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+                        img_pil = Image.fromarray(img)
+                        img_path = os.path.join(save_dir, f'image_cam{c}.png')
+                        img_pil.save(img_path)
+                    logger.info(f"Saved {num_cameras} images from first environment to {save_dir}")
+                else:
+                    logger.warning(f"Unsupported 5D image shape: {image_data.shape}, skipping image save")
+            elif len(image_data.shape) == 4:
+                # Check if channels first or channels last
+                # Priority: try to detect based on which dimension looks like channels
+                # Common channel counts: 1 (grayscale), 3 (RGB), 4 (RGBA)
+                dim_sizes = image_data.shape
+                
+                # Heuristic: channels are usually the smallest dimension and in [1,3,4]
+                possible_formats = []
+                if dim_sizes[-1] in [1, 3, 4]:
+                    possible_formats.append(('channels_last', -1))
+                if dim_sizes[1] in [1, 3, 4]:
+                    possible_formats.append(('channels_first', 1))
+                
+                if not possible_formats:
+                    logger.warning(f"Cannot determine image format for shape {image_data.shape}, skipping")
+                else:
+                    # Use the first valid format
+                    format_type, channel_dim = possible_formats[0]
+                    
+                    if format_type == 'channels_last':  # (batch, H, W, C)
+                        batch_size, H, W, C = image_data.shape
+                        # Only save first environment (b=0)
+                        img = image_data[0]  # (H, W, C)
+                        if img.dtype != np.uint8:
+                            img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+                        if C == 1:
+                            img = img.squeeze(-1)  # Remove channel dimension for grayscale
+                        img_pil = Image.fromarray(img)
+                        img_path = os.path.join(save_dir, f'image.png')
+                        img_pil.save(img_path)
+                        logger.info(f"Saved 1 image from first environment to {save_dir}")
+                    else:  # channels_first: (batch, C, H, W)
+                        batch_size, C, H, W = image_data.shape
+                        # Only save first environment (b=0)
+                        img = image_data[0].transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+                        if img.dtype != np.uint8:
+                            img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+                        if C == 1:
+                            img = img.squeeze(-1)  # Remove channel dimension for grayscale
+                        img_pil = Image.fromarray(img)
+                        img_path = os.path.join(save_dir, f'image.png')
+                        img_pil.save(img_path)
+                        logger.info(f"Saved 1 image from first environment to {save_dir}")
+            else:
+                logger.warning(f"Unsupported image shape: {image_data.shape} (expected 4D or 5D), skipping image save")
+        
+        # 2. Save state (raw data from environment) - ONLY FIRST ENVIRONMENT
+        if hasattr(obs, 'state') and obs.state is not None:
+            state_data = obs.state
+            if isinstance(state_data, torch.Tensor):
+                state_data = state_data.cpu().numpy()
+            
+            # Only save first environment (index 0)
+            if state_data.ndim > 1:
+                state_data = state_data[0:1]  # Keep 2D shape (1, state_dim)
+            else:
+                state_data = state_data.reshape(1, -1)
+            
+            # Save raw state (unnormalized data from environment)
+            state_file = os.path.join(save_dir, 'state_raw.csv')
+            np.savetxt(state_file, state_data, delimiter=',', 
+                      header=','.join([f'state_{i}' for i in range(state_data.shape[1])]),
+                      comments='')
+            logger.info(f"Saved raw state from first environment to {state_file}")
+        
+        # 3. Save action (raw data from policy)
+        action_data = None
+        if hasattr(act, 'action'):
+            action_data = act.action
+        elif isinstance(act, (np.ndarray, torch.Tensor)):
+            action_data = act
+            # If it's a numpy array of dicts (dtype='object'), extract the 'action' field
+            if isinstance(action_data, np.ndarray) and action_data.dtype == np.object_:
+                # This is likely an array of MetaAction dicts from policy.select_action
+                try:
+                    # Extract 'action' field from each dict
+                    action_list = []
+                    for item in action_data.flat:
+                        if isinstance(item, dict) and 'action' in item:
+                            action_list.append(item['action'])
+                        elif isinstance(item, np.ndarray):
+                            action_list.append(item)
+                    if action_list:
+                        action_data = np.array(action_list)
+                    else:
+                        logger.warning(f"Cannot extract action data from object array, skipping action save")
+                        action_data = None
+                except Exception as e:
+                    logger.warning(f"Failed to extract action from object array: {e}, skipping action save")
+                    action_data = None
+        
+        if action_data is not None:
+            if isinstance(action_data, torch.Tensor):
+                action_data = action_data.cpu().numpy()
+            
+            # Ensure action_data is numeric and at least 2D for CSV saving
+            if action_data.dtype == np.object_:
+                logger.warning(f"Action data still has object dtype after extraction, skipping save")
+            else:
+                # Only save first environment (index 0)
+                if action_data.ndim > 1:
+                    action_data = action_data[0:1]  # Keep 2D shape (1, action_dim)
+                else:
+                    action_data = action_data.reshape(1, -1)
+                
+                # Save raw action (denormalized data from policy)
+                action_file = os.path.join(save_dir, 'action_raw.csv')
+                np.savetxt(action_file, action_data, delimiter=',',
+                          header=','.join([f'action_{i}' for i in range(action_data.shape[1])]),
+                          comments='')
+                logger.info(f"Saved raw action from first environment to {action_file}")
+        
+        # 4. Save metadata and info
+        info_file = os.path.join(save_dir, 'info.txt')
+        with open(info_file, 'w') as f:
+            f.write("=== Example Batch Info ===\n\n")
+            
+            # Observation info
+            f.write("Observation (MetaObs):\n")
+            if hasattr(obs, '__dict__'):
+                for key, value in obs.__dict__.items():
+                    if isinstance(value, (np.ndarray, torch.Tensor)):
+                        shape = value.shape if hasattr(value, 'shape') else 'N/A'
+                        dtype = value.dtype if hasattr(value, 'dtype') else 'N/A'
+                        f.write(f"  {key}: shape={shape}, dtype={dtype}\n")
+                    elif value is not None:
+                        f.write(f"  {key}: {type(value).__name__} = {value}\n")
+            f.write("\n")
+            
+            # Action info
+            f.write("Action (MetaAct):\n")
+            if hasattr(act, '__dict__'):
+                for key, value in act.__dict__.items():
+                    if isinstance(value, (np.ndarray, torch.Tensor)):
+                        shape = value.shape if hasattr(value, 'shape') else 'N/A'
+                        dtype = value.dtype if hasattr(value, 'dtype') else 'N/A'
+                        f.write(f"  {key}: shape={shape}, dtype={dtype}\n")
+                    elif value is not None:
+                        f.write(f"  {key}: {type(value).__name__} = {value}\n")
+            elif isinstance(act, (np.ndarray, torch.Tensor)):
+                f.write(f"  shape={act.shape}, dtype={act.dtype}\n")
+            
+            f.write("\n")
+            f.write("Files saved (ONLY FIRST ENVIRONMENT, index 0):\n")
+            f.write("  - image_cam{j}.png or image.png: observation images from first environment\n")
+            f.write("  - state_raw.csv: raw state values from first environment (1 row)\n")
+            f.write("  - action_raw.csv: raw action values for first environment (1 row)\n")
+            f.write("  - info.txt: this file\n")
+            f.write("\n")
+            f.write("Note: Only the first environment (index 0) from the batch is saved.\n")
+            f.write("      State comes from environment (raw/unnormalized).\n")
+            f.write("      Action comes from policy (denormalized if using normalizers).\n")
+        
+        logger.info(f"Saved example batch info to {info_file}")
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to save example batch: {e}")
+        logger.error(traceback.format_exc())
+
 def organize_obs(obs: np.ndarray, ctrl_space='ee'):
     """Organize obs returned by SubprocVectorEnv into a dict"""
     # Lazy import to avoid circular dependency at module import time
@@ -81,7 +304,7 @@ def organize_obs(obs: np.ndarray, ctrl_space='ee'):
     # Note: camera selection is now handled in each environment's obs2meta method
     return dict2meta(res)
 
-def evaluate(args, policy, env, video_writer=None):
+def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
     video_frames = [[] for _ in range(len(env))]
     horizons = np.ones(len(env))*args.max_timesteps
     # 开始测试
@@ -90,6 +313,10 @@ def evaluate(args, policy, env, video_writer=None):
         success =  np.zeros(len(env)).astype(np.bool8)
         obs = env.reset()
         obs = organize_obs(obs, args.ctrl_space)
+        
+        # Save first observation and action for debugging
+        first_obs_saved = False
+        
         for t in range(args.max_timesteps):
             if video_writer is not None:
                 frames = obs['image']
@@ -99,6 +326,12 @@ def evaluate(args, policy, env, video_writer=None):
                     if not success[env_i]:
                         video_frames[env_i].append(frames[env_i])
             act = policy.select_action(obs, t)
+            
+            # Save first obs and action
+            if not first_obs_saved and save_example_dir is not None:
+                _save_example_batch(obs, act, save_example_dir)
+                first_obs_saved = True
+            
             obs, reward, done, info = env.step(act)
             obs = organize_obs(obs, args.ctrl_space)
             # Decide if success
@@ -131,15 +364,15 @@ def evaluate(args, policy, env, video_writer=None):
         'horizon_success': (success*horizons).sum()/(total_successes),
     }
 
-def absolute_action_to_delta(maction, mobs):
-    # Convert absolute action into relative action
-    if maction.ctrl_type=='delta': return maction
-    if maction.ctrl_space=='ee':
-        maction.ctrl_type = 'delta'
-        assert mobs is not None and mobs.state_ee is not None, "failed to load state_ee from MetaObs"
-        maction.action = maction.action - mobs.state_ee
-    elif maction.ctrl_space=='joint':
-        maction.ctrl_type = 'delta'
-        assert mobs is not None and mobs.joint_state is not None, "failed to load state_ee from MetaObs"
-        maction.action = maction.action - mobs.joint_state
-    return maction
+# def absolute_action_to_delta(maction, mobs):
+#     # Convert absolute action into relative action
+#     if maction.ctrl_type=='delta': return maction
+#     if maction.ctrl_space=='ee':
+#         maction.ctrl_type = 'delta'
+#         assert mobs is not None and mobs.state_ee is not None, "failed to load state_ee from MetaObs"
+#         maction.action = maction.action - mobs.state_ee
+#     elif maction.ctrl_space=='joint':
+#         maction.ctrl_type = 'delta'
+#         assert mobs is not None and mobs.joint_state is not None, "failed to load state_ee from MetaObs"
+#         maction.action = maction.action - mobs.joint_state
+#     return maction

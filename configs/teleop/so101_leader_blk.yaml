@@ -1,12 +1,10 @@
-target: deploy.teleoperator.so101_leader.So101Leader
-
-# Controller settings
-shm_name: "ilstd_teleop_controller"
-action_dim: 6
-action_dtype: "float64"
-freq: 100.0
-
-# Device-specific settings
-com: /dev/ttyACM2
-robot_id: so101_leader
-calibration_dir: /media/zzz/ElementsSE/laptop_ubuntu/.cache/ilstd/data/calibration/so101_leader_blk
+type: deploy.teleoperator.so101_leader.So101Leader
+name: so101leader
+args:
+  shm_name: ilstd_teleop_controller
+  action_dim: 6
+  action_dtype: float64
+  freq: 100.0
+  com: /dev/ttyACM2
+  robot_id: so101_leader
+  calibration_dir: /media/zzz/ElementsSE/laptop_ubuntu/.cache/ilstd/data/calibration/so101_leader_blk

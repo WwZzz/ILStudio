@@ -1,4 +1,5 @@
 import os
+import warnings
 import torch.nn as nn
 import torch
 import numpy as np
@@ -78,7 +79,10 @@ class DiffusionPolicyModel(PreTrainedModel):
         for cam_id, cam_name in enumerate(self.camera_names):
             img_size = self.config.image_sizes[cam_id]
             if isinstance(img_size, str): img_size = eval(img_size)
-            backbones.append(ResNet18Conv(input_channel=3, pretrained= True, input_coord_conv=False))
+            # Suppress torchvision pretrained parameter deprecation warning from robomimic
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
+                backbones.append(ResNet18Conv(input_channel=3, pretrained=True, input_coord_conv=False))
             feat_shape = list(backbones[-1](torch.rand((1, 3, img_size[1], img_size[0])))[0].shape)
             # feat_shape = [512, 8, 8]
             pools.append(SpatialSoftmax(input_shape=feat_shape, num_kp=self.num_kp, temperature=1.0,
@@ -193,15 +197,22 @@ class DiffusionPolicyModel(PreTrainedModel):
                 naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
             return naction
         
-    def select_action(self, obs):
-        # process data
-        # if not hasattr(self, 'ema_copied'): 
-        #     self.ema.copy_to(self.parameters())
-        #     self.ema_copied = True
-        device = next(self.parameters()).device  # Get model's device
-        obs = {k:torch.from_numpy(v).to(device) if isinstance(v, np.ndarray) else v for k,v in obs.items()}
-        obs['image'] = obs['image']/255.0
-        action = self.forward(obs['state'], obs['image'], None, None)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
+        # Move tensors to device and get data
+        device = next(self.parameters()).device
+        image = batch_obs['image'].to(device)
+        state = batch_obs['qpos'].to(device)
+        # Forward pass
+        action = self.forward(state, image, None, None)
         return action
     
     def save_pretrained(self, save_directory, state_dict=None, *args, **kwargs):
@@ -308,4 +319,3 @@ def replace_bn_with_gn(
             num_channels=x.num_features)
     )
     return root_module
-

@@ -1,10 +1,12 @@
-target: deploy.robot.so101.So101FollowerWithCamera
-com: COM4
-robot_id: so101_follower
-camera_configs:
-  front_camera:
-    index_or_path: 1
-    width: 640
-    height: 480
-    fps: 30
-use_lock: True
+type: deploy.robot.so101.So101FollowerWithCamera
+name: so101followerwithcamera
+args:
+  com: COM4
+  robot_id: so101_follower
+  camera_configs:
+    front_camera:
+      index_or_path: 1
+      width: 640
+      height: 480
+      fps: 30
+  use_lock: true

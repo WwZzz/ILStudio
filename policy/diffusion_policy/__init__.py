@@ -5,7 +5,7 @@ from .trainer import Trainer
 import torchvision.transforms as transforms
 
 def load_model(args):
-    if not args.is_pretrained:
+    if args.is_training:
         # Use unified image_size for all cameras
         image_sizes = [args.image_size for _ in args.camera_names]
         config = DiffusionPolicyConfig(
@@ -25,6 +25,8 @@ def load_model(args):
             model.ema.copy_to(model.parameters()) # using ema for testing
         model.config.num_inference_timesteps = model_args.get('num_inference_steps', 10)
         model.to('cuda')
+        # Only set collator, no processor needed (samples already in correct format)
+        model.data_collator = data_collator
     # model.to(dtype=torch.float32, device=args.device)
     return {'model': model}
 

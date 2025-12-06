@@ -253,7 +253,7 @@ def build(args):
     )
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("number of parameters: %.2fM" % (n_parameters/1e6,))
+    logger.info("number of parameters: %.2fM" % (n_parameters/1e6,))
 
     return model
 
@@ -273,9 +273,6 @@ def build_cnnmlp(args):
         camera_names=args.camera_names,
         chunk_size=args.chunk_size
     )
-
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("number of parameters: %.2fM" % (n_parameters/1e6,))
 
     return model
 

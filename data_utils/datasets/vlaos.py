@@ -1,3 +1,4 @@
+import os
 from torch.utils.data import IterableDataset
 import tensorflow_datasets as tfds
 import dlimp as dl
@@ -11,6 +12,7 @@ from tqdm import tqdm
 from policy.openvla.prismatic.vla.datasets.datasets import RLDSDataset
 from torch.utils.data import IterableDataset
 import torch
+from data_utils.utils import ensure_uint8_image
 
 def load_json(file_path):
     with open(file_path, 'r') as f:
@@ -42,10 +44,13 @@ class VLAOSDataset(IterableDataset):
     
     def __iter__(self):
         for data in self.dataset:
+            # Get image data and ensure it's uint8 [0, 255]
+            image_np = ensure_uint8_image(data['observation']['image_primary'])
+            
             data_dict = dict(
                 raw_lang=data["task"]["language_instruction"].decode(),
                 action=torch.from_numpy(data["action"]),
-                image = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['observation']['image_primary'])),
+                image = torch.einsum('k h w c -> k c h w', torch.from_numpy(image_np)),
                 is_pad=torch.from_numpy(~data['action_pad_mask']),
                 reasoning={},
                 state=torch.from_numpy(data['observation']['proprio'][0]),

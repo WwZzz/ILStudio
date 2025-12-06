@@ -1,8 +1,10 @@
+import configs 
 import os
 import argparse
 import json
+from loguru import logger
 import policy.utils as ml_utils
-from data_utils.utils import set_seed, load_data
+from data_utils.utils import set_seed, load_data, save_example_data
 from data_utils.data_loader import get_dataloader
 from configs.loader import ConfigLoader
 from policy.policy_loader import (
@@ -14,8 +16,10 @@ from policy.policy_loader import (
 from policy.trainer import BaseTrainer
 import torch
 import numpy
+torch.serialization.add_safe_globals([numpy.ndarray])
 torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
-torch.serialization.safe_globals([numpy.core.multiarray._reconstruct])
+torch.serialization.add_safe_globals([numpy.dtype])
+torch.serialization.safe_globals([numpy.dtype])
 
 def parse_param():
     """
@@ -83,10 +87,16 @@ def main(args):
         None. The trained model and statistics are saved to the output directory
         specified in training_args.
     """
-    set_seed(1)
+    args.is_training = True
     
     # Load all configurations in one place
     task_config, policy_config, training_args, config_paths = load_all_configs(args)
+    
+    # Set random seed
+    seed = getattr(training_args, 'seed', 0)
+    set_seed(seed)
+    logger.info(f"🌱 Set global seed to: {seed} for reproducibility")
+    
     os.makedirs(training_args.output_dir, exist_ok=True)
     all_ckpts = [os.path.join(training_args.output_dir, ckpt_name) for ckpt_name in os.listdir(training_args.output_dir) if ckpt_name.startswith('checkpoint-') and os.path.isdir(os.path.join(training_args.output_dir, ckpt_name))]
     if len(all_ckpts)==0: training_args.resume_from_checkpoint = None
@@ -100,17 +110,24 @@ def main(args):
             }, f, indent=2)
     
     # Load model 
-    print(f"Loading policy config: {config_paths['policy']}")
+    logger.info(f"Loading policy config: {config_paths['policy']}")
     model_components = load_policy_model_for_training(config_paths['policy'], args, task_config)
     model = model_components['model']
     config = model_components.get('config', None)
     if config:
-        print(f"Loaded config from YAML: {type(config).__name__}") 
+        logger.info(f"Loaded config from YAML: {type(config).__name__}") 
     ml_utils.print_model_trainable_information(model)
     
     # Load dataset
     data_dict = load_data(args, task_config)
     train_data, val_data = data_dict['train'], data_dict['eval']
+    
+    # Save example data from the first training dataset for debugging
+    logger.info("="*80)
+    logger.info(f"Saving example data to {training_args.output_dir}...")
+    logger.info("="*80)
+    save_example_data(train_data, training_args.output_dir)
+    logger.info("="*80)
     
     # Create data loader with policy-spefific data processor and collator
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)

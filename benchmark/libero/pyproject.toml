@@ -26,6 +26,7 @@ dependencies = [
     "gym==0.25.2",
     "tianshou==0.2.0",
     "libero",
+    "loguru",
 ]
 
 [tool.uv]

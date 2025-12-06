@@ -1,10 +1,8 @@
-target: deploy.teleoperator.keyboard.KeyboardTeleop
-
-# Controller settings
-shm_name: "ilstd_teleop_controller"
-action_dim: 7
-action_dtype: "float64"
-freq: 10.0
-
-# Device-specific settings
-delta_scale: 5.0
+type: deploy.teleoperator.keyboard.KeyboardTeleop
+name: keyboard
+args:
+  shm_name: ilstd_teleop_controller
+  action_dim: 7
+  action_dtype: float64
+  freq: 10.0
+  delta_scale: 5.0

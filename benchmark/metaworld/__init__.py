@@ -5,6 +5,7 @@ import gymnasium as gym
 from multiprocessing import current_process
 import metaworld
 from .task_desc import TASK_DESC
+import warnings
 
 ALL_CAMERA_NAMES = ['corner', 'corner2', 'corner3', 'corner4', 'topview', 'behindGripper', 'gripperPOV']
 ALL_TASKS = metaworld.ALL_V3_ENVIRONMENTS
@@ -29,6 +30,8 @@ class MetaWorldEnv(MetaEnv):
     
     def create_env(self):
         task = self.config.task
+        # 过滤 gymnasium 的 passive_env_checker 警告
+        warnings.filterwarnings('ignore', category=UserWarning, module='gymnasium.utils.passive_env_checker')
         if self.camera_name is not None:
             env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode, camera_name=self.camera_name)
         else:

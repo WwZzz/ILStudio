@@ -47,7 +47,7 @@ def resize_with_pad(images: np.ndarray, height: int, width: int, method=Image.BI
     original_shape = images.shape
 
     images = images.reshape(-1, *original_shape[-3:])
-    resized = np.stack([_resize_with_pad_pil(Image.fromarray(im), height, width, method=method) for im in images])
+    resized = np.stack([_resize_with_pad_pil(Image.fromarray(im if images.max()>1.0 else (im*255).astype(np.uint8)), height, width, method=method) for im in images])
     return resized.reshape(*original_shape[:-3], *resized.shape[-3:])
 
 def pad_to_dim(x: np.ndarray, target_dim: int, axis: int = -1, value: float = 0.0) -> np.ndarray:
@@ -142,6 +142,6 @@ class OpenPiCollator:
             tokenized_prompt=tokenized_prompt, 
             tokenized_prompt_mask=tokenized_prompt_mask,
         )
-        return {'observation': observation, 'actions': actions}
+        return {'observation': observation, 'actions': actions, "is_pad": is_pad_all}
     
         

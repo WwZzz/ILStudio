@@ -28,10 +28,13 @@ def load_model(args):
     Returns:
         dict: Dictionary containing at least 'model' key with the model instance
     """
-    if args.is_pretrained:
+    if not args.is_training:
         # Load from pretrained checkpoint
         model = FlowMatchingPolicy.from_pretrained(args.model_name_or_path)
         model.to(args.device if hasattr(args, 'device') else 'cuda')
+        # Initialize processor and collator for inference
+        model.data_processor = FlowMatchingDataProcessor(model.config)
+        model.data_collator = flow_matching_collator
     else:
         # Create new model from configuration
         model_args = getattr(args, 'model_args', {})

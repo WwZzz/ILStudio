@@ -1,0 +1,10 @@
+type: metaworld
+# Example fields consumed by benchmark.aloha.AlohaSimEnv
+task: button-press-v3
+max_timesteps: 128
+ctrl_space: ee
+ctrl_type: abs
+use_camera: Truebenchmark/metaworld
+camera_name: 'corner4'
+image_size: [480, 480]
+

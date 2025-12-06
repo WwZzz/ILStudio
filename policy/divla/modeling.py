@@ -237,20 +237,26 @@ class QwenVLForPolicy(PreTrainedModel):
         return policy_outputs    
         
     
-    def select_action(self, obs):
-        if not hasattr(self, 'data_processor'):
-            self.data_processor = Qwen2VLAProcess(tokenizer=self.tokenizer, multimodal_processor=self.multimodal_processor)
-        if not hasattr(self, 'data_collator'):
-            self.data_collator = Qwen2VLADataCollatorForSupervisedDataset(multimodal_processor=self.multimodal_processor, tokenizer=self.tokenizer, computed_type=torch.bfloat16)
-        # processor each sample in obs batch
-        bs = obs['state'].shape[0]
-        all_obs = [{k:torch.from_numpy(v[i]) if isinstance(v, np.ndarray) else v[i] for k,v in obs.items() if v is not None} for i in range(bs)]
-        all_obs = [self.data_processor(sample) for sample in all_obs]
-        batch_obs = self.data_collator(all_obs)
-        batch_obs['states'] = batch_obs['states'].to(dtype=torch.bfloat16)
-        for k,v in batch_obs.items():
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
+        # Move batch to device
+        for k, v in batch_obs.items():
             if isinstance(v, torch.Tensor):
                 batch_obs[k] = v.to(self.device)
+        
+        # Ensure states are in bfloat16
+        if 'states' in batch_obs:
+            batch_obs['states'] = batch_obs['states'].to(dtype=torch.bfloat16)
+        
+        # Generate actions
         action = self.generate(**batch_obs)
         return action
 

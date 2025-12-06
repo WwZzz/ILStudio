@@ -10,6 +10,7 @@ import pickle
 import struct
 import threading
 import torch
+from loguru import logger
 from typing import Optional
 from benchmark.base import MetaObs, MetaAction, MetaPolicy
 
@@ -40,9 +41,9 @@ class PolicyServer:
             self.server_socket.listen(5)
             
             self.running = True
-            print(f"🚀 Policy Server started on {self.host}:{self.port}")
-            print("   Ctrl+C to stop the server")
-            print("   Waiting for connections...")
+            logger.info(f"🚀 Policy Server started on {self.host}:{self.port}")
+            logger.info("   Ctrl+C to stop the server")
+            logger.info("   Waiting for connections...")
             
             while self.running:
                 try:
@@ -50,7 +51,7 @@ class PolicyServer:
                     self.client_count += 1
                     client_id = self.client_count
                     
-                    print(f"✓ Client #{client_id} connected from {client_address}")
+                    logger.info(f"✓ Client #{client_id} connected from {client_address}")
                     
                     # Handle client in separate thread
                     client_thread = threading.Thread(
@@ -62,7 +63,7 @@ class PolicyServer:
                     
                 except Exception as e:
                     if self.running:
-                        print(f"✗ Error accepting connection: {e}")
+                        logger.error(f"✗ Error accepting connection: {e}")
                     
         finally:
             self.stop()
@@ -76,7 +77,7 @@ class PolicyServer:
                 # Receive MetaObs from client
                 meta_obs = self.receive_meta_obs(client_socket)
                 if meta_obs is None:
-                    print(f"  Client #{client_id} disconnected")
+                    logger.info(f"  Client #{client_id} disconnected")
                     break
                 
                 request_count += 1
@@ -91,18 +92,18 @@ class PolicyServer:
                     self.send_mact_list(client_socket, mact_list)
                     
                     if request_count % 10 == 0:
-                        print(f"  Client #{client_id}: {request_count} requests processed")
+                        logger.info(f"  Client #{client_id}: {request_count} requests processed")
                     
                 except Exception as e:
-                    print(f"✗ Inference error for client #{client_id}: {e}")
+                    logger.error(f"✗ Inference error for client #{client_id}: {e}")
                     # Send empty list on error
                     self.send_mact_list(client_socket, [])
                     
         except Exception as e:
-            print(f"✗ Error handling client #{client_id}: {e}")
+            logger.error(f"✗ Error handling client #{client_id}: {e}")
         finally:
             client_socket.close()
-            print(f"  Client #{client_id} connection closed (processed {request_count} requests)")
+            logger.info(f"  Client #{client_id} connection closed (processed {request_count} requests)")
     
     def receive_meta_obs(self, client_socket: socket.socket):
         """
@@ -131,7 +132,7 @@ class PolicyServer:
             return meta_obs
             
         except Exception as e:
-            print(f"✗ Error receiving MetaObs: {e}")
+            logger.error(f"✗ Error receiving MetaObs: {e}")
             return None
     
     def send_mact_list(self, client_socket: socket.socket, mact_list):
@@ -153,7 +154,7 @@ class PolicyServer:
             client_socket.sendall(data_bytes)
             
         except Exception as e:
-            print(f"✗ Error sending action list: {e}")
+            logger.error(f"✗ Error sending action list: {e}")
             raise
     
     def _recv_exactly(self, sock: socket.socket, num_bytes: int) -> Optional[bytes]:
@@ -179,4 +180,4 @@ class PolicyServer:
                 self.server_socket.close()
             except:
                 pass
-        print("\n✓ Policy Server stopped")
+        logger.info("✓ Policy Server stopped")

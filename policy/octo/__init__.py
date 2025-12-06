@@ -2,7 +2,7 @@ from .modeling import OctoConfig, OctoPolicy
 from .data_utils import OctoDataProcessor, OctoCollator
 
 def load_model(args):
-    if args.is_pretrained:
+    if not args.is_training:
         model = OctoPolicy.from_pretrained(args.model_name_or_path)
         model.data_processor =  OctoDataProcessor(model.text_processor, model.config.use_wrist, model.config.image_size)
         model.data_collator = OctoCollator()

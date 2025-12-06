@@ -84,25 +84,34 @@ class OpenPiPolicy(PreTrainedModel):
             )
             logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
     
-    def forward(self, observation, actions=None):
+    def forward(self, observation, actions=None, is_pad=None):
         observation = _model.Observation.from_dict(observation)
         dev = 'cuda'
         observation = jax.tree.map(lambda x: x.to(dev), observation)
         if actions is not None:
             actions = actions.to(dev)
             losses = self.model(observation, actions)
-            return {'loss': losses.mean()}
+            if is_pad is not None:
+                losses = (losses * ~is_pad.unsqueeze(-1))
+            losses = losses[:,:,:self.config.action_dim]
+            return {'loss': losses.mean().unsqueeze(0)}
         else:
             action = self.model.sample_actions(dev, observation)
             return action
         
-    def select_action(self, obs):
-        num_obs = obs['state'].shape[0]
-        instances = [{'state': obs['state'][i], 'image': obs['image'][i], 'raw_lang': obs['raw_lang'][i]} for i in range(num_obs)]
-        processed_obs = [self.data_processor(instance) for instance in instances]
-        batch_obs = self.data_collator(processed_obs)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions as numpy array
+        """
+        # Forward pass
         action = self.forward(**batch_obs)
-        return action[:,:,:self.config.action_dim].cpu().numpy()
+        return action[:, :, :self.config.action_dim].cpu().numpy()
     
     def get_input_embeddings(self):
         return self.model.paligemma_with_expert.paligemma.language_model.embed_tokens

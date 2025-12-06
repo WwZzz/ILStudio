@@ -1,5 +1,6 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
+import numpy as np
 
 def data_collator(instances):
     """
@@ -22,14 +23,18 @@ def data_collator(instances):
             - action: tensor of shape [B, Ta, action_dim]
             - is_pad: tensor of shape [B]
     """
-    if not isinstance(instances[0]['action'], torch.Tensor):
-        actions = torch.tensor(np.array([instance['action'] for instance in instances]))
-        states = torch.tensor(np.array([instance['state'] for instance in instances]))
+    if 'action' in instances[0]:
+        if not isinstance(instances[0]['action'], torch.Tensor):
+            actions = torch.tensor(np.array([instance['action'] for instance in instances]))
+        else:
+            actions = torch.stack([instance['action'] for instance in instances])
     else:
-        actions = torch.stack([instance['action'] for instance in instances])
-        states = torch.stack([instance['state'] for instance in instances])
-    is_pad_all = torch.stack([instance['is_pad'] for instance in instances])
-    images = torch.stack([instance['image'] for instance in instances])/255.0
+        actions = None
+    states = torch.tensor(np.array([instance['state'] for instance in instances])) if not isinstance(instances[0]['state'], torch.Tensor) else torch.stack([instance['state'] for instance in instances])
+    is_pad_all = torch.stack([instance['is_pad'] for instance in instances]) if 'is_pad' in instances[0] else None
+    images = torch.stack([instance['image'] for instance in instances])
+    if images.dtype == torch.uint8 or images.max() > 1.0:
+        images = images.float() / 255.0
     batch = dict(
         image=images,
         actions=actions,

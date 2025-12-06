@@ -1,19 +1,17 @@
-# 新的灵活数据集配置格式
 datasets:
-  - name: "lerobot_bridge_v2"
-    class: "WrappedLerobotDataset"
-    args:
-      dataset_path_list: [ZibinDong/bridgedatav2_train]
-      chunk_size: 64
-      ctrl_space: 'ee'
-      ctrl_type: 'abs'
-
-# Task-specific parameters
-action_dim: 4
-state_dim: 4
-image_size: [256, 256]
-action_normalize: "zscore"
-state_normalize: "zscore"
-
-
-
+- type: data_utils.datasets.WrappedLerobotDataset
+  name: lerobot_bridge_v2
+  args:
+    dataset_path_list:
+    - ZibinDong/bridgedatav2_train
+    chunk_size: 64
+    ctrl_space: ee
+    ctrl_type: abs
+meta:
+  action_dim: 4
+  state_dim: 4
+  image_size:
+  - 256
+  - 256
+  action_normalize: zscore
+  state_normalize: zscore

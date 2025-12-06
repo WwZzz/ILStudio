@@ -5,8 +5,11 @@ Policy Server Startup Script
 This script starts a policy server that listens for observation data 
 and returns predicted actions over a network connection.
 """
+import configs  
+import os
 import signal
 import sys
+from loguru import logger
 from data_utils.utils import set_seed, load_normalizers
 from benchmark.base import MetaPolicy
 from deploy.remote import PolicyServer
@@ -40,7 +43,7 @@ def parse_param():
                        help='Dataset ID to use (if multiple datasets, defaults to first)')
     
     # Model parameters (will be loaded from checkpoint config if not provided)
-    parser.add_argument('--chunk_size', type=int, default=64,
+    parser.add_argument('--chunk_size', type=int, default=-1,
                        help='Actual chunk size for policy that will truncate each raw chunk')
     
     # Parse arguments
@@ -50,7 +53,7 @@ def parse_param():
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C gracefully"""
-    print("\n\n⏸ Received interrupt signal, shutting down...")
+    logger.info("⏸ Received interrupt signal, shutting down...")
     sys.exit(0)
 
 
@@ -61,29 +64,30 @@ if __name__=='__main__':
     
     set_seed(0)
     args = parse_param()
+    args.is_training = False
     
-    print("="*60)
-    print("🚀 Policy Server Startup")
-    print("="*60)
+    logger.info("="*60)
+    logger.info("🚀 Policy Server Startup")
+    logger.info("="*60)
     
     # Load normalizers and model
-    print(f"\n📦 Loading model and normalizers...")
-    print(f"   Model path: {args.model_name_or_path}")
-    print(f"   Dataset ID: {args.dataset_id if args.dataset_id else '(first dataset)'}")
-    print(f"   Device: {args.device}")
+    logger.info("📦 Loading model and normalizers...")
+    logger.info(f"   Model path: {args.model_name_or_path}")
+    logger.info(f"   Dataset ID: {args.dataset_id if args.dataset_id else '(first dataset)'}")
+    logger.info(f"   Device: {args.device}")
     
     # Load normalizers
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
     
     # Load policy directly from checkpoint
-    print(f"   ✓ Loading model from checkpoint: {args.model_name_or_path}")
+    logger.info(f"   ✓ Loading model from checkpoint: {args.model_name_or_path}")
     from policy.direct_loader import load_model_from_checkpoint
     model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model']
     config = model_components.get('config', None)
     if config:
-        print(f"   ✓ Loaded config from checkpoint: {type(config).__name__}")
+        logger.info(f"   ✓ Loaded config from checkpoint: {type(config).__name__}")
     
     # Create policy
     # Ensure model is in evaluation mode
@@ -97,18 +101,18 @@ if __name__=='__main__':
         ctrl_space=ctrl_space, 
         ctrl_type=ctrl_type
     )
-    print(f"   ✓ Policy created with chunk_size={args.chunk_size}")
+    logger.info(f"   ✓ Policy created with chunk_size={args.chunk_size}")
     
     # Create and start server
-    print(f"\n🌐 Starting Policy Server...")
+    logger.info("🌐 Starting Policy Server...")
     server = PolicyServer(policy, host=args.host, port=args.port)
     
     try:
         server.start()
     except KeyboardInterrupt:
-        print("\n⏸ Server interrupted by user")
+        logger.info("⏸ Server interrupted by user")
     except Exception as e:
-        print(f"\n✗ Server error: {e}")
+        logger.error(f"✗ Server error: {e}")
     finally:
         server.stop()
-        print("\n👋 Server shutdown complete")
+        logger.info("👋 Server shutdown complete")

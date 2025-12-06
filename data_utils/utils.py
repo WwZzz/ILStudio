@@ -5,11 +5,223 @@ import fnmatch
 import json
 import warnings
 import importlib
+from loguru import logger
 import torch
 import torch.distributed as dist
+try:
+    import pandas as pd
+except:
+    pd = None
+from PIL import Image
 from torch.utils.data import DataLoader, ConcatDataset
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
 from .normalize import NORMTYPE2CLASS, load_normalizers, save_norm_meta_to_json, load_normalizer_from_meta
+
+
+def save_example_data(train_data, output_dir):
+    """
+    Save example data from the first dataset for debugging purposes.
+    Saves raw (unnormalized) data to match testing phase format:
+    - Images: original resolution, saved as PNG
+    - State: raw unnormalized values, saved as state_raw.csv
+    - Action: raw unnormalized values, saved as action_raw.csv
+    
+    Args:
+        train_data: The dataset object or list of datasets (can be map-style or iterable)
+        output_dir: Directory to save the example data
+    """
+    try:
+        # Create directory for examples
+        examples_dir = os.path.join(output_dir, 'example_data')
+        
+        # Check if example data already exists
+        if os.path.exists(examples_dir):
+            # Check if any example files exist
+            existing_files = os.listdir(examples_dir)
+            if len(existing_files) > 0:
+                logger.info(f"Example data already exists in {examples_dir}, skipping save.")
+                return
+        
+        os.makedirs(examples_dir, exist_ok=True)
+        
+        # Handle list of datasets or single dataset
+        if isinstance(train_data, list):
+            if len(train_data) == 0:
+                logger.warning("Empty dataset list provided")
+                return
+            dataset = train_data[0]  # Use first dataset
+            logger.info(f"Saving example from first dataset (list of {len(train_data)} datasets)")
+        else:
+            dataset = train_data
+            logger.info("Saving example from single dataset")
+        
+        # Get one sample from the dataset (raw, before any processing)
+        # Check if dataset is map-style (has __getitem__) or iterable
+        sample = None
+        if hasattr(dataset, '__getitem__'):
+            # Map-style dataset
+            try:
+                sample = dataset[0]
+            except Exception as e:
+                logger.warning(f"Could not get sample from map-style dataset: {e}")
+                return
+        else:
+            # Iterable dataset
+            try:
+                sample = next(iter(dataset))
+            except Exception as e:
+                logger.warning(f"Could not get sample from iterable dataset: {e}")
+                return
+        
+        if sample is None:
+            logger.warning("Could not retrieve sample from dataset")
+            return
+        
+        # Save raw language instruction
+        if 'raw_lang' in sample and sample['raw_lang']:
+            lang_file = os.path.join(examples_dir, 'raw_lang.txt')
+            with open(lang_file, 'w', encoding='utf-8') as f:
+                f.write(str(sample['raw_lang']))
+            logger.info(f"Saved language instruction to: {lang_file}")
+        
+        # Save images - save each camera view separately, preserving original resolution
+        # Match testing phase format: save as camera_{i}.png without resizing
+        if 'image' in sample and sample['image'] is not None:
+            image_data = sample['image']
+            
+            # Convert tensor to numpy if needed
+            if isinstance(image_data, torch.Tensor):
+                image_data = image_data.cpu().numpy()
+            
+            logger.debug(f"Training example - Image shape: {image_data.shape}, dtype: {image_data.dtype}")
+            
+            # Handle different image formats
+            # Expected format: (num_cameras, C, H, W) or (C, H, W)
+            if len(image_data.shape) == 4:  # Multiple cameras: (num_cameras, C, H, W)
+                num_cameras = image_data.shape[0]
+                
+                for cam_idx in range(num_cameras):
+                    img = image_data[cam_idx]  # (C, H, W)
+                    # Convert from (C, H, W) to (H, W, C)
+                    img = np.transpose(img, (1, 2, 0))
+                    # Normalize to 0-255 if needed
+                    if img.max() <= 1.0:
+                        img = (img * 255).astype(np.uint8)
+                    else:
+                        img = img.astype(np.uint8)
+                    
+                    # Save individual camera image
+                    image_file = os.path.join(examples_dir, f'camera_{cam_idx}.png')
+                    pil_image = Image.fromarray(img)
+                    pil_image.save(image_file)
+                    logger.info(f"Saved camera {cam_idx} image (shape: {img.shape}) to: {image_file}")
+                
+            elif len(image_data.shape) == 3:  # Single camera: (C, H, W)
+                img = image_data
+                # Convert from (C, H, W) to (H, W, C)
+                img = np.transpose(img, (1, 2, 0))
+                # Normalize to 0-255 if needed
+                if img.max() <= 1.0:
+                    img = (img * 255).astype(np.uint8)
+                else:
+                    img = img.astype(np.uint8)
+                
+                # Save single camera image
+                image_file = os.path.join(examples_dir, 'camera_0.png')
+                pil_image = Image.fromarray(img)
+                pil_image.save(image_file)
+                logger.info(f"Saved single camera image (shape: {img.shape}) to: {image_file}")
+            else:
+                logger.warning(f"Unexpected image shape: {image_data.shape}")
+        
+        # Save state as separate CSV (raw, unnormalized)
+        # Match testing phase format: state_raw.csv
+        if 'state' in sample and sample['state'] is not None:
+            state_data = sample['state']
+            if isinstance(state_data, torch.Tensor):
+                state_data = state_data.cpu().numpy()
+            
+            # Ensure state_data is at least 2D for np.savetxt
+            if state_data.ndim == 1:
+                state_data = state_data.reshape(1, -1)
+            elif state_data.ndim > 2:
+                # Flatten to 2D if needed
+                state_data = state_data.reshape(1, -1)
+            
+            state_file = os.path.join(examples_dir, 'state_raw.csv')
+            header = ','.join([f'state_{i}' for i in range(state_data.shape[1])])
+            np.savetxt(state_file, state_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw state (unnormalized) to: {state_file}")
+        
+        # Save action as separate CSV (raw, unnormalized)
+        # Match testing phase format: action_raw.csv
+        if 'action' in sample and sample['action'] is not None:
+            action_data = sample['action']
+            if isinstance(action_data, torch.Tensor):
+                action_data = action_data.cpu().numpy()
+            
+            # Action might be (chunk_size, action_dim) or (action_dim,)
+            if action_data.ndim == 1:
+                action_data = action_data.reshape(1, -1)
+            elif action_data.ndim > 2:
+                # Flatten higher dimensions
+                original_shape = action_data.shape
+                action_data = action_data.reshape(-1, action_data.shape[-1])
+                logger.debug(f"Reshaped action from {original_shape} to {action_data.shape}")
+            
+            action_file = os.path.join(examples_dir, 'action_raw.csv')
+            header = ','.join([f'action_{i}' for i in range(action_data.shape[1])])
+            np.savetxt(action_file, action_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw action (unnormalized) to: {action_file}")
+        
+        # Save reasoning as JSON if not empty
+        if 'reasoning' in sample and sample['reasoning']:
+            reasoning = sample['reasoning']
+            # Check if reasoning is not empty
+            if reasoning and (not isinstance(reasoning, str) or reasoning.strip()):
+                reasoning_file = os.path.join(examples_dir, 'reasoning.json')
+                with open(reasoning_file, 'w', encoding='utf-8') as f:
+                    if isinstance(reasoning, dict):
+                        json.dump(reasoning, f, indent=2, ensure_ascii=False)
+                    else:
+                        json.dump({'reasoning': str(reasoning)}, f, indent=2, ensure_ascii=False)
+                logger.info(f"Saved reasoning to: {reasoning_file}")
+        
+        # Save metadata info file to match testing phase format
+        info_file = os.path.join(examples_dir, 'info.txt')
+        with open(info_file, 'w') as f:
+            f.write("=== Training Example Data Info ===\n\n")
+            f.write("This example is saved from the raw training dataset (before data_processor).\n")
+            f.write("Data is saved in unnormalized form to match testing phase format.\n\n")
+            
+            # Sample info
+            f.write("Sample keys:\n")
+            for key in sample.keys():
+                value = sample[key]
+                if isinstance(value, (np.ndarray, torch.Tensor)):
+                    shape = value.shape if hasattr(value, 'shape') else 'N/A'
+                    dtype = value.dtype if hasattr(value, 'dtype') else 'N/A'
+                    f.write(f"  {key}: shape={shape}, dtype={dtype}\n")
+                elif value is not None:
+                    f.write(f"  {key}: {type(value).__name__}\n")
+            
+            f.write("\nFiles saved:\n")
+            f.write("  - camera_{i}.png: raw images from dataset (unnormalized, original resolution)\n")
+            f.write("  - state_raw.csv: raw state values (unnormalized)\n")
+            f.write("  - action_raw.csv: raw action values (unnormalized)\n")
+            f.write("  - raw_lang.txt: language instruction (if available)\n")
+            f.write("  - reasoning.json: reasoning data (if available)\n")
+            f.write("  - info.txt: this file\n\n")
+            f.write("Note: These raw values can be directly compared with testing phase examples.\n")
+        
+        logger.info(f"Saved example info to: {info_file}")
+        logger.info("Successfully saved example data from first dataset (raw, unnormalized)")
+        
+    except Exception as e:
+        logger.error(f"Error saving example data: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 def safe_decode(value):
     if isinstance(value, bytes):
@@ -19,10 +231,56 @@ def safe_decode(value):
     else:
         return str(value)
 
+def ensure_uint8_image(image_array):
+    """
+    Ensure image array is uint8 with values in [0, 255] range.
+    Handles conversion from normalized float images (0-1) or other formats.
+    
+    Args:
+        image_array: numpy array or torch tensor
+        
+    Returns:
+        Image array in uint8 format with values [0, 255]
+    """
+    # Handle torch tensors directly without numpy conversion
+    if isinstance(image_array, torch.Tensor):
+        if image_array.dtype == torch.uint8:
+            return image_array
+        
+        if image_array.dtype in [torch.float32, torch.float64, torch.float16]:
+            # Normalized float image (0-1)
+            if image_array.max() <= 1.0 and image_array.min() >= 0.0:
+                return (image_array * 255).clamp(0, 255).to(torch.uint8)
+            # Float image already in [0, 255] range
+            else:
+                return image_array.clamp(0, 255).to(torch.uint8)
+        else:
+            # Other dtypes (int32, int64, etc.)
+            return image_array.clamp(0, 255).to(torch.uint8)
+    
+    # Handle numpy arrays
+    else:
+        if image_array.dtype == np.uint8:
+            return image_array
+        
+        if image_array.dtype in [np.float32, np.float64, np.float16]:
+            # Normalized float image (0-1)
+            if image_array.max() <= 1.0 and image_array.min() >= 0.0:
+                return (image_array * 255).clip(0, 255).astype(np.uint8)
+            # Float image already in [0, 255] range
+            else:
+                return image_array.clip(0, 255).astype(np.uint8)
+        else:
+            # Other dtypes (int32, int64, etc.)
+            return image_array.clip(0, 255).astype(np.uint8)
+
 def convert_rlds_sample(data):
+    # Ensure images are uint8 [0, 255]
+    image_data = ensure_uint8_image(data['image'])
+    
     data_dict = dict(
         raw_lang = safe_decode(data['raw_lang']),
-        image = torch.einsum('k h w c -> k c h w', torch.from_numpy(data['image'])),
+        image = torch.einsum('k h w c -> k c h w', torch.from_numpy(image_data) if isinstance(image_data, np.ndarray) else image_data),
         state = torch.from_numpy(data['state']).float(),
         action = torch.from_numpy(data['action']).float(),
     )
@@ -53,8 +311,28 @@ def find_all_hdf5(dataset_dir):
     return hdf5_files
 
 def set_seed(seed):
-    torch.manual_seed(seed)
+    """Set all random seeds to ensure reproducibility
+    
+    Args:
+        seed: random seed
+    """
+    import random
+    random.seed(seed)
+    # NumPy
     np.random.seed(seed)
+    # PyTorch CPU
+    torch.manual_seed(seed)
+    # PyTorch GPU
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # multiple GPUs
+    
+    # cuDNN deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # environment variable (some libraries will read)
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 def flatten_list(l):
@@ -92,8 +370,8 @@ def _create_dataset_from_config(dataset_config: dict, args):
     Returns:
         Dataset instance with added 'name' and 'dataset_id' attributes
     """
-    # Get dataset class
-    class_path = dataset_config.get('class', dataset_config.get('dataset_class', 'EpisodicDataset'))
+    # Get dataset class - support both new 'type' and old 'class' fields
+    class_path = dataset_config.get('type') or dataset_config.get('class') or dataset_config.get('dataset_class', 'EpisodicDataset')
     dataset_class = _import_class_from_path(class_path)
     
     # Extract dataset name from config (required for identification)
@@ -222,11 +500,11 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         
         # Log mask configuration for transparency
         if action_norm_mask is not None or state_norm_mask is not None:
-            print(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
+            logger.info(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
             if action_norm_mask is not None:
-                print(f"  - action_norm_mask: {action_norm_mask}")
+                logger.info(f"  - action_norm_mask: {action_norm_mask}")
             if state_norm_mask is not None:
-                print(f"  - state_norm_mask: {state_norm_mask}")
+                logger.info(f"  - state_norm_mask: {state_norm_mask}")
         
         # Create normalizers with masks
         action_normalizers[dataset_id] = action_normalizer_class(
@@ -283,14 +561,14 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         # Log mask information being saved
         has_mask = any('action_norm_mask' in ds or 'state_norm_mask' in ds for ds in datasets_meta)
         if has_mask:
-            print(f"\nSaving normalizer metadata with mask configurations to: {os.path.join(args.output_dir, 'normalize.json')}")
+            logger.info(f"Saving normalizer metadata with mask configurations to: {os.path.join(args.output_dir, 'normalize.json')}")
             for ds_meta in datasets_meta:
                 if 'action_norm_mask' in ds_meta or 'state_norm_mask' in ds_meta:
-                    print(f"  Dataset '{ds_meta['dataset_id']}':")
+                    logger.info(f"  Dataset '{ds_meta['dataset_id']}':")
                     if 'action_norm_mask' in ds_meta:
-                        print(f"    - action_norm_mask: {ds_meta['action_norm_mask']}")
+                        logger.info(f"    - action_norm_mask: {ds_meta['action_norm_mask']}")
                     if 'state_norm_mask' in ds_meta:
-                        print(f"    - state_norm_mask: {ds_meta['state_norm_mask']}")
+                        logger.info(f"    - state_norm_mask: {ds_meta['state_norm_mask']}")
         
         save_norm_meta_to_json(os.path.join(args.output_dir, 'normalize.json'), norm_meta)
         
@@ -299,7 +577,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             try:
                 normalizer.save_stats_to_(args.output_dir)
             except Exception as e:
-                print(f"Failed to save normalizer stats of {dataset_id} because {e}")
+                logger.warning(f"Failed to save normalizer stats of {dataset_id} because {e}")
     
     # Wrap datasets with normalizers
     from data_utils.dataset_wrappers import wrap_dataset_with_normalizers

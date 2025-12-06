@@ -13,7 +13,6 @@ import copy
 from data_utils.normalize import ZScoreNormalizer, MinMaxNormalizer, PercentileNormalizer
 # TensorFlow imports for RLDS dataset handling
 try:
-    import dlimp as dl
     import tensorflow as tf
     TF_AVAILABLE = True
 except ImportError:
@@ -227,6 +226,7 @@ def wrap_dataset_with_normalizers(
             dataset_name=dataset_name
         )
     elif has_iter:
+        import dlimp as dl
         # Check if this is an RLDS dataset (tf.data with dlimp Dataset)
         if hasattr(dataset, 'dataset') and isinstance(dataset.dataset, dl.DLataset):
             # This is an RLDS dataset, use TensorFlow pipeline for normalization

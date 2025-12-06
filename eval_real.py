@@ -1,12 +1,13 @@
-# eval_real.py (simplified argparse with complete core functionality)
+import configs 
+import os
 import yaml
 import traceback
 import time
 import threading
 import queue
-import os
 import imageio
 import torch
+from loguru import logger
 from data_utils.utils import set_seed,  _convert_to_type
 from deploy.robot.base import AbstractRobotInterface, RateLimiter, make_robot
 from deploy.action_manager import load_action_manager
@@ -60,7 +61,7 @@ def parse_param():
 
 def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Queue, args):
     """Sensing producer thread, uses an abstract interface to get observations."""
-    print("[Sensing Thread] Producer started.")
+    logger.info("[Sensing Thread] Producer started.")
     if args.output_dir!='':
         os.makedirs(args.output_dir, exist_ok=True)
         if args.episode_id<0:
@@ -78,7 +79,7 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
             obs = robot.get_observation()
             t_obs = time.perf_counter()
             if obs:
-                print(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
+                logger.debug(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
                 obs = robot.obs2meta(obs)
                 if observation_queue.full():
                     try:
@@ -100,13 +101,13 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
                     video_writer.append_data(img)
             rate_limiter.sleep(args.sensing_rate)
     except Exception as e:
-        print(f"[Sensing Thread] An exception occurred: {e}")
+        logger.error(f"[Sensing Thread] An exception occurred: {e}")
         traceback.print_exc()
         robot.shutdown()
 
 def inference_producer(policy, observation_queue: queue.Queue, action_manager: queue.Queue, args):
     """Inference producer thread, consumes observation data and produces actions."""
-    print("[Inference Thread] Producer started.")
+    logger.info("[Inference Thread] Producer started.")
     with torch.no_grad():
         try:
             step_count = 0
@@ -120,14 +121,14 @@ def inference_producer(policy, observation_queue: queue.Queue, action_manager: q
                 step_count += 1
                 action_manager.put(action_chunk, t_obs)
         except Exception as e:
-            print(f"[Inference Thread] An exception occurred: {e}")
+            logger.error(f"[Inference Thread] An exception occurred: {e}")
             traceback.print_exc()
             robot.shutdown()
 
 if __name__ == '__main__':
     set_seed(0)
     args = parse_param()
-    args.is_pretrained = True
+    args.is_training = False
     
     # Build config loader from CLI for overrides
     # Explicitly pass unknown_args to ConfigLoader (same as train.py)
@@ -153,14 +154,14 @@ if __name__ == '__main__':
         robot_cfg_path = cfg_loader._resolve('robot', args.robot_config)
     except Exception:
         robot_cfg_path = args.robot_config
-    print(f"Loading robot configuration from {robot_cfg_path}")
+    logger.info(f"Loading robot configuration from {robot_cfg_path}")
     with open(robot_cfg_path, 'r') as f:
         robot_cfg = yaml.safe_load(f)
     apply_overrides_to_mapping(robot_cfg, cfg_loader.get_overrides('robot'), _convert_to_type)
 
     robot = make_robot(robot_cfg, args)
     
-    print("Robot successfully loaded.")
+    logger.info("Robot successfully loaded.")
     input("=" * 10 + "Press Enter to start evaluation..." + "=" * 10)
 
     # Create thread-safe queues
@@ -172,15 +173,15 @@ if __name__ == '__main__':
     # - Config file paths: 'configs/action_manager/my_custom.yaml'
     # - Command-line overrides: --manager.start_ratio 0.15 --manager.end_ratio 0.25
     # - Dynamic class loading via module_path and class_name in config
-    print(f"Loading action manager: {args.action_manager}")
+    logger.info(f"Loading action manager: {args.action_manager}")
     try:
         manager_cfg, manager_cfg_path = cfg_loader.load_manager(args.action_manager)
-        print(f"✓ Loaded config from: {manager_cfg_path}")
-        print(f"  Manager: {manager_cfg.get('manager_name', manager_cfg.get('name'))}")
-        print(f"  Parameters: {', '.join(f'{k}={v}' for k, v in manager_cfg.items() if k not in ['name', 'manager_name', 'module_path', 'class_name'])}")
+        logger.info(f"✓ Loaded config from: {manager_cfg_path}")
+        logger.info(f"  Manager: {manager_cfg.get('manager_name', manager_cfg.get('name'))}")
+        logger.info(f"  Parameters: {', '.join(f'{k}={v}' for k, v in manager_cfg.items() if k not in ['name', 'manager_name', 'module_path', 'class_name'])}")
     except Exception as e:
         # Fallback for legacy class names
-        print(f"Using legacy loading for: {args.action_manager}")
+        logger.info(f"Using legacy loading for: {args.action_manager}")
         manager_cfg = {'manager_name': args.action_manager}
     
     action_manager = load_action_manager(config=manager_cfg)
@@ -196,7 +197,7 @@ if __name__ == '__main__':
     sensing_thread.start()
     inference_thread.start()
 
-    print("[Main Control Loop] Consumer started.")
+    logger.info("[Main Control Loop] Consumer started.")
     try:
         rate_limiter = RateLimiter()
         while robot.is_running():
@@ -205,9 +206,9 @@ if __name__ == '__main__':
             action = action_manager.get(t)
             if action is not None:
                 action = robot.meta2act(action)
-                print(f"[Main Control Loop] New action {action} found, updating...")
+                logger.debug(f"[Main Control Loop] New action {action} found, updating...")
                 robot.publish_action(action)
             rate_limiter.sleep(args.publish_rate)
     except KeyboardInterrupt:
-        print(f"[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
+        logger.info(f"[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
         robot.shutdown()

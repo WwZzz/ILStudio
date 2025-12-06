@@ -1,17 +1,19 @@
-# 新的灵活数据集配置格式
 datasets:
-  - name: "insertion_human"
-    class: "AlohaSimDataset"
-    args:
-      dataset_path_list: ['/inspire/hdd/project/robot-action/public/data/act_aloha/sim_insertion_human']
-      camera_names: ['primary']
-      chunk_size: 50
-      ctrl_space: 'joint'
-      ctrl_type: 'abs'
-
-# Task-specific parameters that will override policy configs
-action_dim: 14
-state_dim: 14
-image_size: [640, 480]
-action_normalize: "zscore"
-state_normalize: "zscore"
+- type: data_utils.datasets.AlohaSimDataset
+  name: insertion_human
+  args:
+    dataset_path_list:
+    - /inspire/hdd/project/robot-action/public/data/act_aloha/sim_insertion_human
+    camera_names:
+    - primary
+    chunk_size: 50
+    ctrl_space: joint
+    ctrl_type: abs
+meta:
+  action_dim: 14
+  state_dim: 14
+  image_size:
+  - 640
+  - 480
+  action_normalize: zscore
+  state_normalize: zscore

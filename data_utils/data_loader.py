@@ -1,9 +1,9 @@
+import os
 import threading
 import time
 import numpy as np
 import itertools
 import torch
-import os
 import fnmatch
 import queue
 import json
@@ -16,14 +16,6 @@ from torch.utils.data import DataLoader, Sampler
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
-try:
-    from torchdata.datapipes.iter import IterableWrapper, Cycler, ShardingFilter, Shuffler, Batcher, Prefetcher, Multiplexer, SampleMultiplexer
-    TORCHDATA_AVAILABLE = True
-except ImportError:
-    TORCHDATA_AVAILABLE = False
-    warnings.warn("torchdata not available. Multi-dataset mixing will not be supported.")
-# import logging
-# logger = logging.getLogger(__name__)
 
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
@@ -273,7 +265,6 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
     if isinstance(train_dataset, list):
         # Multiple datasets - use torchdata for mixing
         
-        print(f"Using mixed dataset pipeline with {len(train_dataset)} datasets")
         train_loader = _create_mixed_dataloader(train_dataset, processor, collator, args)
         
         # Handle validation dataset
@@ -304,18 +295,39 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
     # Identify the type of the dataset: iter or map
     if is_map_data(dataset):
         wrapped_data = WrappedDataset(dataset, processor)
-        sampler = DistributedSampler(wrapped_data) if is_training and is_distributed() else None
+        sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_training and is_distributed() else None
+        
+        # 创建确定性的随机数生成器（用于 shuffle）
+        generator = None
+        if is_training and sampler is None:  # 只在没有 sampler 且需要 shuffle 时使用
+            seed = getattr(args, 'seed', 0)
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        
+        # Worker 初始化函数（确保每个 worker 有不同但确定的种子）
+        def worker_init_fn(worker_id):
+            import random
+            seed = getattr(args, 'seed', 0)
+            worker_seed = seed + worker_id
+            random.seed(worker_seed)
+            np.random.seed(worker_seed)
+            torch.manual_seed(worker_seed)
+        
+        persistent_workers = getattr(args, 'dataloader_persistent_workers', False) if args.dataloader_num_workers>0 else False
+        prefetch_factor = getattr(args, 'dataloader_prefetch_factor', 2) if args.dataloader_num_workers>0 else None
         loader = DataLoader(
             wrapped_data,
             batch_size=args.per_device_train_batch_size,
-            shuffle=(sampler is None and is_training),
+            shuffle=(sampler is None) and is_training,  # 只在没有 sampler 时 shuffle
             sampler=sampler,
             num_workers=args.dataloader_num_workers,
             collate_fn=collator,
             drop_last=is_training,
             pin_memory=args.dataloader_pin_memory,
-            persistent_workers=True,
-            prefetch_factor=getattr(args, 'dataloader_prefetch_factor', 2),
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
+            generator=generator,  # 确保 shuffle 的可复现性
+            worker_init_fn=worker_init_fn if is_training and args.dataloader_num_workers > 0 else None,  # 确保 worker 的可复现性
         )
         if getattr(args, 'background_prefetch', False):
             loader = BackgroundPrefetcher(loader, getattr(args, 'dataloader_prefetch_factor', 2))
@@ -338,6 +350,14 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         else:
             # Pytorch Iterable dataset
             # Wrap iterable dataset with processor
+            try:
+                from torchdata.datapipes.iter import IterableWrapper
+            except ImportError:
+                raise ImportError(
+                    "torchdata is required for iterable dataset support. "
+                    "Install it with: pip install torchdata"
+                )
+            
             wrapped_data = WrappedIterableDataset(dataset, processor)
             pipe = IterableWrapper(wrapped_data, deepcopy=False)
             # For iterable datasets, we cannot use DistributedSampler

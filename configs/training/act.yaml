@@ -44,8 +44,8 @@ adam_epsilon: 1e-8
 
 # Logging settings
 logging_strategy: "steps"
-logging_steps: 1000
-report_to: "none"
+logging_steps: 10
+report_to: "tensorboard"
 
 # Saving settings
 save_strategy: "steps"

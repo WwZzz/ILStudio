@@ -12,6 +12,7 @@ import numpy as np
 import warnings
 from benchmark.utils import resize_with_pad
 from .lerobot_wrapper import WrappedLerobotDataset
+from data_utils.utils import ensure_uint8_image
 
 class LerobotLIBERO(WrappedLerobotDataset):
     def extract_from_episode(self, episode_idx, keyname=[]):
@@ -21,9 +22,9 @@ class LerobotLIBERO(WrappedLerobotDataset):
         all_features = ds_meta.features
         preserved_keys = []
         if 'state' in keyname:
-            preserved_keys.append('state')
+            preserved_keys.append('observation.state')
         if 'action' in keyname:
-            preserved_keys.append('actions')
+            preserved_keys.append('action')
         if 'image' in keyname or 'images' in keyname:
             preserved_keys.extend(ds_meta.camera_keys)
             ignore_image = False
@@ -62,8 +63,8 @@ class LerobotLIBERO(WrappedLerobotDataset):
         data_dict = {}
         episode_id = self.per_dataset_episode_start[dataset_idx] + sample['episode_index'].item()
         raw_lang = sample['task']
-        action = sample['actions']
-        state = sample['state']
+        action = sample['action']
+        state = sample['observation.state']
         timestamp = sample['frame_index'].item()
         is_pad = sample['action_is_pad']
         # process image
@@ -72,6 +73,10 @@ class LerobotLIBERO(WrappedLerobotDataset):
             images = torch.cat([resize_with_pad(sample[cam_key].unsqueeze(0), height=self.image_size[1], width=self.image_size[0]) for cam_key in cam_keys], dim=0)
         else:
             images = torch.stack([sample[cam_key] for cam_key in cam_keys])
+        
+        # Safety check: ensure images are uint8 with values in [0, 255]
+        images = ensure_uint8_image(images)
+        
         data_dict = {
             'image': images,
             'state': state,

@@ -8,9 +8,9 @@
 
 
 
-| ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |FlowMatching - Transport                                             |
-|----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|----------------------------------------------------------|
-| <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_aloha_insertion.gif" height="200">  | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/diffusion_aloha_transfer.gif" height="200"> | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_robomimic_square.gif" height="200"> |<img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/flowmatching_transport.gif" height="200"> |
+| ACT - Insertion                                          | Diffusion UNet - Transfer Cube                               | ACT - Square                                             |FlowMatching - Transport                                             |SmolVLA - MetaWorld                                             |
+|----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|----------------------------------------------------------|----------------------------------------------------------|
+| <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_aloha_insertion.gif" height="200">  | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/diffusion_aloha_transfer.gif" height="200"> | <img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/act_robomimic_square.gif" height="200"> |<img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/flowmatching_transport.gif" height="200"> |<img src="https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_smolvla_mw41.gif" height="200"> |
 
 | Koch - Pick & Place -Inference                                     |     SO101 - Fold Tower -Inference               | BC_MLP - AdroitHandDoor                                                         |Pi0 - LIBERO                                                         |
 |----------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------|----------------------------------------------------------|
@@ -34,6 +34,8 @@ cd IL-Studio
 git submodule update --init --recursive 
 # Install uv by 'pip install uv' before running the command below
 uv sync
+# activate the uv python environment
+source .venv/bin/activate
 ```
 
 ### pip
@@ -44,15 +46,19 @@ If `uv` is not preferred, just use `pip install -r requirements.txt` to use this
 ### ACT on AlohaSim
 
 ```shell
-uv run python train.py --policy act --task sim_transfer_cube_scripted --output_dir ckpt/act_aloha_sim_transfer
+python train.py --policy act --task sim_transfer_cube_scripted --output_dir ckpt/act_aloha_sim_transfer
 
 # Evaluation at local 
-uv runpython eval_sim.py -m  ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_
+
+
 # 🛠️Note:
 # If you are running this code on a local computer or workstation, you need to perform the following additional steps:
+# Option 0 [Headless server with GPU]
+export MUJOCO_GL=egl
+python eval_sim.py -m  ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_ --use_spawn
 # Option 1 [without GPU]
 export MUJOCO_GL=osmesa
-uv runpython eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_
+python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_
 # Option 2 [with GPU]
 export MUJOCO_GL=glfw
 python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_ --use_spawn
@@ -62,12 +68,33 @@ python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/t
 
 ```shell
 # You can use --training.xxx to update the training parameters
-uv run python train.py --policy diffusion_policy --task sim_transfer_cube_scripted --output_dir ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000
+python train.py -p diffusion_policy -t sim_transfer_cube_scripted -o ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000 -c dp
 
 # Evaluation at local 
 
-uv run python eval.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
+python eval_sim.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
 ```
+
+### SmolVLA on MetaWorld
+```shell
+# train
+python train.py --policy smolvla --task metaworld --output_dir ckpt/smolvla_metaworld --training.max_steps 100000 --training.per_device_train_batch_size 64
+
+# eval with policy server
+# Terminal 1
+# the default server address is localhost:5000
+python start_policy_server.py -m ckpt/smolvla_metaworld
+
+# Terminal 2
+# Follow benchmark/metaworld/README.md to install the virtual environment for metaworld before evalution
+# e.g.,
+# -n denotes the number of rollouts for each task
+# -bs denotes the number of rollouts in parallel for acceleration
+# the default address is localhost:5000. You can use other address or /path/to/ckpt to evaluate locally without policy server
+source benchmark/metaworld/.venv/bin/activate
+python eval_sim.py -o results/smolvla_mw_easy -e mw_easy -n 10 -bs 10
+```
+
 ## Overview
 ![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
@@ -185,6 +212,8 @@ export CMAKE_POLICY_VERSION_MINIMUM=X.X # your cmake version, e.g., 3.5 or 4.0
 ```
 
 - when `eval_sim.py` raises errors like `malloc(): unaligned tcache chunk detected`, please add `--use_spawn` at the end fo the evaluation command.  
+
+- **Failed to build `evdev` on Ubuntu**:  `sudo apt-get update && sudo apt-get install -y python3.10-dev`
 
 ## 📫 Concat:
 - Wang Z. <zwang@stu.xmu.edu.cn>

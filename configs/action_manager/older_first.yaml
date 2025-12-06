@@ -1,12 +1,4 @@
-# Older First Action Manager Configuration
-# Refuse newly coming chunks unless the last chunk ends x%
-
+type: deploy.action_manager.older_first.OlderFirstManager
 name: older_first
-manager_name: OlderFirstManager
-
-# coef: threshold coefficient (0.0 to 1.0)
-# New chunks are only accepted if current_step >= len(chunk) * coef
-# Default: 1.0 (only accept new chunk after current chunk is fully executed)
-# Lower values allow earlier acceptance of new chunks
-coef: 1.0
-
+args:
+  coef: 1.0

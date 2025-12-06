@@ -7,6 +7,7 @@ and convert them to transformers.TrainingArguments.
 
 import yaml
 import os
+from loguru import logger
 from typing import Dict, Any, Optional
 from pathlib import Path
 import transformers
@@ -37,7 +38,7 @@ class TrainingConfig:
                 try:
                     processed_config[key] = float(value)
                 except ValueError:
-                    print(f"Warning: Could not convert {key}='{value}' to float, keeping as string")
+                    logger.warning(f"Could not convert {key}='{value}' to float, keeping as string")
                     processed_config[key] = value
             else:
                 processed_config[key] = value
@@ -72,8 +73,6 @@ class TrainingConfig:
             filtered_config = {k: v for k, v in config_dict.items() if k in valid_params}
             invalid_params = set(config_dict.keys()) - valid_params
             
-            # if invalid_params:
-            #     print(f"Warning: Ignoring invalid TrainingArguments parameters: {invalid_params}")
             
             training_args = transformers.TrainingArguments(**filtered_config)
             if invalid_params:

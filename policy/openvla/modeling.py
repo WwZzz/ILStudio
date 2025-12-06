@@ -125,53 +125,51 @@ class OpenPolicy(PreTrainedModel):
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
     
-    def select_action(
-        self,
-        obs,
-        **kwargs
-    ) -> np.ndarray:
+    def select_action(self, batch_obs, **kwargs) -> np.ndarray:
         """
-        Predict action from image and instruction.
+        Predict action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions as numpy array
         """
-        images = [img[0] for img in obs['image']]
-        # Convert image to PIL if needed
-        if isinstance(images[0], np.ndarray):
-            if images[0].dtype != np.uint8:
-                images = [(image * 255).astype(np.uint8) for image in images]
-            if len(images[0].shape) == 3 and images[0].shape[0] == 3:  # CHW format
-                images = [image.transpose(1, 2, 0) for image in images]
-            images = [Image.fromarray(image) for image in images]
-        elif isinstance(images[0], torch.Tensor):
-            if images[0].dim() == 3 and images[0].shape[0] == 3:  # CHW format
-                images[0] = [image.permute(1, 2, 0) for image in images]
-            if images[0].dtype != torch.uint8:
-                images[0] = [(image * 255).byte() for image in images]
-            images = [Image.fromarray(image.numpy()) for image in images]
-        instructions = obs['raw_lang']
-        # Build simple prompt
-        prompts = [f"Human: What action should the robot take to {ins}?\nAssistant:" for ins in instructions]
-        # Tokenize
-        inputs = self.processor(
-            text=prompts,
-            images=images,
-            return_tensors="pt"
-        )
-        # Move to device
+        # The batch_obs should already contain processed inputs from data_processor
         device = next(self.model.parameters()).device
-        inputs = {k: v.to(device,dtype=torch.bfloat16) if k=='pixel_values' else v.to(device) for k, v in inputs.items()}
-        bs = len(prompts)
+        
+        # Move inputs to device
+        inputs = {k: v.to(device, dtype=torch.bfloat16) if k == 'pixel_values' else v.to(device) 
+                 for k, v in batch_obs.items() if isinstance(v, torch.Tensor)}
+        
+        bs = inputs['input_ids'].shape[0]
+        
+        # Ensure proper token formatting (add token 29871 if needed)
         if not torch.all(inputs['input_ids'][:, -1] == 29871):
-            inputs['input_ids'] = torch.cat((inputs['input_ids'], torch.Tensor([[29871] for _ in range(bs)]).long().to(device)), dim=1)
-            inputs['attention_mask'] = torch.cat((inputs['attention_mask'], torch.Tensor([[1] for _ in range(bs)]).long().to(device)), dim=1)
-        inputs = [{k: v[i:i+1,:] if isinstance(v, torch.Tensor) else v[i] for k, v in inputs.items()} for i in range(bs)]
+            inputs['input_ids'] = torch.cat(
+                (inputs['input_ids'], torch.full((bs, 1), 29871, dtype=torch.long, device=device)), 
+                dim=1
+            )
+            inputs['attention_mask'] = torch.cat(
+                (inputs['attention_mask'], torch.ones((bs, 1), dtype=torch.long, device=device)), 
+                dim=1
+            )
+        
+        # Split batch for generation (model processes one at a time)
+        inputs_list = [{k: v[i:i+1] for k, v in inputs.items()} for i in range(bs)]
+        
         # Run VLA inference
-        generated_ids = [self.model.generate(**inp, max_new_tokens=self.config.action_dim,) for inp in inputs]
-
+        generated_ids = [self.model.generate(**inp, max_new_tokens=self.config.action_dim) 
+                        for inp in inputs_list]
+        
         # Extract predicted action tokens and translate into (normalized) continuous actions
-        predicted_action_token_ids = [gids[0, -self.config.action_dim:].cpu().numpy() for gids in generated_ids]
-        normalized_actions = [self.action_tokenizer.decode_token_ids_to_actions(pids) for pids in predicted_action_token_ids]   
+        predicted_action_token_ids = [gids[0, -self.config.action_dim:].cpu().numpy() 
+                                      for gids in generated_ids]
+        normalized_actions = [self.action_tokenizer.decode_token_ids_to_actions(pids) 
+                             for pids in predicted_action_token_ids]
         action = np.stack(normalized_actions)
-        return action[:,np.newaxis, :]
+        
+        return action[:, np.newaxis, :]
 
 AutoConfig.register("openvla", OpenVLAConfig)
 AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)

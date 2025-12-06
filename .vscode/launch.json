@@ -14,16 +14,47 @@
             "env": {
                 "MUJOCO_GL": "egl",
                 "CUDA_VISIBLE_DEVICES": "0",
+                "HF_ENDPOINT": "https://hf-mirror.com",
                 // "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 // "ILSTD_CACHE": "/mnt/model/ilstd/data",
-                // "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
+                "HF_HOME": "/inspire/qb-dev/project/robot-action/public/huggingface",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [
-                "-c","so101_follower", "-m", "ckpt/dp_so101_fold_1113", "-am", "so101_cover","--image_size", "256",
+                "-p", "act", "-t", "libero_obj0", "-c", "act", "-o", "ckpt/liberoact_V9", "--training.per_device_train_batch_size", "16", "--training.max_steps", "20000"
             ],
             // "args": [
-            //     "-p", "smolvla_mw", "-t", "lerobot_metaworld", "-c", "smolvla", "-o", "ckpt/smolvla_mw_1107"
+            //     "-m", "ckpt/openvla_1129"
+            // ],
+            // "args": [
+            //     "-e", "libero_object_0", "-o", "results/smolvla_liberoobj_primary_0"
+            // ],
+            // "args": [
+            //     "-p", "pi0_mw", "-t", "lerobot_metaworld", "-o", "ckpt/pi0_mw", "-c", "openpi_full"
+            // ],
+            // "args": [//robomimic+act
+            //     "-p", "pi0_aloha", "-t", "sim_transfer_cube_scripted", "-o", "ckpt/pi0_aloha_1122", "-c", "openpi_full"
+            // ],
+            // "args": [
+            //     "-p", "smolvla_mw", "-t", "mw_stick_push", "-c", "smolvla", "-o", "ckpt/smolvla_wm1120_bs64_stick_push_debug"
+            // ],
+            // "args": [
+            //     "-m", "ckpt/smolvla_wm1120_bs64_stick_push/checkpoint-10000"
+            // ],
+            // "args": [
+            //     "-e", "mw_20", "-o", "results/smolvla_mw_20_1119_debug"
+            // ]
+            // "args": [
+            //     "-e","aloha_transfer","-o","results/smolvla_transfer_8w","--use_spawn","-n","10","-ne","5","-m","ckpt/smolvla_alohasim_1118/checkpoint-80000"
+            // ],
+            // "args": [
+            //     " -t","sim_transfer_cube_scripted","-p","smolvla","-c","smolvla","-o","ckpt/smolvla_alohasim_1118_debug",
+            // ],
+            // "args": [
+            //     "-c","so101_follower", "-m", "ckpt/dp_so101_fold_1113", "-am", "so101_cover","--image_size", "256",
+            // ],
+            // "args": [
+            //     "-p", "smolvla_mw", "-t", "lerobot_metaworld", "-c", "smolvla", "-o", "ckpt/smolvla_mw_1117"
             // ],
             // "args": [
             //     "--training.tau_start", "5.0", "-p", "fm_can_gc", "-t", "robomimic_can_mh_lowdim", "-o", "ckpt/robomimic_gc_fm_can_mh_lowdim_1105_debug", "-c", "default", "--training.max_steps", "10000000", "--training.save_steps", "200000"
@@ -59,7 +90,10 @@
             //     "-m", "ckpt/pi0_libero_obj_full/checkpoint-10000"
             // ],
             // "args": [//robomimic+act
-            //     "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/actasdasdjaksdkl", "-c", "default"
+            //     "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_1118", "-c", "act"
+            // ],
+            // "args": [//robomimic+act
+            //     "-t", "sim_transfer_cube_scripted", "-p", "act", "-o", "ckpt/act_1118", "-c", "act"
             // ],
             // "args": [//robomimic+act
             //     "-t", "sim_transfer_cube_scripted", "-p", "act", "-c", "act", "-o", "ckpt/tmp_act_aloha_1"
