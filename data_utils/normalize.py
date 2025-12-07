@@ -184,24 +184,26 @@ class BaseNormalizer:
         cache_path = os.path.join(self.cache_dir, self.stats_filename)
         if os.path.exists(cache_path):
             return True
+        else:
+            return False
         
-        # Backward compatibility: check in dataset_dir if it exists
-        if self.dataset_dir:
-            old_path = os.path.join(self.dataset_dir, self.stats_filename)
-            old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
-            if os.path.exists(old_path) or os.path.exists(old_path_alt):
-                return True
+        # # Backward compatibility: check in dataset_dir if it exists
+        # if self.dataset_dir:
+        #     old_path = os.path.join(self.dataset_dir, self.stats_filename)
+        #     old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        #     if os.path.exists(old_path) or os.path.exists(old_path_alt):
+        #         return True
         
-        return False
+        # return False
 
     def compute_stats_for_array(self, data_k):
         return {
-            "mean": data_k.mean(0).tolist(),
-            "std": data_k.std(0).tolist(),
-            "max": data_k.max(0).tolist(),
-            "min": data_k.min(0).tolist(),
-            "q01": np.quantile(data_k, 0.01, axis=0).tolist(),
-            "q99": np.quantile(data_k, 0.99, axis=0).tolist(),
+            "mean": data_k.mean(0),
+            "std": data_k.std(0),
+            "max": data_k.max(0),
+            "min": data_k.min(0),
+            "q01": np.quantile(data_k, 0.01, axis=0),
+            "q99": np.quantile(data_k, 0.99, axis=0),
         }
     
     def compute_and_save_stats(self):
@@ -475,11 +477,11 @@ class BaseNormalizer:
         # Try cache directory first (new format)
         stats_path = os.path.join(self.cache_dir, self.stats_filename)
         
-        if not os.path.exists(stats_path) and self.dataset_dir:
-            # Backward compatibility: try dataset_dir
-            stats_path = os.path.join(self.dataset_dir, self.stats_filename)
-            if not os.path.exists(stats_path):
-                stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        # if not os.path.exists(stats_path) and self.dataset_dir:
+        #     # Backward compatibility: try dataset_dir
+        #     stats_path = os.path.join(self.dataset_dir, self.stats_filename)
+        #     if not os.path.exists(stats_path):
+        #         stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
         
         if not os.path.exists(stats_path):
             raise FileNotFoundError(

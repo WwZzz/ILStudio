@@ -135,6 +135,6 @@ class SmolVLAPolicy(PreTrainedModel):
                 batch_obs[k] = [item.to(device) if isinstance(item, torch.Tensor) else item for item in v]
         
         # Forward pass
-        action = self.forward(**batch_obs)
-        action = action['action'][:, :, :self.model.config.action_dim]
+        action = self.forward(**batch_obs)['action']
+        action = action[:, :, :self.model.config.action_dim]
         return action

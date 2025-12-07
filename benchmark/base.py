@@ -220,12 +220,7 @@ class MetaPolicy:
                     sample['image'] = normed_mobs.image
             
             # State: use specified control space (already normalized)
-            if self.ctrl_space == 'ee' and normed_mobs.state_ee is not None:
-                sample['state'] = normed_mobs.state_ee[i] if len(normed_mobs.state_ee.shape) > 1 else normed_mobs.state_ee
-            elif self.ctrl_space == 'joint' and normed_mobs.state_joint is not None:
-                sample['state'] = normed_mobs.state_joint[i] if len(normed_mobs.state_joint.shape) > 1 else normed_mobs.state_joint
-            elif normed_mobs.state is not None:
-                sample['state'] = normed_mobs.state[i] if len(normed_mobs.state.shape) > 1 else normed_mobs.state
+            sample['state'] = normed_mobs.state[i] if len(normed_mobs.state.shape) > 1 else normed_mobs.state
             
             # Language instruction
             if normed_mobs.raw_lang is not None:

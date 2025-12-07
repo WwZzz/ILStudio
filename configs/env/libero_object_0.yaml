@@ -7,6 +7,5 @@
     image_size:
     - 256
     - 256
-    camera_ids:
-    - 0
     use_openvla_gripper: False
+    use_wrist: True

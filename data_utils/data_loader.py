@@ -297,7 +297,6 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         wrapped_data = WrappedDataset(dataset, processor)
         sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_training and is_distributed() else None
         
-        # 创建确定性的随机数生成器（用于 shuffle）
         generator = None
         if is_training and sampler is None:  # 只在没有 sampler 且需要 shuffle 时使用
             seed = getattr(args, 'seed', 0)
@@ -318,7 +317,7 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         loader = DataLoader(
             wrapped_data,
             batch_size=args.per_device_train_batch_size,
-            shuffle=(sampler is None) and is_training,  # 只在没有 sampler 时 shuffle
+            shuffle=(sampler is None) and is_training,  
             sampler=sampler,
             num_workers=args.dataloader_num_workers,
             collate_fn=collator,
@@ -326,8 +325,8 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
             pin_memory=args.dataloader_pin_memory,
             persistent_workers=persistent_workers,
             prefetch_factor=prefetch_factor,
-            generator=generator,  # 确保 shuffle 的可复现性
-            worker_init_fn=worker_init_fn if is_training and args.dataloader_num_workers > 0 else None,  # 确保 worker 的可复现性
+            generator=generator, 
+            worker_init_fn=worker_init_fn if is_training and args.dataloader_num_workers > 0 else None, 
         )
         if getattr(args, 'background_prefetch', False):
             loader = BackgroundPrefetcher(loader, getattr(args, 'dataloader_prefetch_factor', 2))
