@@ -7,7 +7,9 @@ datasets:
     chunk_size: 50
     ctrl_space: ee
     ctrl_type: delta
-    camera_names: observation.images.image
+    camera_names: 
+      - observation.images.image
+      - observation.images.image2
     episode_filter:
       task_index: [24]
 

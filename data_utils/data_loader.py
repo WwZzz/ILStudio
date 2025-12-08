@@ -2,13 +2,8 @@ import os
 import threading
 import time
 import numpy as np
-import itertools
 import torch
-import fnmatch
 import queue
-import json
-import warnings
-import importlib
 import torch.distributed as dist
 import dlimp as dl
 from typing import Optional, Any, List, Union, Tuple
@@ -248,6 +243,12 @@ class BackgroundPrefetcher:
             except queue.Empty: break
         # logger.info("[BGPrefetcher] Shutdown complete.")
  
+def _create_loader(dataset, processor, collator, args, is_training):
+    if isinstance(dataset, list):
+        return _create_mixed_dataloader(dataset, processor, collator, args, is_training=is_training)
+    else:
+        return _create_single_dataloader(dataset, processor, collator, args, is_training=is_training)
+
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
     """
     Create DataLoader from single dataset or multiple datasets.
@@ -279,7 +280,14 @@ def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=Non
     
     else:
         # Single dataset - use existing logic
-        return _create_single_dataloader(train_dataset, processor, collator, args, is_training=True)
+        train_loader = _create_single_dataloader(train_dataset, processor, collator, args, is_training=True)
+        
+        # Handle validation dataset
+        eval_loader = None
+        if val_dataset is not None:
+            eval_loader = _create_single_dataloader(val_dataset, processor, collator, args, is_training=False)
+        
+        return train_loader, eval_loader
 
 def is_rlds_data(ds):
     return isinstance(ds, dl.DLataset)
@@ -405,30 +413,42 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
         else:
             raise TypeError("Dataset must be either map-style or iterable.")
     # Mix map-style datasets using ConcatDataset
+    map_loader = None
     if len(all_map_datasets)>0:
         mixed_map_data = torch.utils.data.ConcatDataset(all_map_datasets)
         map_loader = _create_single_dataloader(mixed_map_data, processor, collator, args, is_training=is_training)
-    else:
-        map_loader = None
+    
     # mix iterable datasets using huggingface's datasets
+    iter_loader = None
     if len(all_iter_datasets)>0:
         from datasets import interleave_datasets
-        mixed_iter_data = interleave_datasets(all_iter_datasets
-        )
+        mixed_iter_data = interleave_datasets(all_iter_datasets)
         iter_loader = _create_single_dataloader(mixed_iter_data, processor, collator, args, is_training=is_training)
-    else:
-        iter_loader = None
+    
     # mix rlds datasets using tf.data
+    rlds_loader = None
     if len(all_rlds_datasets)>0:
         import dlimp as dl
-        mixed_rlds_data = dl.DLataset.sample_from_datasets([ds.dataset for ds in all_rlds_datasets])
-        rlds_loader = _create_single_dataloader(mixed_rlds_data, processor, collator, args, is_training=is_training)
+        mixed_rlds_data_raw = dl.DLataset.sample_from_datasets([ds.dataset if hasattr(ds, 'dataset') else ds for ds in all_rlds_datasets])
+        # _create_single_dataloader has specific logic for rlds_data
+        rlds_loader = _create_single_dataloader(mixed_rlds_data_raw, processor, collator, args, is_training=is_training)
+    
+    # Combine all loaders
+    loaders_available = []
+    if map_loader is not None:
+        loaders_available.append(map_loader)
+    if iter_loader is not None:
+        loaders_available.append(iter_loader)
+    if rlds_loader is not None:
+        loaders_available.append(rlds_loader)
+    
+    if len(loaders_available) == 1:
+        return loaders_available[0]
+    elif len(loaders_available) > 1:
+        # If multiple types of loaders are present, we need a multiplexer.
+        # This part assumes a SampleMultiplexer class is available or will be implemented.
+        # For now, we'll keep the NotImplementedError to highlight this.
+        raise NotImplementedError("Mixing different types of DataLoaders (map-style, generic iterable, RLDS) is not yet implemented.")
     else:
-        rlds_loader = None
-    # Combine all loaders using SampleMultiplexer    
-    if rlds_loader is None and iter_loader is None: return map_loader
-    elif map_loader is None and rlds_loader is None: return iter_loader
-    elif map_loader is None and iter_loader is None: return rlds_loader
-    else:
-        raise NotImplementedError("Mixing map-style, iterable, and RLDS datasets is not yet implemented.")
+        return None
     

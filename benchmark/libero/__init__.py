@@ -104,6 +104,6 @@ class LiberoEnv(MetaEnv):
         # depth_primary = obs["agentview_depth"][::-1, ::-1]
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
-        return MetaObs(state=state_ee, state_ee=state_ee, state_joint=state_joint, image=image, raw_lang=self.raw_lang)
+        return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
     
     

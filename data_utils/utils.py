@@ -8,14 +8,47 @@ import importlib
 from loguru import logger
 import torch
 import torch.distributed as dist
+import dlimp as dl # Added this import
 try:
     import pandas as pd
 except:
     pd = None
 from PIL import Image
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, IterableDataset
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
 from .normalize import NORMTYPE2CLASS, load_normalizers, save_norm_meta_to_json, load_normalizer_from_meta
+
+
+class RatioSplittingIterableDataset(IterableDataset):
+    """
+    Wraps an iterable dataset to split it into train and eval sets by ratio on the fly.
+    This is a deterministic split based on the sample index.
+    """
+    def __init__(self, dataset, eval_ratio, mode='train', seed=0):
+        super().__init__()
+        self.dataset = dataset
+        if not (0 < eval_ratio < 1):
+            raise ValueError("eval_ratio must be between 0 and 1.")
+        self.eval_ratio = eval_ratio
+        self.mode = mode
+        self.seed = seed
+
+    def __iter__(self):
+        # Use a generator for deterministic "random" decisions based on index
+        g = torch.Generator()
+        g.manual_seed(self.seed)
+
+        for i, sample in enumerate(self.dataset):
+            # Generate a random number for each sample
+            rand_val = torch.rand(1, generator=g).item()
+            
+            # Decide whether to yield the sample based on the mode
+            is_eval_sample = rand_val < self.eval_ratio
+            
+            if self.mode == 'train' and not is_eval_sample:
+                yield sample
+            elif self.mode == 'eval' and is_eval_sample:
+                yield sample
 
 
 def save_example_data(train_data, output_dir):
@@ -456,6 +489,16 @@ def load_data(args, task_config, save_norm=True):
         )
     return _load_data_flexible_format(args, task_config, save_norm)
 
+def is_rlds_data(ds):
+    import dlimp as dl # Ensure dlimp is imported here as well if needed
+    return isinstance(ds, dl.DLataset)
+
+def is_map_data(dataset):
+    return hasattr(dataset, '__len__') and hasattr(dataset, '__getitem__')
+
+def is_iter_data(dataset):
+    return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
+
 def _load_data_flexible_format(args, task_config, save_norm=True):
     """Load data using the new flexible configuration format"""
     
@@ -593,9 +636,92 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         )
         wrapped_datasets.append(wrapped_dataset)
     
-    # Create combined dataset
-    train_data = wrapped_datasets[0] if len(wrapped_datasets) == 1 else wrapped_datasets
-    return {'train': train_data, 'eval': None}
+    # Data splitting logic based on eval_ratio and dataset types
+    eval_ratio = getattr(args, 'eval_ratio', 0.0)
+    train_data_splits = []
+    eval_data_splits = []
+
+    if eval_ratio > 0:
+        logger.info(f"Splitting each dataset with eval_ratio: {eval_ratio}")
+        for ds in wrapped_datasets:
+            # --- Handle RLDS Datasets ---
+            if hasattr(ds, 'rlds_dataset') and hasattr(ds.rlds_dataset, 'split'):
+                train_rlds_ds, eval_rlds_ds = ds.rlds_dataset.split(
+                    [1.0 - eval_ratio, eval_ratio], deterministic=True, drop_remainder=False
+                )
+
+                # Re-create instances of the original class with the new split datasets
+                # This preserves all other configurations of the dataset wrapper
+                train_ds_split = ds.__class__.__new__(ds.__class__)
+                train_ds_split.__dict__ = ds.__dict__.copy()
+                train_ds_split.rlds_dataset = train_rlds_ds
+                train_ds_split.dataset = train_rlds_ds.dataset
+
+                eval_ds_split = ds.__class__.__new__(ds.__class__)
+                eval_ds_split.__dict__ = ds.__dict__.copy()
+                eval_ds_split.rlds_dataset = eval_rlds_ds
+                eval_ds_split.dataset = eval_rlds_ds.dataset
+                
+                train_data_splits.append(train_ds_split)
+                eval_data_splits.append(eval_ds_split)
+                logger.info(f"Split WrappedRLDSDataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+
+            # --- Handle Map-style Datasets ---
+            elif is_map_data(ds):
+                num_total = len(ds)
+                if num_total == 0:
+                    logger.warning(f"Dataset '{getattr(ds.dataset, 'name', 'N/A')}' is empty, skipping split.")
+                    continue
+                
+                num_eval = int(num_total * eval_ratio)
+                if num_eval == 0 and num_total > 1:
+                    num_eval = 1
+                
+                num_train = num_total - num_eval
+                if num_train <= 0 and num_total > 1:
+                    num_train = num_total - 1
+                    num_eval = 1
+                if num_train > 0 or num_eval > 0:
+                    train_split, eval_split = torch.utils.data.random_split(
+                        ds, [num_train, num_eval],
+                        generator=torch.Generator().manual_seed(getattr(args, 'seed', 0)) if getattr(args, 'seed', None) is not None else None
+                    )
+                    if len(train_split) > 0: train_data_splits.append(train_split)
+                    if len(eval_split) > 0: eval_data_splits.append(eval_split)
+                    logger.info(f"Split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}': {len(train_split)} train, {len(eval_split)} eval.")
+                else:
+                    train_data_splits.append(ds)
+                    logger.warning(f"Could not split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}' with {num_total} samples. Added to train set.")
+
+            # --- Handle Generic Iterable Datasets ---
+            else:
+                logger.info(f"Splitting generic iterable dataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+                train_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='train', seed=getattr(args, 'seed', 0))
+                eval_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='eval', seed=getattr(args, 'seed', 0))
+                train_data_splits.append(train_split)
+                eval_data_splits.append(eval_split)
+
+    else:  # eval_ratio is 0 or less
+        # Per user request, do not create an eval set if eval_ratio is not specified (or is <= 0).
+        # All datasets will be used for training.
+        logger.info("eval_ratio <= 0. All datasets will be used for training. No evaluation dataset will be created.")
+        train_data_splits.extend(wrapped_datasets)
+        # eval_data_splits remains an empty list, so eval_data will be None.
+
+    # --- Finalize train and eval data ---
+    train_data = None
+    if len(train_data_splits) == 1:
+        train_data = train_data_splits[0]
+    elif len(train_data_splits) > 1:
+        train_data = train_data_splits # Return as a list for _create_mixed_dataloader
+
+    eval_data = None
+    if len(eval_data_splits) == 1:
+        eval_data = eval_data_splits[0]
+    elif len(eval_data_splits) > 1:
+        eval_data = eval_data_splits
+
+    return {'train': train_data, 'eval': eval_data}
 
 def _convert_to_type(value):
     """
