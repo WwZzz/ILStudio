@@ -71,7 +71,7 @@ class WrappedLerobotDataset(tud.Dataset):
                 # Calculate actual frame count for filtered episodes
                 # LeRobot doesn't actually reduce hf_dataset size, so we need to calculate manually
                 actual_frames = sum(ds_meta.episodes[ep_idx]['length'] for ep_idx in episodes_to_load)
-                logger.info(f"Actual frames for selected episodes: {actual_frames}")
+                # logger.info(f"Actual frames for selected episodes: {actual_frames}")
             else:
                 actual_frames = dataset.num_frames
             
@@ -241,7 +241,7 @@ class WrappedLerobotDataset(tud.Dataset):
         
         # Log dataset info
         logger.info(f"Dataset initialized: {self.total_episodes} episodes, {self.total_frames} frames")
-        logger.info(f"Episode lengths: min={min(self.episode_len)}, max={max(self.episode_len)}, mean={np.mean(self.episode_len):.1f}")
+        # logger.info(f"Episode lengths: min={min(self.episode_len)}, max={max(self.episode_len)}, mean={np.mean(self.episode_len):.1f}")
         return
     
     def _build_index_mapping(self):
@@ -268,7 +268,7 @@ class WrappedLerobotDataset(tud.Dataset):
                 for frame_idx in range(total_frames):
                     self.index_to_episode_map.append((dataset_idx, -1, -1, frame_idx))
         
-        logger.info(f"Built index mapping table with {len(self.index_to_episode_map)} entries")
+        # logger.info(f"Built index mapping table with {len(self.index_to_episode_map)} entries")
         
     def _load_file_into_memory(self, *args, **kwargs):
         warnings.warn("Cannot load LerobotDataset into memory")

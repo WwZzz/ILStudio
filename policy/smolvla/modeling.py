@@ -107,13 +107,14 @@ class SmolVLAPolicy(PreTrainedModel):
         }
     
     def forward(self, images, img_masks, lang_tokens, lang_masks, state, actions=None, is_pad=None, noise=None, time=None) -> dict[str, Tensor]:
-        if is_pad is None:
+        # Use self.training to determine mode: eval mode (False) -> inference, train mode (True) -> training
+        if not self.training:
             actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
             return {"action": actions}
         losses = self.model(images=images, img_masks=img_masks, lang_tokens=lang_tokens, lang_masks=lang_masks,
                             state=state, actions=actions, noise=noise, time=time)
-        losses = (losses * ~is_pad.unsqueeze(-1))
-        losses = losses[:, :, : self.config.action_dim]
+        # losses = (losses * ~is_pad.unsqueeze(-1)) # cannot use any mask to denoise-based policy
+        losses = losses[:, :, : self.config.max_action_dim]
         return {"loss": losses.mean()}
     
     def select_action(self, batch_obs):

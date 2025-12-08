@@ -20,7 +20,6 @@ class BaseTrainer(Trainer):
                     # This won't actually be called since we override get_eval_dataloader
                     return {}
             kwargs['eval_dataset'] = DummyEvalDataset()
-            logger.debug(f"🔍 Created DummyEvalDataset because eval_loader was provided")
         
         super().__init__(**kwargs)
         self._train_loader = train_loader
@@ -160,9 +159,10 @@ class BaseTrainer(Trainer):
         with torch.no_grad():
             for batch in eval_dataloader:
                 # Prepare batch_obs (copy to avoid modifying original)
+                # Exclude actions and is_pad from batch_obs for select_action (inference mode)
                 batch_obs = {}
                 for k, v in batch.items():
-                    if k not in ['actions', 'action']:  # Exclude actions from batch_obs for select_action
+                    if k not in ['actions', 'action', 'is_pad']:
                         batch_obs[k] = v
                 # Get ground truth actions
                 gt_actions = batch.get('actions')
@@ -170,6 +170,14 @@ class BaseTrainer(Trainer):
                     gt_actions = batch.get('action')
                 if gt_actions is None:
                     continue
+                
+                # For models with max_action_dim padding (like smolvla), extract only the actual action dimensions
+                # gt_actions might be [B, T, max_action_dim] but we only want [B, T, action_dim]
+                if hasattr(self.model, 'config') and hasattr(self.model.config, 'action_dim'):
+                    action_dim = self.model.config.action_dim
+                    if gt_actions.shape[-1] > action_dim:
+                        gt_actions = gt_actions[..., :action_dim]
+                
                 # Get is_pad mask if available (to exclude padded timesteps)
                 is_pad = batch.get('is_pad')
                 # Get predicted actions using select_action
@@ -245,7 +253,9 @@ class BaseTrainer(Trainer):
                         # [B, T] and [B, T, A] - use multiplicative mask like in ACT
                         # ~is_pad: True for valid data, False for padding
                         mask = ~is_pad.unsqueeze(-1)  # [B, T, 1]
-                        # Count valid elements (mask=True positions)
+                        # Expand mask to match all_mse shape [B, T, A]
+                        mask = mask.expand_as(all_mse)
+                        # Count valid elements (all valid action values)
                         num_valid = mask.sum().item()
                         if num_valid > 0:
                             # Compute mean only over valid elements (not including padding in denominator)

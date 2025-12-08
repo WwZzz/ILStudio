@@ -688,7 +688,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
                     )
                     if len(train_split) > 0: train_data_splits.append(train_split)
                     if len(eval_split) > 0: eval_data_splits.append(eval_split)
-                    logger.info(f"Split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}': {len(train_split)} train, {len(eval_split)} eval.")
+                    # logger.info(f"Split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}': {len(train_split)} train, {len(eval_split)} eval.")
                 else:
                     train_data_splits.append(ds)
                     logger.warning(f"Could not split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}' with {num_total} samples. Added to train set.")
