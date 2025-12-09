@@ -37,6 +37,7 @@ class LiberoEnv(MetaEnv):
         self.camera_ids = getattr(self.config, 'camera_ids', [0,])
         self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', True)
         self.use_wrist = getattr(self.config, 'use_wrist', False)
+        self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         env = self.create_env()
         super().__init__(env)
         
@@ -84,7 +85,11 @@ class LiberoEnv(MetaEnv):
         if self.use_openvla_gripper:
             actions[6] = 1.-2.*actions[6]
         return actions
-        
+    
+    def get_libero_dummy_action(self):
+        """Get dummy/no-op action, used to roll out the simulation while the robot does nothing."""
+        return [0, 0, 0, 0, 0, 0, -1]
+
     def obs2meta(self, obs):
         gripper_state = obs['robot0_gripper_qpos'] # (2,) 
         xyz = obs['robot0_eef_pos'] # (3,)
@@ -105,5 +110,13 @@ class LiberoEnv(MetaEnv):
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
+    
+    def reset(self):
+        self.env.reset()
+        for _ in range(self.num_steps_wait):
+            obs, _, _, _ = self.env.step(self.get_libero_dummy_action())
+        self.prev_obs = self.obs2meta(obs)
+        return self.prev_obs
+
     
     

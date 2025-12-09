@@ -1,6 +1,6 @@
 datasets:
 - type: data_utils.datasets.WrappedLerobotDataset
-  name: libero_object_0_v10
+  name: libero_object_task0
   args:
     dataset_path_list:
     - HuggingFaceVLA/libero

@@ -73,32 +73,18 @@ class ACTPolicy(PreTrainedModel):
         self.kl_weight = config.kl_weight
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
-    def forward(self, qpos=None, image=None, actions=None, is_pad=None, **kwargs):
+    def forward(self, qpos, image, actions=None, is_pad=None):
         """
         Forward method for training and inference. Trainer calls this method automatically.
         
         Args:
-            qpos: Tensor, shape (batch_size, state_dim), robot state. Can also be passed as 'state' or 'qpos' in kwargs.
-            image: Tensor, shape (batch_size, C, H, W), normalized visual inputs. Can also be passed in kwargs.
-            actions: Tensor, shape (batch_size, num_queries, action_dim), action sequences for training. Can also be passed as 'actions' in kwargs.
-            is_pad: Tensor, shape (batch_size, num_queries), padding mask. Can also be passed as 'is_pad' in kwargs.
-            **kwargs: Additional keyword arguments for compatibility with Trainer.
+            qpos: Tensor, shape (batch_size, state_dim), robot state.
+            image: Tensor, shape (batch_size, C, H, W), normalized visual inputs.
+            actions: Tensor, shape (batch_size, num_queries, action_dim), action sequences for training.
+            is_pad: Tensor, shape (batch_size, num_queries), padding mask.
         Returns:
             Loss dictionary during training; sampled actions during inference.
         """
-        # Support both positional and keyword arguments for compatibility with Trainer
-        if qpos is None:
-            qpos = kwargs.get('qpos') or kwargs.get('state')
-        if image is None:
-            image = kwargs.get('image')
-        if actions is None:
-            actions = kwargs.get('actions')
-        if is_pad is None:
-            is_pad = kwargs.get('is_pad')
-        
-        if qpos is None or image is None:
-            raise ValueError("qpos and image must be provided either as positional or keyword arguments")
-        
         env_state = None
         image = self.normalize(image)
         if actions is not None: # training time
