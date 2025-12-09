@@ -2,7 +2,7 @@
   name: libero_object_0
   args:
     task: libero_object_0
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -14,7 +14,7 @@
   name: libero_object_1
   args:
     task: libero_object_1
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -26,7 +26,7 @@
   name: libero_object_2
   args:
     task: libero_object_2
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -38,7 +38,7 @@
   name: libero_object_3
   args:
     task: libero_object_3
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -50,7 +50,7 @@
   name: libero_object_4
   args:
     task: libero_object_4
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -62,7 +62,7 @@
   name: libero_object_5
   args:
     task: libero_object_5
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -74,7 +74,7 @@
   name: libero_object_6
   args:
     task: libero_object_6
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -86,7 +86,7 @@
   name: libero_object_7
   args:
     task: libero_object_7
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -98,7 +98,7 @@
   name: libero_object_8
   args:
     task: libero_object_8
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
@@ -110,7 +110,7 @@
   name: libero_object_9
   args:
     task: libero_object_9
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256

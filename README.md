@@ -68,7 +68,7 @@ python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/t
 
 ```shell
 # You can use --training.xxx to update the training parameters
-python train.py --policy diffusion_policy --task sim_transfer_cube_scripted --output_dir ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000
+python train.py -p diffusion_policy -t sim_transfer_cube_scripted -o ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000 -c dp
 
 # Evaluation at local 
 

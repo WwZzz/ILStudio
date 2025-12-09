@@ -23,11 +23,11 @@ background_prefetch: false
 # Core optimizer settings that are typically set once per training setup
 
 # Learning rate and scheduling
-learning_rate: 0.0001
-weight_decay: 0.0
-warmup_steps: 0
+learning_rate: 3e-4
+weight_decay: 1e-4
+warmup_steps: 500
 warmup_ratio: 0.0
-lr_scheduler_type: "constant"
+lr_scheduler_type: "cosine"
 
 # Optimizer settings
 optim: "adamw_torch"
@@ -45,11 +45,11 @@ adam_epsilon: 1e-8
 # Logging settings
 logging_strategy: "steps"
 logging_steps: 10
-report_to: "tensorboard"
+report_to: "none"
 
 # Saving settings
 save_strategy: "steps"
-save_steps: 5000
+save_steps: 10000
 save_total_limit: 50
 
 # =============================================================================
@@ -76,7 +76,7 @@ seed: 0
 
 # Training duration
 num_train_epochs: 3
-max_steps: 50000
+max_steps: 100000
 
 # Batch sizes (typically determined by hardware)
 per_device_train_batch_size: 64

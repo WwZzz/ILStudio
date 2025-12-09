@@ -61,6 +61,19 @@ class TrainingConfig:
         # Apply overrides
         config_dict.update(overrides)
         
+        # Auto-set eval_strategy if do_eval is True but eval_strategy is not set
+        # This ensures evaluation actually runs when do_eval=True
+        do_eval = config_dict.get('do_eval', False)
+        if do_eval:
+            # Check if eval_strategy is already set
+            has_eval_strategy = 'eval_strategy' in config_dict
+            if not has_eval_strategy:
+                # Set eval_strategy to "steps" if eval_steps is set, otherwise "epoch"
+                if 'eval_steps' in config_dict and config_dict.get('eval_steps') is not None:
+                    config_dict['eval_strategy'] = 'steps'
+                else:
+                    config_dict['eval_strategy'] = 'epoch'
+        
         # Create TrainingArguments - it will use default values for any missing parameters
         try:
             return transformers.TrainingArguments(**config_dict)

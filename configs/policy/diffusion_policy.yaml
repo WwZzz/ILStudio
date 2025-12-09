@@ -19,3 +19,5 @@ args:
   action_decoder_kwargs: {}
   use_pretrained_weights: true
   pretrained_model_path: null
+action_normalize: minmax
+state_normalize: minmax

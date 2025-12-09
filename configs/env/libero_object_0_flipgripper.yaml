@@ -2,10 +2,11 @@
   name: libero_object_0
   args:
     task: libero_object_0
-    max_timesteps: 400
+    max_timesteps: 280
     ctrl_space: ee
     image_size:
     - 256
     - 256
     camera_ids:
     - 0
+    use_openvla_gripper: True

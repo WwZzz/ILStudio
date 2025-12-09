@@ -36,6 +36,16 @@ def load_model(args):
             )
             model = get_peft_model(model, lora_config)
             model.print_trainable_parameters()
+    
+    # Initialize data_processor and data_collator for inference
+    if not args.is_training:
+        image_transform = model.processor.image_processor.apply_transform
+        model.data_processor = OpenVLAProcessor(
+            tokenizer=model.tokenizer,
+            image_transform=image_transform
+        )
+        model.data_collator = OpenVLACollator(model.tokenizer)
+    
     return {
         'model': model,
         'tokenizer': model.tokenizer,

@@ -1,5 +1,6 @@
 import sys
 import os
+import threading
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'third_party', 'libero'))
 from benchmark.base import MetaAction, MetaEnv, MetaObs
 from libero.libero import benchmark as libero_bench
@@ -20,6 +21,7 @@ import argparse
 from collections import deque
 import imageio
 from robosuite.controllers import load_controller_config
+from loguru import logger 
 
 benchmark_dict = libero_bench.get_benchmark_dict()
 
@@ -35,6 +37,7 @@ class LiberoEnv(MetaEnv):
         self.camera_ids = getattr(self.config, 'camera_ids', [0,])
         self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', True)
         self.use_wrist = getattr(self.config, 'use_wrist', False)
+        self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         env = self.create_env()
         super().__init__(env)
         
@@ -50,21 +53,27 @@ class LiberoEnv(MetaEnv):
         self.task_name = task.name
         task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
         # step over the environment
-        image_size = getattr(self.config, 'image_size', [480, 640])
-        if isinstance(image_size, (list, tuple)):
-            height, width = image_size
-        elif isinstance(image_size, int):
-            height, width = image_size, image_size
+        image_size = getattr(self.config, 'image_size', None)
+        if image_size is not None:
+            if isinstance(image_size, (list, tuple)):
+                height, width = image_size
+            elif isinstance(image_size, int):
+                height, width = image_size, image_size
+            else:
+                raise ValueError("image_size should be list [height, width] or int")
+            self.image_size = (height, width)
         else:
-            raise ValueError("image_size should be list [height, width] or int")
-        self.image_size = (height, width)
+            self.image_size = None
         env_args = {
             "bddl_file_name": task_bddl_file,
-            "camera_heights": height,
-            "camera_widths": width,
+            "camera_heights": 256,
+            "camera_widths": 256,
         }
         env = OffScreenRenderEnv(**env_args)
-        state = init_states[np.random.choice(len(init_states))]
+        np.random.seed(None)
+        state_index = np.random.choice(len(init_states))
+        state = init_states[state_index]
+        logger.info(f"Setting initial state {state_index} for task {self.task_name}")
         env.set_init_state(state)
         return env
         
@@ -76,7 +85,11 @@ class LiberoEnv(MetaEnv):
         if self.use_openvla_gripper:
             actions[6] = 1.-2.*actions[6]
         return actions
-        
+    
+    def get_libero_dummy_action(self):
+        """Get dummy/no-op action, used to roll out the simulation while the robot does nothing."""
+        return [0, 0, 0, 0, 0, 0, -1]
+
     def obs2meta(self, obs):
         gripper_state = obs['robot0_gripper_qpos'] # (2,) 
         xyz = obs['robot0_eef_pos'] # (3,)
@@ -88,7 +101,7 @@ class LiberoEnv(MetaEnv):
         img_primary = obs["agentview_image"][::-1, ::-1]
         all_imgs = [img_primary]
         if self.use_wrist:
-            img_second = obs['robot0_eye_in_hand_image']
+            img_second = obs['robot0_eye_in_hand_image'][::-1, ::-1]
             all_imgs.append(img_second)
         image = np.stack(all_imgs)
         image = image.transpose(0, 3, 1, 2)
@@ -96,6 +109,14 @@ class LiberoEnv(MetaEnv):
         # depth_primary = obs["agentview_depth"][::-1, ::-1]
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
-        return MetaObs(state=state_ee, state_ee=state_ee, state_joint=state_joint, image=image, raw_lang=self.raw_lang)
+        return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
+    
+    def reset(self):
+        self.env.reset()
+        for _ in range(self.num_steps_wait):
+            obs, _, _, _ = self.env.step(self.get_libero_dummy_action())
+        self.prev_obs = self.obs2meta(obs)
+        return self.prev_obs
+
     
     

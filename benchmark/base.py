@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, fields, asdict
 from collections import deque
 from typing import Optional
 import torch
+from loguru import logger
 from .utils import resize_with_pad
 
 @dataclass
@@ -87,7 +88,22 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, chunk_size:Optional[int] = None, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta', img_size=None):
+    def __init__(self, policy, chunk_size:Optional[int] = None, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
+        """
+        MetaPolicy wrapper for policy inference.
+        
+        Note: Image resizing is now handled by each policy's data_processor,
+              not in MetaPolicy. This ensures consistent data processing between
+              training and inference.
+        
+        Args:
+            policy: The policy model
+            chunk_size: Action chunk size for chunked action prediction
+            action_normalizer: Normalizer for actions
+            state_normalizer: Normalizer for states  
+            ctrl_space: Control space ('ee' or 'joint')
+            ctrl_type: Control type ('delta' or 'abs')
+        """
         self.policy = policy
         self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
@@ -95,17 +111,78 @@ class MetaPolicy:
         self.action_queue = deque(maxlen=chunk_size) if (chunk_size is not None and chunk_size>0) else deque(maxlen=1000)
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
-        if img_size is not None:
-            img_size = (img_size, img_size) if isinstance(img_size, int) else img_size
-        self.img_size = img_size
 
-    def meta2obs(self, mobs: MetaObs):
-        # convert MetaObs into policy-specific obs
-        if hasattr(self.policy, 'meta2obs'):
-            obs = self.policy.meta2obs(mobs)
+    def meta2obs(self, samples: list):
+        """
+        Convert standard format samples to policy-specific observation format.
+        
+        This method applies policy's data_processor and data_collator to transform
+        samples into the format used during training, ensuring consistency.
+        
+        Args:
+            samples: List of sample dicts in ILStudio standard format, each containing:
+                - 'image': (cameras, C, H, W) or (C, H, W) - raw image from environment
+                - 'state': (state_dim,) - state vector
+                - 'raw_lang': str - language instruction
+                - 'timestamp': int (optional) - timestep
+        
+        Returns:
+            Policy-specific observation format (processed and collated batch)
+        """
+        # Check if policy has custom meta2obs (legacy support)
+        if hasattr(self.policy, 'meta2obs') and callable(self.policy.meta2obs):
+            return self.policy.meta2obs(samples)
+        
+        # Standard processing pipeline: data_processor → data_collator
+        processed_samples = samples
+        
+        # Step 1: Apply data_processor if available
+        if hasattr(self.policy, 'data_processor') and self.policy.data_processor is not None:
+            processed_samples = [self.policy.data_processor(sample) for sample in samples]
+        
+        # Step 2: Apply data_collator if available
+        if hasattr(self.policy, 'data_collator') and self.policy.data_collator is not None:
+            batch_obs = self.policy.data_collator(processed_samples)
         else:
-            obs = asdict(mobs)
-        return obs
+            # Default collator: simple batching with torch
+            batch_obs = self._default_collate(processed_samples)
+        
+        return batch_obs
+    
+    def _default_collate(self, samples: list):
+        """
+        Default collator when policy doesn't provide one.
+        Simply converts numpy arrays to tensors and stacks them.
+        """
+        if not samples:
+            return {}
+        
+        batch = {}
+        keys = samples[0].keys()
+        
+        for key in keys:
+            values = [s[key] for s in samples]
+            
+            # Skip None values
+            if values[0] is None:
+                batch[key] = None
+                continue
+            
+            # Handle numpy arrays and tensors
+            if isinstance(values[0], np.ndarray):
+                batch[key] = torch.from_numpy(np.stack(values))
+            elif isinstance(values[0], torch.Tensor):
+                batch[key] = torch.stack(values)
+            # Handle strings (like raw_lang)
+            elif isinstance(values[0], str):
+                batch[key] = values  # Keep as list
+            # Handle scalars
+            elif isinstance(values[0], (int, float)):
+                batch[key] = torch.tensor(values)
+            else:
+                batch[key] = values
+        
+        return batch
     
     def act2meta(self, action, ctrl_space:str='ee', ctrl_type:str=True):
         # convert action into MetaAction, np.ndarray((chunk_size, action_dim), dtype=np.float32) as default
@@ -119,20 +196,78 @@ class MetaPolicy:
     def is_action_queue_empty(self):
         return len(self.action_queue)==0
 
+    def normed_mobs_to_samples(self, normed_mobs: MetaObs):
+        """
+        Convert normalized MetaObs to samples in ILStudio standard format.
+        """
+         # Prepare standard format samples
+        batch_size = normed_mobs.state.shape[0] if normed_mobs.state is not None and len(normed_mobs.state.shape) > 1 else 1
+        
+        samples = []
+        for i in range(batch_size):
+            sample = {}
+            
+            # Image: keep original format, let policy's data_processor handle resize
+            if normed_mobs.image is not None:
+                if normed_mobs.image.ndim == 5:  # (batch, cameras, C, H, W)
+                    sample['image'] = normed_mobs.image[i]  # (cameras, C, H, W)
+                elif normed_mobs.image.ndim == 4:  # (batch, C, H, W) or (cameras, C, H, W)
+                    if batch_size > 1:
+                        sample['image'] = normed_mobs.image[i]  # (C, H, W)
+                    else:
+                        sample['image'] = normed_mobs.image  # (cameras, C, H, W)
+                else:
+                    sample['image'] = normed_mobs.image
+            
+            # State: use specified control space (already normalized)
+            sample['state'] = normed_mobs.state[i] if len(normed_mobs.state.shape) > 1 else normed_mobs.state
+            
+            # Language instruction
+            if normed_mobs.raw_lang is not None:
+                if isinstance(normed_mobs.raw_lang, list):
+                    sample['raw_lang'] = normed_mobs.raw_lang[i] if len(normed_mobs.raw_lang) > i else normed_mobs.raw_lang[0]
+                else:
+                    sample['raw_lang'] = normed_mobs.raw_lang
+            
+            # Timestamp (optional)
+            if hasattr(normed_mobs, 'timestep') and normed_mobs.timestep is not None:
+                sample['timestamp'] = normed_mobs.timestep[i] if len(normed_mobs.timestep.shape) > 1 else normed_mobs.timestep
+            # Construct observations, convert arrays to tensors
+            if sample['image'] is not None:
+                # Safety check: ensure images are uint8 with values in [0, 255]
+                from data_utils.utils import ensure_uint8_image
+                sample['image'] = ensure_uint8_image(sample['image'])   # (cameras, C, H, W)
+                sample['image'] = torch.from_numpy(sample['image'])  # (cameras, C, H, W)
+            else:
+                sample['image'] = None
+            sample['state'] = torch.from_numpy(sample['state']).float() if 'state' in sample else None  # (state_dim,)
+            if 'action' in sample:
+                sample['action'] = torch.from_numpy(sample['action']).float() 
+            if 'is_pad' in sample:
+                sample['is_pad'] = torch.from_numpy(sample['is_pad']).bool() 
+            samples.append(sample)
+        return samples
+
     def inference(self, mobs: MetaObs):
+        """
+        Prepare observation data in ILStudio standard format for policy inference.
+        
+        The standard format is a list of samples, where each sample is a dict containing:
+        - 'image': image data (N, C, H, W) or (N, num_cameras, C, H, W)
+        - 'state': state data (from ctrl_space: 'ee' or 'joint') - normalized
+        - 'raw_lang': language instruction
+        - 'timestamp': optional timestep information
+        
+        This format matches training data format, allowing policy to use the same
+        data_processor and collator for consistent data handling.
+        """
+        # Normalize state before preparing samples
         normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
-        # try resize image
-        if self.img_size is not None:
-            images = normed_mobs.image 
-            if images.ndim == 5:
-                images = images[:, -1, :, :, :].transpose(0, 2, 3, 1) # n, c, h,w -> n, h, w, c
-                original_dim = 5
-            images = [cv2.resize(img, (self.img_size[1], self.img_size[0])) for img in images] # cv2.resize receive (W,H) and we denote the img size as (H,W)
-            normed_mobs.image = np.stack(images, axis=0).transpose(0, 3, 1, 2) # n, h, w, c -> n, c, h, w
-            if original_dim == 5:
-                normed_mobs.image = normed_mobs.image[:, np.newaxis, :, :, :]
-        # convert MetaObs to policy-specific obs
-        policy_obs = self.meta2obs(normed_mobs)
+        
+        samples = self.normed_mobs_to_samples(normed_mobs)
+        
+        # Convert samples to policy-specific format using policy's data processing
+        policy_obs = self.meta2obs(samples)
         # inference action
         action_chunk = self.policy.select_action(policy_obs)
         # (B, chunk_size, action_dim)

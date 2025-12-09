@@ -25,6 +25,8 @@ def load_model(args):
             model.ema.copy_to(model.parameters()) # using ema for testing
         model.config.num_inference_timesteps = model_args.get('num_inference_steps', 10)
         model.to('cuda')
+        # Only set collator, no processor needed (samples already in correct format)
+        model.data_collator = data_collator
     # model.to(dtype=torch.float32, device=args.device)
     return {'model': model}
 

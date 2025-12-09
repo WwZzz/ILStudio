@@ -8,19 +8,56 @@ import importlib
 from loguru import logger
 import torch
 import torch.distributed as dist
+# import dlimp as dl # Added this import
 try:
     import pandas as pd
 except:
     pd = None
 from PIL import Image
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, IterableDataset
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
 from .normalize import NORMTYPE2CLASS, load_normalizers, save_norm_meta_to_json, load_normalizer_from_meta
+
+
+class RatioSplittingIterableDataset(IterableDataset):
+    """
+    Wraps an iterable dataset to split it into train and eval sets by ratio on the fly.
+    This is a deterministic split based on the sample index.
+    """
+    def __init__(self, dataset, eval_ratio, mode='train', seed=0):
+        super().__init__()
+        self.dataset = dataset
+        if not (0 < eval_ratio < 1):
+            raise ValueError("eval_ratio must be between 0 and 1.")
+        self.eval_ratio = eval_ratio
+        self.mode = mode
+        self.seed = seed
+
+    def __iter__(self):
+        # Use a generator for deterministic "random" decisions based on index
+        g = torch.Generator()
+        g.manual_seed(self.seed)
+
+        for i, sample in enumerate(self.dataset):
+            # Generate a random number for each sample
+            rand_val = torch.rand(1, generator=g).item()
+            
+            # Decide whether to yield the sample based on the mode
+            is_eval_sample = rand_val < self.eval_ratio
+            
+            if self.mode == 'train' and not is_eval_sample:
+                yield sample
+            elif self.mode == 'eval' and is_eval_sample:
+                yield sample
 
 
 def save_example_data(train_data, output_dir):
     """
     Save example data from the first dataset for debugging purposes.
+    Saves raw (unnormalized) data to match testing phase format:
+    - Images: original resolution, saved as PNG
+    - State: raw unnormalized values, saved as state_raw.csv
+    - Action: raw unnormalized values, saved as action_raw.csv
     
     Args:
         train_data: The dataset object or list of datasets (can be map-style or iterable)
@@ -51,7 +88,7 @@ def save_example_data(train_data, output_dir):
             dataset = train_data
             logger.info("Saving example from single dataset")
         
-        # Get one sample from the dataset
+        # Get one sample from the dataset (raw, before any processing)
         # Check if dataset is map-style (has __getitem__) or iterable
         sample = None
         if hasattr(dataset, '__getitem__'):
@@ -80,13 +117,16 @@ def save_example_data(train_data, output_dir):
                 f.write(str(sample['raw_lang']))
             logger.info(f"Saved language instruction to: {lang_file}")
         
-        # Save images - save each camera view separately
+        # Save images - save each camera view separately, preserving original resolution
+        # Match testing phase format: save as camera_{i}.png without resizing
         if 'image' in sample and sample['image'] is not None:
             image_data = sample['image']
             
             # Convert tensor to numpy if needed
             if isinstance(image_data, torch.Tensor):
                 image_data = image_data.cpu().numpy()
+            
+            logger.debug(f"Training example - Image shape: {image_data.shape}, dtype: {image_data.dtype}")
             
             # Handle different image formats
             # Expected format: (num_cameras, C, H, W) or (C, H, W)
@@ -127,50 +167,45 @@ def save_example_data(train_data, output_dir):
             else:
                 logger.warning(f"Unexpected image shape: {image_data.shape}")
         
-        # Save state and action as CSV
-        state_action_data = {}
-        
+        # Save state as separate CSV (raw, unnormalized)
+        # Match testing phase format: state_raw.csv
         if 'state' in sample and sample['state'] is not None:
-            state = sample['state']
-            if isinstance(state, torch.Tensor):
-                state = state.cpu().numpy()
-            # Flatten if needed
-            state = state.flatten()
-            state_action_data['state'] = state
+            state_data = sample['state']
+            if isinstance(state_data, torch.Tensor):
+                state_data = state_data.cpu().numpy()
+            
+            # Ensure state_data is at least 2D for np.savetxt
+            if state_data.ndim == 1:
+                state_data = state_data.reshape(1, -1)
+            elif state_data.ndim > 2:
+                # Flatten to 2D if needed
+                state_data = state_data.reshape(1, -1)
+            
+            state_file = os.path.join(examples_dir, 'state_raw.csv')
+            header = ','.join([f'state_{i}' for i in range(state_data.shape[1])])
+            np.savetxt(state_file, state_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw state (unnormalized) to: {state_file}")
         
+        # Save action as separate CSV (raw, unnormalized)
+        # Match testing phase format: action_raw.csv
         if 'action' in sample and sample['action'] is not None:
-            action = sample['action']
-            if isinstance(action, torch.Tensor):
-                action = action.cpu().numpy()
-            # Action might be (chunk_size, action_dim), save each timestep
-            if len(action.shape) == 2:
-                # Save as multiple rows
-                csv_file = os.path.join(examples_dir, 'state_action.csv')
-                df_data = {'timestep': list(range(action.shape[0]))}
-                
-                # Add action columns
-                for i in range(action.shape[1]):
-                    df_data[f'action_{i}'] = action[:, i]
-                
-                # Add state columns (broadcast state to all timesteps)
-                if 'state' in state_action_data:
-                    state = state_action_data['state']
-                    for i in range(len(state)):
-                        df_data[f'state_{i}'] = [state[i]] * action.shape[0]
-                
-                df = pd.DataFrame(df_data)
-                df.to_csv(csv_file, index=False)
-                logger.info(f"Saved state and action (action shape: {action.shape}) to: {csv_file}")
-            else:
-                # Single action vector
-                action = action.flatten()
-                state_action_data['action'] = action
-                
-                # Create DataFrame
-                csv_file = os.path.join(examples_dir, 'state_action.csv')
-                df = pd.DataFrame([state_action_data])
-                df.to_csv(csv_file, index=False)
-                logger.info(f"Saved state and action to: {csv_file}")
+            action_data = sample['action']
+            if isinstance(action_data, torch.Tensor):
+                action_data = action_data.cpu().numpy()
+            
+            # Action might be (chunk_size, action_dim) or (action_dim,)
+            if action_data.ndim == 1:
+                action_data = action_data.reshape(1, -1)
+            elif action_data.ndim > 2:
+                # Flatten higher dimensions
+                original_shape = action_data.shape
+                action_data = action_data.reshape(-1, action_data.shape[-1])
+                logger.debug(f"Reshaped action from {original_shape} to {action_data.shape}")
+            
+            action_file = os.path.join(examples_dir, 'action_raw.csv')
+            header = ','.join([f'action_{i}' for i in range(action_data.shape[1])])
+            np.savetxt(action_file, action_data, delimiter=',', header=header, comments='')
+            logger.info(f"Saved raw action (unnormalized) to: {action_file}")
         
         # Save reasoning as JSON if not empty
         if 'reasoning' in sample and sample['reasoning']:
@@ -185,7 +220,35 @@ def save_example_data(train_data, output_dir):
                         json.dump({'reasoning': str(reasoning)}, f, indent=2, ensure_ascii=False)
                 logger.info(f"Saved reasoning to: {reasoning_file}")
         
-        logger.info("Successfully saved example data from first dataset")
+        # Save metadata info file to match testing phase format
+        info_file = os.path.join(examples_dir, 'info.txt')
+        with open(info_file, 'w') as f:
+            f.write("=== Training Example Data Info ===\n\n")
+            f.write("This example is saved from the raw training dataset (before data_processor).\n")
+            f.write("Data is saved in unnormalized form to match testing phase format.\n\n")
+            
+            # Sample info
+            f.write("Sample keys:\n")
+            for key in sample.keys():
+                value = sample[key]
+                if isinstance(value, (np.ndarray, torch.Tensor)):
+                    shape = value.shape if hasattr(value, 'shape') else 'N/A'
+                    dtype = value.dtype if hasattr(value, 'dtype') else 'N/A'
+                    f.write(f"  {key}: shape={shape}, dtype={dtype}\n")
+                elif value is not None:
+                    f.write(f"  {key}: {type(value).__name__}\n")
+            
+            f.write("\nFiles saved:\n")
+            f.write("  - camera_{i}.png: raw images from dataset (unnormalized, original resolution)\n")
+            f.write("  - state_raw.csv: raw state values (unnormalized)\n")
+            f.write("  - action_raw.csv: raw action values (unnormalized)\n")
+            f.write("  - raw_lang.txt: language instruction (if available)\n")
+            f.write("  - reasoning.json: reasoning data (if available)\n")
+            f.write("  - info.txt: this file\n\n")
+            f.write("Note: These raw values can be directly compared with testing phase examples.\n")
+        
+        logger.info(f"Saved example info to: {info_file}")
+        logger.info("Successfully saved example data from first dataset (raw, unnormalized)")
         
     except Exception as e:
         logger.error(f"Error saving example data: {e}")
@@ -281,8 +344,28 @@ def find_all_hdf5(dataset_dir):
     return hdf5_files
 
 def set_seed(seed):
-    torch.manual_seed(seed)
+    """Set all random seeds to ensure reproducibility
+    
+    Args:
+        seed: random seed
+    """
+    import random
+    random.seed(seed)
+    # NumPy
     np.random.seed(seed)
+    # PyTorch CPU
+    torch.manual_seed(seed)
+    # PyTorch GPU
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # multiple GPUs
+    
+    # cuDNN deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # environment variable (some libraries will read)
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 def flatten_list(l):
@@ -405,6 +488,16 @@ def load_data(args, task_config, save_norm=True):
             "Please update your task config to use the datasets format."
         )
     return _load_data_flexible_format(args, task_config, save_norm)
+
+def is_rlds_data(ds):
+    import dlimp as dl # Ensure dlimp is imported here as well if needed
+    return isinstance(ds, dl.DLataset)
+
+def is_map_data(dataset):
+    return hasattr(dataset, '__len__') and hasattr(dataset, '__getitem__')
+
+def is_iter_data(dataset):
+    return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
 
 def _load_data_flexible_format(args, task_config, save_norm=True):
     """Load data using the new flexible configuration format"""
@@ -543,9 +636,92 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         )
         wrapped_datasets.append(wrapped_dataset)
     
-    # Create combined dataset
-    train_data = wrapped_datasets[0] if len(wrapped_datasets) == 1 else wrapped_datasets
-    return {'train': train_data, 'eval': None}
+    # Data splitting logic based on eval_ratio and dataset types
+    eval_ratio = getattr(args, 'eval_ratio', 0.0)
+    train_data_splits = []
+    eval_data_splits = []
+
+    if eval_ratio > 0:
+        logger.info(f"Splitting each dataset with eval_ratio: {eval_ratio}")
+        for ds in wrapped_datasets:
+            # --- Handle RLDS Datasets ---
+            if hasattr(ds, 'rlds_dataset') and hasattr(ds.rlds_dataset, 'split'):
+                train_rlds_ds, eval_rlds_ds = ds.rlds_dataset.split(
+                    [1.0 - eval_ratio, eval_ratio], deterministic=True, drop_remainder=False
+                )
+
+                # Re-create instances of the original class with the new split datasets
+                # This preserves all other configurations of the dataset wrapper
+                train_ds_split = ds.__class__.__new__(ds.__class__)
+                train_ds_split.__dict__ = ds.__dict__.copy()
+                train_ds_split.rlds_dataset = train_rlds_ds
+                train_ds_split.dataset = train_rlds_ds.dataset
+
+                eval_ds_split = ds.__class__.__new__(ds.__class__)
+                eval_ds_split.__dict__ = ds.__dict__.copy()
+                eval_ds_split.rlds_dataset = eval_rlds_ds
+                eval_ds_split.dataset = eval_rlds_ds.dataset
+                
+                train_data_splits.append(train_ds_split)
+                eval_data_splits.append(eval_ds_split)
+                logger.info(f"Split WrappedRLDSDataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+
+            # --- Handle Map-style Datasets ---
+            elif is_map_data(ds):
+                num_total = len(ds)
+                if num_total == 0:
+                    logger.warning(f"Dataset '{getattr(ds.dataset, 'name', 'N/A')}' is empty, skipping split.")
+                    continue
+                
+                num_eval = int(num_total * eval_ratio)
+                if num_eval == 0 and num_total > 1:
+                    num_eval = 1
+                
+                num_train = num_total - num_eval
+                if num_train <= 0 and num_total > 1:
+                    num_train = num_total - 1
+                    num_eval = 1
+                if num_train > 0 or num_eval > 0:
+                    train_split, eval_split = torch.utils.data.random_split(
+                        ds, [num_train, num_eval],
+                        generator=torch.Generator().manual_seed(getattr(args, 'seed', 0)) if getattr(args, 'seed', None) is not None else None
+                    )
+                    if len(train_split) > 0: train_data_splits.append(train_split)
+                    if len(eval_split) > 0: eval_data_splits.append(eval_split)
+                    # logger.info(f"Split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}': {len(train_split)} train, {len(eval_split)} eval.")
+                else:
+                    train_data_splits.append(ds)
+                    logger.warning(f"Could not split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}' with {num_total} samples. Added to train set.")
+
+            # --- Handle Generic Iterable Datasets ---
+            else:
+                logger.info(f"Splitting generic iterable dataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+                train_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='train', seed=getattr(args, 'seed', 0))
+                eval_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='eval', seed=getattr(args, 'seed', 0))
+                train_data_splits.append(train_split)
+                eval_data_splits.append(eval_split)
+
+    else:  # eval_ratio is 0 or less
+        # Per user request, do not create an eval set if eval_ratio is not specified (or is <= 0).
+        # All datasets will be used for training.
+        logger.info("eval_ratio <= 0. All datasets will be used for training. No evaluation dataset will be created.")
+        train_data_splits.extend(wrapped_datasets)
+        # eval_data_splits remains an empty list, so eval_data will be None.
+
+    # --- Finalize train and eval data ---
+    train_data = None
+    if len(train_data_splits) == 1:
+        train_data = train_data_splits[0]
+    elif len(train_data_splits) > 1:
+        train_data = train_data_splits # Return as a list for _create_mixed_dataloader
+
+    eval_data = None
+    if len(eval_data_splits) == 1:
+        eval_data = eval_data_splits[0]
+    elif len(eval_data_splits) > 1:
+        eval_data = eval_data_splits
+
+    return {'train': train_data, 'eval': eval_data}
 
 def _convert_to_type(value):
     """

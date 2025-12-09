@@ -1,4 +1,5 @@
 from lerobot.policies.smolvla.modeling_smolvla import VLAFlowMatching
+from lerobot.policies.rtc.configuration_rtc import RTCConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from lerobot.utils.constants import ACTION
@@ -48,6 +49,7 @@ class SmolVLAPolicyConfig(PretrainedConfig):
             min_period: float = 4e-3,
             max_period: float = 4.0,
             device: str = 'cuda',
+            rtc_config: RTCConfig = None,
             **kwargs
         ):
         super().__init__(**kwargs)
@@ -82,6 +84,7 @@ class SmolVLAPolicyConfig(PretrainedConfig):
         self.min_period = min_period
         self.max_period = max_period    
         self.device = device
+        self.rtc_config = rtc_config
 
 
 class SmolVLAPolicy(PreTrainedModel):
@@ -104,30 +107,35 @@ class SmolVLAPolicy(PreTrainedModel):
         }
     
     def forward(self, images, img_masks, lang_tokens, lang_masks, state, actions=None, is_pad=None, noise=None, time=None) -> dict[str, Tensor]:
-        if is_pad is None:
+        # Use self.training to determine mode: eval mode (False) -> inference, train mode (True) -> training
+        if not self.training:
             actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
             return {"action": actions}
         losses = self.model(images=images, img_masks=img_masks, lang_tokens=lang_tokens, lang_masks=lang_masks,
                             state=state, actions=actions, noise=noise, time=time)
-        losses = (losses * ~is_pad.unsqueeze(-1))
-        losses = losses[:, :, : self.config.action_dim]
+        # losses = (losses * ~is_pad.unsqueeze(-1)) # cannot use any mask to denoise-based policy
+        losses = losses[:, :, : self.config.max_action_dim]
         return {"loss": losses.mean()}
     
-    def select_action(self, obs):
-        num_samples = obs['state'].shape[0]
-        samples = [
-            {'state': obs['state'][i], 
-            'image': obs['image'][i], 
-            'raw_lang': obs['raw_lang'][i],
-            } for i in range(num_samples)]
-        processed_samples = [self.data_processor(sample) for sample in samples]
-        batch_obs = self.data_collator(processed_samples)
+    def select_action(self, batch_obs):
+        """
+        Inference action from processed batch observation.
+        
+        Args:
+            batch_obs: Processed and collated batch from meta2obs
+        
+        Returns:
+            Action predictions
+        """
+        # Move batch to device
         device = next(self.parameters()).device
-        for k,v in batch_obs.items():
+        for k, v in batch_obs.items():
             if isinstance(v, torch.Tensor):
                 batch_obs[k] = v.to(device)
             elif isinstance(v, list):
-                batch_obs[k] = [v.to(device) for v in v]
-        action = self.forward(**batch_obs)
-        action = action['action'][:,:,:self.model.config.action_dim]
+                batch_obs[k] = [item.to(device) if isinstance(item, torch.Tensor) else item for item in v]
+        
+        # Forward pass
+        action = self.forward(**batch_obs)['action']
+        action = action[:, :, :self.model.config.action_dim]
         return action

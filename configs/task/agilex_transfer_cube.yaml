@@ -18,5 +18,5 @@ meta:
 action_dim: 14
 state_dim: 14
 image_size: [640, 480]
-  action_normalize: zscore
-  state_normalize: zscore
+action_normalize: zscore
+state_normalize: zscore

@@ -18,6 +18,8 @@ import torch
 import numpy
 torch.serialization.add_safe_globals([numpy.ndarray])
 torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
+torch.serialization.add_safe_globals([numpy.dtype])
+torch.serialization.safe_globals([numpy.dtype])
 
 def parse_param():
     """
@@ -37,6 +39,8 @@ def parse_param():
                        help='Training config (name under configs/training or absolute path to yaml)')
     parser.add_argument('-o', '--output_dir', type=str, default='ckpt/training_output',
                        help='Output directory for checkpoints')
+    parser.add_argument('--eval_ratio', type=float, default=0.0,
+                       help='Ratio of training data to use for evaluation. Default to 0.0 (use first dataset as eval if multiple provided)')
     
     # Parse arguments (allow unknown for dotted overrides)
     args, unknown = parser.parse_known_args()
@@ -86,10 +90,15 @@ def main(args):
         specified in training_args.
     """
     args.is_training = True
-    set_seed(1)
     
     # Load all configurations in one place
     task_config, policy_config, training_args, config_paths = load_all_configs(args)
+    
+    # Set random seed
+    seed = getattr(training_args, 'seed', 0)
+    set_seed(seed)
+    logger.info(f"🌱 Set global seed to: {seed} for reproducibility")
+    
     os.makedirs(training_args.output_dir, exist_ok=True)
     all_ckpts = [os.path.join(training_args.output_dir, ckpt_name) for ckpt_name in os.listdir(training_args.output_dir) if ckpt_name.startswith('checkpoint-') and os.path.isdir(os.path.join(training_args.output_dir, ckpt_name))]
     if len(all_ckpts)==0: training_args.resume_from_checkpoint = None
@@ -126,7 +135,7 @@ def main(args):
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
     train_loader, eval_loader = get_dataloader(train_data, val_data, data_processor, data_collator, args) 
-    
+    assert val_data is not None, "Validation data is required for training"
     # Get Trainer
     train_class = get_policy_trainer_class(config_paths['policy']) or BaseTrainer
     trainer = train_class(

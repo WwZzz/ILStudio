@@ -22,6 +22,12 @@ def load_model(args):
         # Load from pretrained checkpoint
         model = MLPPolicy.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         model.to(args.device if hasattr(args, 'device') else 'cuda')
+        # Initialize processor and collator for inference
+        model.data_processor = MLPDataProcessor(
+            state_dim=model.config.state_dim,
+            use_camera=model.config.use_camera
+        )
+        model.data_collator = data_collator
     else:
         # Create new model from configuration
         model_args = getattr(args, 'model_args', {})

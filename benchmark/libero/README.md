@@ -6,6 +6,7 @@ source .venv/bin/activate
 uv sync
 cd ../../third_party/libero
 uv pip install -e .
+uv pip install mujoco==3.3.2
 cd ../..
 ```
 

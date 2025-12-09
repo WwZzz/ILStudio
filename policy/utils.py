@@ -56,7 +56,7 @@ def load_policy(args):
             state_normalizer=normalizers['state'], 
             ctrl_space=ctrl_space, 
             ctrl_type=ctrl_type,
-            img_size = getattr(args, 'image_size', None)
+            # img_size = getattr(args, 'image_size', None)
         )
     return policy
 
@@ -65,4 +65,4 @@ def print_model_trainable_information(model, rank0_print=None):
     lora_para = sum(p.numel() for n, p in model.named_parameters() if (p.requires_grad and 'lora' in n))
     all_para = sum(p.numel() for n, p in model.named_parameters())
     train_para = sum(p.numel() for n, p in model.named_parameters() if p.requires_grad)
-    rank0_print(f"Lora parameters/trainalbe parameters/all parameters:{lora_para/1000000}M/{train_para/1000000}M/{(all_para-lora_para)/1000000}M")
+    rank0_print(f"Lora parameters/trainable parameters/all parameters:{lora_para/1000000}M/{train_para/1000000}M/{(all_para-lora_para)/1000000}M")
