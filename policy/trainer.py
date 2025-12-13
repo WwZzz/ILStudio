@@ -103,29 +103,26 @@ class BaseTrainer(Trainer):
         
         # Return None only if we have neither eval_loader nor eval_dataset
         return None
-    
-    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate=None):
+
+    def _maybe_log_save_evaluate(self, *args, **kwargs):
         """
         Override to add logging and ensure evaluation runs.
-        This method is called during training to check if evaluation should run.
+        Modified to support different transformers versions dynamically using *args and **kwargs.
         """
         step = self.state.global_step if hasattr(self.state, 'global_step') else 'unknown'
         
-        # Check control.should_evaluate before calling parent
-        should_eval = getattr(self.control, 'should_evaluate', False)
-        
-        # Check if we should evaluate
         if hasattr(self.args, 'do_eval') and self.args.do_eval:
             eval_strategy = getattr(self.args, 'eval_strategy', None)
-            if eval_strategy != "no" and str(eval_strategy).lower() != "no":
+            if eval_strategy is None:
+                eval_strategy = getattr(self.args, 'evaluation_strategy', 'no')
+
+            if str(eval_strategy).lower() != "no":
                 try:
-                    eval_dataloader = self.get_eval_dataloader()
+                    self.get_eval_dataloader()
                 except Exception as e:
                     logger.warning(f"⚠️  Step {step}: Error getting eval_dataloader in _maybe_log_save_evaluate: {e}")
-        
-        # Call parent's method
-        return super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate)
-    
+        return super()._maybe_log_save_evaluate(*args, **kwargs)
+
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="val_action"):
         """
         Default evaluation method that computes MSE and MAE between predicted actions
