@@ -1,8 +1,10 @@
 # Installation
 
-Follow the instruction in this repo to install this environment
-
-https://github.com/simpler-env/SimplerEnv
+```shell
+uv venv
+uv sync
+git clone https://github.com/simpler-env/ManiSkill2_real2sim.git
+```
 
 
 # TroubleShooting

@@ -1,3 +1,5 @@
+import os
+os.environ['MS2_REAL2SIM_ASSET_DIR'] = os.path.join(os.path.dirname(__file__), 'ManiSkill2_real2sim', 'data')
 import simpler_env
 from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
 import numpy as np
