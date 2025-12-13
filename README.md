@@ -34,6 +34,10 @@ cd IL-Studio
 git submodule update --init --recursive 
 # Install uv by 'pip install uv' before running the command below
 uv sync
+# Install lerobot (Optinal)
+cd third_party/lerobot
+uv pip install -e .
+uv pip install numpy==1.26.4
 # activate the uv python environment
 source .venv/bin/activate
 ```

@@ -135,7 +135,7 @@ def main(args):
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
     train_loader, eval_loader = get_dataloader(train_data, val_data, data_processor, data_collator, args) 
-    assert val_data is not None, "Validation data is required for training"
+    # assert val_data is not None, "Validation data is required for training"
     # Get Trainer
     train_class = get_policy_trainer_class(config_paths['policy']) or BaseTrainer
     trainer = train_class(
