@@ -32,6 +32,8 @@ def parse_param():
                        help='Action publishing rate (Hz)')
     parser.add_argument('-sr', '--sensing_rate', type=float, default=20,
                        help='Sensing rate (Hz)')
+    parser.add_argument('-ir', '--infer_rate', type=float, default=10,
+                       help='Inference rate (Hz)')
     
     # Model arguments
     parser.add_argument('--device', type=str, default='cuda',
@@ -79,7 +81,7 @@ def sensing_producer(robot: AbstractRobotInterface, observation_queue: queue.Que
             obs = robot.get_observation()
             t_obs = time.perf_counter()
             if obs:
-                logger.debug(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
+                # logger.debug(f"[Sensing Thread] New Observation came at {args.sensing_rate}Hz...")
                 obs = robot.obs2meta(obs)
                 if observation_queue.full():
                     try:
@@ -110,6 +112,7 @@ def inference_producer(policy, observation_queue: queue.Queue, action_manager: q
     logger.info("[Inference Thread] Producer started.")
     with torch.no_grad():
         try:
+            rate_limiter = RateLimiter()
             step_count = 0
             while True:
                 # Blocking: Wait for observation data
@@ -120,6 +123,8 @@ def inference_producer(policy, observation_queue: queue.Queue, action_manager: q
                 action_chunk = [aci[0] for aci in raw_action_chunk]
                 step_count += 1
                 action_manager.put(action_chunk, t_obs)
+                # logger.debug(f"[Inference Thread] Inference completed at {args.infer_rate}Hz...")
+                rate_limiter.sleep(args.infer_rate)
         except Exception as e:
             logger.error(f"[Inference Thread] An exception occurred: {e}")
             traceback.print_exc()
