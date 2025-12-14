@@ -17,7 +17,7 @@
                 "HF_ENDPOINT": "https://hf-mirror.com",
                 // "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 // "ILSTD_CACHE": "/mnt/model/ilstd/data",
-                "HF_HOME": "/inspire/qb-dev/project/robot-action/public/huggingface",
+                "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [

@@ -111,16 +111,16 @@ class OpenPolicy(PreTrainedModel):
             labels=labels,
             attention_mask=attention_mask,
         )
-        action_logits = output.logits[:, self.model.vision_backbone.featurizer.patch_embed.num_patches : -1]
-        action_preds = action_logits.argmax(dim=2)
-        action_gt = labels[:, 1:].to(action_preds.device)
-        mask = action_gt > self.action_tokenizer.action_token_begin_idx
-        correct_preds = (action_preds == action_gt) & mask
-        action_accuracy = correct_preds.sum().float() / mask.sum().float()
-        continuous_actions_pred = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_preds[mask].cpu().numpy()))
-        continuous_actions_gt = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_gt[mask].cpu().numpy()))
-        action_l1_loss = torch.nn.functional.l1_loss(continuous_actions_pred, continuous_actions_gt)
-        return {'loss': output.loss, 'action_l1_loss': action_l1_loss, 'action_acc': action_accuracy}
+        # action_logits = output.logits[:, self.model.vision_backbone.featurizer.patch_embed.num_patches : -1]
+        # action_preds = action_logits.argmax(dim=2)
+        # action_gt = labels[:, 1:].to(action_preds.device)
+        # mask = action_gt > self.action_tokenizer.action_token_begin_idx
+        # correct_preds = (action_preds == action_gt) & mask
+        # action_accuracy = correct_preds.sum().float() / mask.sum().float()
+        # continuous_actions_pred = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_preds[mask].cpu().numpy()))
+        # continuous_actions_gt = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_gt[mask].cpu().numpy()))
+        # action_l1_loss = torch.nn.functional.l1_loss(continuous_actions_pred, continuous_actions_gt)
+        return {'loss': output.loss,}
         
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()

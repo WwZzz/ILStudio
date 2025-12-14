@@ -1,5 +1,9 @@
 from lerobot.policies.smolvla.modeling_smolvla import VLAFlowMatching
-from lerobot.policies.rtc.configuration_rtc import RTCConfig
+try:
+    from lerobot.policies.rtc.configuration_rtc import RTCConfig
+except:
+    # For compatibility
+    RTCConfig = None
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from lerobot.utils.constants import ACTION
