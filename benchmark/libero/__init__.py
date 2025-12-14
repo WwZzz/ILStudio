@@ -35,7 +35,7 @@ class LiberoEnv(MetaEnv):
         self.ctrl_space = getattr(self.config, 'ctrl_space', 'ee')
         self.ctrl_type = getattr(self.config, 'ctrl_type', 'delta')
         self.camera_ids = getattr(self.config, 'camera_ids', [0,])
-        self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', True)
+        self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', False)
         self.use_wrist = getattr(self.config, 'use_wrist', False)
         self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         env = self.create_env()

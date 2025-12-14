@@ -23,6 +23,7 @@ class MetaWorldEnv(MetaEnv):
         self.camera_name = getattr(self.config, 'camera_name', None)
         self.use_camera = getattr(self.config, 'use_camera', True)
         self.robot_state_only = getattr(self.config, 'robot_state_only', True)
+        self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         assert self.camera_name is None or self.camera_name in ALL_CAMERA_NAMES
         self.raw_lang = TASK_DESC[self.config.task][1]
         env = self.create_env()
@@ -73,4 +74,6 @@ class MetaWorldEnv(MetaEnv):
     
     def reset(self):
         obs = self.env.reset()
+        for _ in range(self.num_steps_wait):
+            obs = self.env.step([0,0,0,0])
         return self.obs2meta(obs[0])
