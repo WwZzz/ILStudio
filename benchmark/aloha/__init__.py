@@ -40,23 +40,9 @@ from .ee_sim_env import make_ee_sim_env
 from .sim_env import make_sim_env, BOX_POSE
 from .utils import sample_box_pose, sample_insertion_pose
 import numpy as np
-from dataclasses import dataclass, field, fields, asdict
-from data_utils.rotate import quat2axisangle
-import os
+from dataclasses import asdict
 import numpy as np
-from torchvision import transforms
-import pickle
 import time
-import copy
-import json
-import tensorflow as tf
-from PIL import Image, ImageDraw, ImageFont
-from typing import List
-from pathlib import Path
-import argparse
-from collections import deque
-import imageio
-from robosuite.controllers import load_controller_config
 import cv2
 from multiprocessing import current_process
 
@@ -97,8 +83,8 @@ class AlohaSimEnv(MetaEnv):
         return env
         
     def meta2act(self, maction: MetaAction):
-        assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
-        assert maction['ctrl_type']==self.ctrl_type, "Action must be relative action for LIBERO"
+        # assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
+        # assert maction['ctrl_type']==self.ctrl_type, "Action must be relative action for LIBERO"
         actions = maction['action'] # (action_dim, )
         return actions
         

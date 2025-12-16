@@ -6,10 +6,11 @@ from loguru import logger
 from data_utils.utils import set_seed
 from tqdm import tqdm
 import imageio
-from benchmark.utils import evaluate
+from benchmark.utils import evaluate as default_evaluate, SequentialVectorEnv
 import importlib
 import multiprocessing as mp
 from policy.utils import load_policy
+import numpy as np
 
 def parse_param():
     """
@@ -111,31 +112,63 @@ if __name__=='__main__':
         if not hasattr(env_module, 'create_env'): 
             raise AttributeError(f"env module {module_path if '.' in env_type else env_type} has no 'create_env'")
         
+        # Check if env_module has its own evaluate function
+        if hasattr(env_module, 'evaluate'):
+            evaluate = env_module.evaluate
+            logger.info(f"Using environment-specific evaluate function from {env_name}")
+        else:
+            evaluate = default_evaluate
+            logger.info(f"Using default evaluate function")
+        
         all_eval_results = []
-        num_iters = args.num_rollout//args.batch_size if args.num_rollout%args.batch_size==0 else args.num_rollout//args.batch_size+1
-        for i in tqdm(range(args.num_rollout//args.batch_size), total=num_iters, desc=f"Env {env_idx+1} Rollouts"):
-            num_envs = args.batch_size if i<num_iters-1 else args.num_rollout-i*args.batch_size
-            # init video recorder
-            if args.output_dir!='':
+        
+        # When batch_size=0, run sequentially without SubprocVectorEnv (useful for environments with multiprocessing issues)
+        # Determine execution mode and batch configuration
+        use_sequential = (args.batch_size == 0)
+        if use_sequential:
+            logger.info(f"Running in sequential mode (batch_size=0, no SubprocVectorEnv)")
+            num_iters = args.num_rollout
+            batch_size = 1
+        else:
+            logger.info(f"Running in parallel mode (batch_size={args.batch_size}, using SubprocVectorEnv)")
+            batch_size = args.batch_size
+            num_iters = (args.num_rollout + batch_size - 1) // batch_size  # Ceiling division
+        
+        # Unified evaluation loop
+        for i in tqdm(range(num_iters), total=num_iters, desc=f"Env {env_idx+1} Rollouts"):
+            # Calculate number of environments for this iteration
+            if use_sequential:
+                num_envs = 1
+                rollout_start = i
+                rollout_end = i + 1
+            else:
+                num_envs = min(batch_size, args.num_rollout - i * batch_size)
+                rollout_start = i * batch_size
+                rollout_end = rollout_start + num_envs
+            
+            # Initialize video recorder
+            if args.output_dir != '':
                 video_dir = os.path.join(args.output_dir, env_name, 'video')
                 os.makedirs(video_dir, exist_ok=True)
-                video_path = os.path.join(video_dir, f"{args.task}_roll{i*args.batch_size}_{i*args.batch_size+num_envs}.mp4") 
+                video_path = os.path.join(video_dir, f"{args.task}_roll{rollout_start}_{rollout_end}.mp4")
                 video_writer = imageio.get_writer(video_path, fps=args.fps)
             else:
                 video_writer = None
+            
+            # Create environment(s)
             env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
-            env = SubprocVectorEnv(env_fns)
-            # evaluate
+            env = SequentialVectorEnv(env_fns) if use_sequential else SubprocVectorEnv(env_fns)
+            
+            # Set policy to eval mode
             if hasattr(policy, 'policy') and hasattr(policy.policy, 'eval'):
-                # Local model mode
-                policy.policy.eval()
-            # Remote mode doesn't need model.eval()
+                policy.policy.eval()  # Local model mode
             
             # Save example batch only for the first rollout
             save_example_dir = None
             if i == 0 and args.output_dir != '':
                 save_example_dir = os.path.join(args.output_dir, env_name, 'example_data')
             
+            # Run evaluation
             eval_result = evaluate(args, policy, env, video_writer=video_writer, save_example_dir=save_example_dir)
             logger.info(eval_result)
             all_eval_results.append(eval_result)
@@ -148,7 +181,26 @@ if __name__=='__main__':
             'horizon_success': sum([eri['horizon_success']*eri['total_success'] for eri in all_eval_results])
         }
         eval_result['success_rate'] = 1.0*eval_result['total_success']/eval_result['total']    
-        eval_result['horizon_success']/=eval_result['total_success']
+        eval_result['horizon_success']/=max(eval_result['total_success'], 1)  # Avoid division by zero
+        
+        # Add environment-specific metrics (e.g., CALVIN subtasks)
+        # Collect any additional metrics that all results have
+        if all_eval_results:
+            first_result = all_eval_results[0]
+            for key in first_result.keys():
+                if key not in eval_result and key not in ['success', 'horizon']:
+                    # For list metrics, concatenate
+                    if isinstance(first_result[key], list):
+                        eval_result[key] = sum([eri.get(key, []) for eri in all_eval_results], [])
+                    # For scalar metrics that look like rates/averages, compute average
+                    elif isinstance(first_result[key], (int, float)):
+                        if 'rate' in key or 'avg' in key or 'calvin_success' in key:
+                            # Weighted average by number of samples
+                            total_weight = sum(eri['total'] for eri in all_eval_results)
+                            eval_result[key] = sum(eri.get(key, 0) * eri['total'] for eri in all_eval_results) / max(total_weight, 1)
+                        else:
+                            # For counts, sum them
+                            eval_result[key] = sum(eri.get(key, 0) for eri in all_eval_results)
         
         # Store results for this environment
         env_key = f"{env_name}_{args.task}" if hasattr(env_cfg, 'task') else f"{env_name}_env{env_idx}"
