@@ -141,6 +141,13 @@ def parse_dummy_policy_config(model_name_or_path):
         action_dim = int(match.group(2))
         return mode, action_dim, default_chunk
     
+    # Pattern 4b: __dummy-{dim}{mode}, e.g., __dummy-16random, __dummy-7zero
+    match = re.match(r'^(\d+)(zero|random)$', config_str)
+    if match:
+        action_dim = int(match.group(1))
+        mode = match.group(2)
+        return mode, action_dim, default_chunk
+    
     # Pattern 5: __dummy-{dim}, e.g., __dummy-7, __dummy-14
     match = re.match(r'^(\d+)$', config_str)
     if match:

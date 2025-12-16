@@ -1,0 +1,23 @@
+# RoboTwin Pick Diverse Bottles Task
+#
+# IMPORTANT: RoboTwin does NOT support parallel execution
+# Always use --batch_size 0 (sequential mode)
+#
+# Usage:
+#   benchmark/robotwin/.venv/bin/python eval_sim.py \
+#     -e robotwin_pick_bottles -m <model> --batch_size 0
+
+type: benchmark.robotwin.RoboTwinEnv
+name: robotwin_pick_diverse_bottles
+args:
+  task: pick_diverse_bottles  # Task class name (matches Python file)
+  task_config: demo_clean     # 'demo_clean' or 'demo_randomized'
+  max_timesteps: 100         # Maximum steps per episode
+  ctrl_space: qpos            # 'qpos' or 'ee'
+  ctrl_type: abs              # Only 'abs' supported by RoboTwin
+  seed: 0
+  camera_names:
+    - head_camera
+  image_size: [480, 640]      # [H, W] for cameras
+  # robotwin_root: /path/to/RoboTwin  # Optional: custom RoboTwin root path (default: benchmark/robotwin/RoboTwin)
+
