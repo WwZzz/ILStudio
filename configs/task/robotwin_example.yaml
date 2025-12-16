@@ -1,0 +1,42 @@
+# RoboTwin Dataset Configuration Example
+# This demonstrates how to load RoboTwin HDF5 demonstration data for training
+
+datasets:
+  - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
+    name: robotwin_adjust_bottle_aloha
+    args:
+      # Data source - choose ONE:
+      
+      # Option 1: Download from Hugging Face
+      # dataset_name: adjust_bottle/aloha-agilex_clean_50
+      
+      # Option 2: Use local path (directory or .zip file)
+      dataset_path: /home/noematrix/.cache/huggingface/datasets/aloha-agilex_clean_50
+
+      # Image settings
+      image_size: [480, 640]  # [H, W] - images will be resized to this
+      chunk_size: 16          # Number of timesteps per sample
+
+      # Camera configuration - specify which cameras to load
+      # Available: 'head_camera', 'left_camera', 'right_camera', 'front_camera'
+      camera_names:
+        - head_camera      # Front/overhead camera
+        - left_camera      # Left wrist camera
+        - right_camera     # Right wrist camera
+
+      # Control configuration
+      ctrl_space: qpos       # 'qpos' - joint position control
+      ctrl_type: abs         # 'abs' - absolute control (RoboTwin only supports this)
+
+      # Data loading
+      preload_data: false    # Set to true to load all data into RAM (requires large memory)
+
+meta:
+  # Dimensions are auto-detected from HDF5 file structure
+  # For aloha-agilex: 6 left joints + 1 left gripper + 6 right joints + 1 right gripper = 14
+  action_dim: 14  # Auto-detected, adjust if needed
+  state_dim: 14   # Same as action_dim for qpos control
+  
+  # Normalization
+  action_normalize: zscore
+  state_normalize: zscore

@@ -1,0 +1,32 @@
+# RoboTwin Pick Diverse Bottles Task with Left Wrist Camera Only
+#
+# This config demonstrates using only head camera and left wrist camera
+#
+# IMPORTANT: RoboTwin does NOT support parallel execution
+# Always use --batch_size 0 (sequential mode)
+#
+# Usage:
+#   benchmark/robotwin/.venv/bin/python eval_sim.py \
+#     -e robotwin_pick_bottles_left_wrist -m <model> --batch_size 0
+
+type: benchmark.robotwin.RoboTwinEnv
+name: robotwin_pick_diverse_bottles_left_wrist
+args:
+  task: pick_diverse_bottles  # Task class name (matches Python file)
+  task_config: demo_clean     # 'demo_clean' or 'demo_randomized'
+  max_timesteps: 400         # Maximum steps per episode
+  ctrl_space: qpos            # 'qpos' or 'ee'
+  ctrl_type: abs              # Only 'abs' supported by RoboTwin
+  seed: 0
+  
+  # Camera Configuration - Head + Left Wrist Only
+  # Use RoboTwin's original camera names directly
+  camera_names:
+    - head_camera             # Overhead view (required)
+    - left_camera             # Left arm wrist camera
+  image_size: [480, 640]      # [H, W] for all cameras
+  
+  # Motion Planner Configuration
+  use_planner: false          # false: Fast inference (recommended for policy eval)
+                              # true: Use Curobo + TOPP for smooth trajectories and collision avoidance
+

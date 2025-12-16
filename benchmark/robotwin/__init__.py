@@ -95,6 +95,16 @@ class RoboTwinEnv(MetaEnv):
         self.image_size = getattr(config, 'image_size', [480, 640])
         self.camera_names = getattr(config, 'camera_names', ['head_camera'])
         
+        # Robot embodiment configuration (optional override)
+        # If not specified, will use embodiment from task_config YAML
+        self.embodiment = getattr(config, 'embodiment', None)
+        
+        # Planner configuration
+        # use_planner=False: Skip planner initialization (faster, no GPU required)
+        # use_planner=True: Try to use TOPP/Curobo for trajectory smoothing (with automatic fallback)
+        # Note: Original RoboTwin tries to use planner but gracefully falls back if it fails
+        self.use_planner = getattr(config, 'use_planner', False)
+        
         # Change to RoboTwin directory for initialization
         _enter_robotwin_context()
         
@@ -110,7 +120,7 @@ class RoboTwinEnv(MetaEnv):
             self.task_config['save_data'] = False
             self.task_config['render_freq'] = 0  # No rendering by default
             self.task_config['seed'] = self.seed
-            self.task_config['use_planner'] = False  # Disable motion planner for policy evaluation
+            self.task_config['use_planner'] = self.use_planner  # Motion planner (Curobo + TOPP)
             self.task_config['step_lim'] = self.max_timesteps  # Override RoboTwin's default step limit
             
             # Load camera config and set dimensions
@@ -168,11 +178,11 @@ class RoboTwinEnv(MetaEnv):
             self.task_config['head_camera_h'] = self.image_size[0]
             self.task_config['head_camera_w'] = self.image_size[1]
         
-        # Override camera collection based on ILStudio camera_names
-        # Only collect cameras that are explicitly specified
+        # Override camera collection based on camera_names
+        # Use RoboTwin's original camera names directly
         self.task_config['camera']['collect_head_camera'] = 'head_camera' in self.camera_names
-        self.task_config['camera']['collect_wrist_camera'] = ('left_wrist_camera' in self.camera_names or 
-                                                               'right_wrist_camera' in self.camera_names)
+        self.task_config['camera']['collect_wrist_camera'] = ('left_camera' in self.camera_names or 
+                                                               'right_camera' in self.camera_names)
     
     def _load_embodiment_configs(self):
         """Load embodiment configurations to determine action dimensions."""
@@ -184,8 +194,11 @@ class RoboTwinEnv(MetaEnv):
         with open(embodiment_config_path, 'r') as f:
             embodiment_types = yaml.safe_load(f)
         
-        # Get embodiment type from task config
-        embodiment_type = self.task_config.get('embodiment', ['aloha-agilex'])
+        # Get embodiment type from ILStudio config (if specified) or task config
+        if self.embodiment is not None:
+            embodiment_type = self.embodiment if isinstance(self.embodiment, list) else [self.embodiment]
+        else:
+            embodiment_type = self.task_config.get('embodiment', ['aloha-agilex'])
         
         def get_embodiment_file(embodiment_name):
             """Get the robot file path for an embodiment."""
@@ -336,6 +349,8 @@ class RoboTwinEnv(MetaEnv):
         observation = obs_dict.get('observation', {})
         
         for cam_name in self.camera_names:
+            # Directly use camera name from config
+            # RoboTwin's camera keys: 'head_camera', 'left_camera', 'right_camera'
             if cam_name in observation and 'rgb' in observation[cam_name]:
                 img = observation[cam_name]['rgb']  # (H, W, 3) RGB
                 # Convert to (C, H, W)
