@@ -1,10 +1,10 @@
 import os
 os.environ['MS2_REAL2SIM_ASSET_DIR'] = os.path.join(os.path.dirname(__file__), 'ManiSkill2_real2sim', 'data')
 import simpler_env
-from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
 import numpy as np
 from ..base import *
-from multiprocessing import current_process
+from scipy.spatial.transform import Rotation as R
+
 
 def create_env(config):
     return SimplerEnv(config)
@@ -13,6 +13,7 @@ class SimplerEnv(MetaEnv):
     def __init__(self, config, *args):
         self.config = config
         self.ctrl_space = getattr(self.config, 'ctrl_space', 'joint')
+        self.state_type = getattr(self.config, 'obs_type', 'pose_rpy') # qpos, pose, or pose_rpy
         self.ctrl_type = 'abs'
         self.max_timesteps = getattr(self.config, 'max_timesteps', 200)
         env = self.create_env()
@@ -34,9 +35,37 @@ class SimplerEnv(MetaEnv):
         return actions
         
     def obs2meta(self, obs):
-        state = obs['agent']['qpos']
+        if self.state_type == 'qpos':
+            state = obs['agent']['qpos']
+        else:
+            eef_pose = obs['extra']['tcp_pose']
+            gripper_qpos = obs['agent']['qpos'][-1:]*2
+            if 'rpy' in self.state_type:
+                eef_pose = self.pose_to_rpy(eef_pose)
+            state = np.concatenate([eef_pose, gripper_qpos])
         image = np.stack([obs['image'][self.camera_name]['rgb']])
+        image = image.transpose(0, 3, 1, 2)
         return MetaObs(state=state, image=image, raw_lang=self.raw_lang)
+
+
+    def pose_to_rpy(self, tcp_pose_7d):
+        """
+        Args:
+            tcp_pose_7d: [x, y, z, qx, qy, qz, qw] (from SimplerEnv)
+        Returns:
+            target_pose: [x, y, z, roll, pitch, yaw] (for Bridge V2 alignment)
+        """
+        # 1. 提取位置
+        xyz = tcp_pose_7d[:3]
+        
+        # 2. 提取旋转 (Scalar-Last)
+        quat_xyzw = tcp_pose_7d[3:]
+        
+        # 3. 转换为 Euler XYZ (Bridge Data 标准)
+        r = R.from_quat(quat_xyzw)
+        rpy = r.as_euler('xyz', degrees=False) # 返回弧度
+    
+        return np.concatenate([xyz, rpy])
 
     def step(self, *args, **kwargs):
         action = args[0]['action']
