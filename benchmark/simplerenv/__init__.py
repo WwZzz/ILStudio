@@ -14,8 +14,12 @@ class SimplerEnv(MetaEnv):
         self.config = config
         self.ctrl_space = getattr(self.config, 'ctrl_space', 'joint')
         self.ctrl_type = 'abs'
-        self.camera_names = getattr(self.config, 'camera_names')
+        self.max_timesteps = getattr(self.config, 'max_timesteps', 200)
         env = self.create_env()
+        if "google_robot" in env.robot_uid:
+            self.camera_name = "overhead_camera"
+        elif "widowx" in env.robot_uid:
+            self.camera_name = "3rd_view_camera"
         self.raw_lang = env.get_language_instruction()
         super().__init__(env)
 
@@ -31,7 +35,7 @@ class SimplerEnv(MetaEnv):
         
     def obs2meta(self, obs):
         state = obs['agent']['qpos']
-        image = np.stack([obs['image'][cam]['rgb']] for cam in self.camera_names)
+        image = np.stack([obs['image'][self.camera_name]['rgb']])
         return MetaObs(state=state, image=image, raw_lang=self.raw_lang)
 
     def step(self, *args, **kwargs):
