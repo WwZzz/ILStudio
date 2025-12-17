@@ -36,7 +36,7 @@ git submodule update --init --recursive
 uv sync
 # Install lerobot (Optinal)
 cd third_party/lerobot
-uv pip install -e .
+uv pip install -e . # or `uv pip install -e ".[smolvla]"` for smolvla usage
 uv pip install numpy==1.26.4
 # activate the uv python environment
 source .venv/bin/activate
@@ -164,7 +164,9 @@ python start_teleop_recorder.py -c so101_follower
 - pandagym
 - robomimic
 - simplerenv
-- robotwin (Under Development)
+- robotwin
+- rlbench (Under Testing)
+- calvin (Under Testing)
 
 ## 🦾 Robot Gallery
 - SO101

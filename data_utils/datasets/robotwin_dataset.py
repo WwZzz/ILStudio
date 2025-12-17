@@ -4,67 +4,32 @@ import numpy as np
 import cv2
 import zipfile
 import shutil
+import json
+import re
 from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
 import requests
-import torch
 import h5py
 from collections import OrderedDict
 
-try:
-    from .base import EpisodicDataset
-except ImportError:
-    from data_utils.datasets.base import EpisodicDataset
+# -----------------------------------------------------------------------------
+# Base Class Fallback
+# -----------------------------------------------------------------------------
 
+from .base import EpisodicDataset
 
-# ============================================================================
-# RoboTwin's load_hdf5 function - adapted from process_data.py
-# ============================================================================
-def load_hdf5(path):
-    """
-    Load RoboTwin HDF5 file.
-    Returns: (left_gripper_all, left_arm_all, right_gripper_all, right_arm_all, image_dict)
-    
-    Images are stored as encoded JPEG bytes in '/observation/{camera_name}/rgb'
-    """
-    with h5py.File(path, 'r') as root:
-        # Load joint states
-        left_gripper_all = root['/joint_action/left_gripper'][()]
-        left_arm_all = root['/joint_action/left_arm'][()]
-        right_gripper_all = root['/joint_action/right_gripper'][()]
-        right_arm_all = root['/joint_action/right_arm'][()]
-        
-        # Load images - stored in '/observation/{camera_name}/rgb' as encoded JPEG bytes
-        image_dict = {}
-        for camera_name in ['head_camera', 'left_camera', 'right_camera', 'front_camera']:
-            try:
-                rgb_path = f'/observation/{camera_name}/rgb'
-                if rgb_path in root:
-                    image_dict[camera_name] = root[rgb_path][()]
-            except KeyError:
-                pass  # Camera not available
-    
-    return left_gripper_all, left_arm_all, right_gripper_all, right_arm_all, image_dict
-
-
+# -----------------------------------------------------------------------------
+# RoboTwin Dataset Class
+# -----------------------------------------------------------------------------
 class RoboTwinDataset(EpisodicDataset):
     """
     RoboTwin dataset for ILStudio.
-    Directly loads raw RoboTwin HDF5 data and converts to ILStudio's standard format.
     
-    Usage in config:
-        datasets:
-          - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
-            name: robotwin_data
-            args:
-              dataset_path: /path/to/data  # or dataset_name for HuggingFace
-              image_size: [480, 640]
-              chunk_size: 16
-              camera_names: ['head_camera', 'left_camera', 'right_camera']
-              ctrl_space: qpos
-              ctrl_type: abs
-              preload_data: false
+    Key Features:
+    - ctrl_space: 'joint' (joint_action) or 'ee' (endpose).
+    - Dynamic Dimensions: Automatically detects single/dual arm from data.
+    - Unified Path: Accepts local path or HF dataset name.
     """
 
     HF_REPO_ID = "TianxingChen/RoboTwin2.0"
@@ -73,66 +38,69 @@ class RoboTwinDataset(EpisodicDataset):
 
     def __init__(
         self,
-        dataset_path: str = None,
-        dataset_name: str = None,
+        dataset_path: str,
         image_size: tuple = (480, 640),
         chunk_size: int = 16,
         camera_names: list = None,
-        ctrl_space: str = 'qpos',
+        ctrl_space: str = 'joint',  # 'joint' or 'ee'
         ctrl_type: str = 'abs',
         preload_data: bool = False,
     ):
-        """
-        Initialize RoboTwin dataset.
-        
-        Args:
-            dataset_path: Local path to dataset (.zip or extracted directory)
-            dataset_name: Hugging Face dataset name (e.g., 'adjust_bottle/aloha-agilex_clean_50')
-            image_size: (height, width) for image resizing
-            chunk_size: Number of timesteps per sample
-            camera_names: List of camera names to load
-            ctrl_space: Control space ('qpos', 'ee', etc.)
-            ctrl_type: Control type ('abs', 'rel', etc.)
-            preload_data: Whether to preload all data into memory
-        """
         if camera_names is None:
             camera_names = ['head_camera', 'left_camera', 'right_camera']
         
         if isinstance(image_size, list):
             image_size = tuple(image_size)
-
-        self._dataset_path = dataset_path
-        self._dataset_name = dataset_name
+            
+        # 1. Validate ctrl_space mapping
+        if ctrl_space not in ['joint', 'ee']:
+            raise ValueError("ctrl_space must be 'joint' or 'ee'")
+        
+        # Internal mapping to HDF5 group names
+        self.hdf5_group_name = 'joint_action' if ctrl_space == 'joint' else 'endpose'
+        self.ctrl_space = ctrl_space
         self._preload_data = preload_data
-        self._episode_cache = {}  # Cache loaded episodes
+        self._episode_cache = {}
+        self._instruction_cache = {}
 
-        # Get raw data directory
-        if dataset_name:
-            self.raw_data_dir = self._download_and_extract_hf(dataset_name)
-        elif dataset_path:
-            self.raw_data_dir = self._extract_local_data(dataset_path)
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        # --------------------------------------------------------
+        # Path Logic
+        # --------------------------------------------------------
+        if dataset_path is None:
+            raise ValueError("dataset_path must be provided.")
+
+        path_obj = Path(dataset_path).expanduser().resolve()
+        
+        if path_obj.exists():
+            logger.info(f"Detected local path: {path_obj}")
+            self.raw_data_dir = self._extract_local_data(path_obj)
         else:
-            raise ValueError("Either 'dataset_path' or 'dataset_name' must be provided.")
+            logger.info(f"Path not found locally, assuming Hugging Face dataset name: {dataset_path}")
+            self.raw_data_dir = self._download_and_extract_hf(dataset_path)
 
-        # Find all raw episode HDF5 files
-        raw_episode_files = sorted(list(self.raw_data_dir.glob('episode*.hdf5')))
+        # Recursively find all episode files
+        raw_episode_files = sorted(list(self.raw_data_dir.rglob('episode*.hdf5')))
         if not raw_episode_files:
             raise FileNotFoundError(f"No episode HDF5 files found in: {self.raw_data_dir}")
 
         self.raw_episode_files = raw_episode_files
 
-        # Infer action and state dimensions from first episode
+        # --------------------------------------------------------
+        # Dynamic Dimension Inference
+        # --------------------------------------------------------
+        # Load the first episode to infer state_dim/action_dim automatically
         try:
-            _, left_arm, _, right_arm, _ = load_hdf5(str(raw_episode_files[0]))
-            left_dof = left_arm.shape[1]  # Number of joints per arm
-            right_dof = right_arm.shape[1]
-            # state_dim = left_joints + left_gripper + right_joints + right_gripper
-            inferred_state_dim = left_dof + 1 + right_dof + 1
+            sample_data, _ = self._load_hdf5(str(raw_episode_files[0]))
+            inferred_dim = sample_data.shape[1]
+            self.state_dim = inferred_dim
+            self.action_dim = inferred_dim
+            logger.info(f"Inferred dimensions from data: {inferred_dim} (Based on '{ctrl_space}' space)")
         except Exception as e:
-            logger.warning(f"Could not infer dimensions from data: {e}. Using default 14.")
-            inferred_state_dim = 14  # Default for aloha-agilex (6+1+6+1)
+            logger.error(f"Failed to infer dimensions from {raw_episode_files[0]}: {e}")
+            raise RuntimeError("Could not infer dataset dimensions.")
 
-        # Initialize base class with raw file paths
         super().__init__(
             dataset_path_list=[str(p) for p in raw_episode_files],
             camera_names=camera_names,
@@ -143,227 +111,284 @@ class RoboTwinDataset(EpisodicDataset):
             preload_data=preload_data
         )
 
-        # Store inferred dimensions
-        self.state_dim = inferred_state_dim
-        self.action_dim = inferred_state_dim
+        logger.info(f"RoboTwinDataset initialized from {self.raw_data_dir}")
+        logger.info(f"  - Control: {ctrl_space} -> {self.hdf5_group_name} ({ctrl_type})")
+        logger.info(f"  - Episodes: {len(self.raw_episode_files)}")
 
-        logger.info(f"RoboTwinDataset initialized with {len(self)} frames from {self.raw_data_dir}")
-        logger.info(f"  - State dim: {self.state_dim}, Action dim: {self.action_dim}")
-        logger.info(f"  - Episodes: {len(self.raw_episode_files)}, Total frames: {len(self)}")
+    # ============================================================================
+    # Core Data Loading Methods
+    # ============================================================================
 
-    def get_episode_len(self):
-        """Get lengths of all episodes from raw RoboTwin data."""
-        all_episode_len = []
-        for dataset_path in self.dataset_path_list:
+    def _load_hdf5(self, path):
+        """
+        Internal method to load raw data from HDF5.
+        Dynamically handles single-arm or dual-arm data.
+        """
+        with h5py.File(path, 'r') as root:
+            traj_parts = []
+            
+            # Use the group determined in __init__ (joint_action or endpose)
+            if self.hdf5_group_name not in root:
+                raise KeyError(f"Group '{self.hdf5_group_name}' not found in {path}")
+            
+            group = root[self.hdf5_group_name]
+            
+            # Define keys to look for based on control space
+            # Order matters: usually [Left Arm, Left Gripper, Right Arm, Right Gripper]
+            # or just [Arm, Gripper] if single arm
+            
+            sides = ['left', 'right']
+            
+            for side in sides:
+                # Determine key names based on ctrl_space
+                if self.ctrl_space == 'joint':
+                    arm_key = f'{side}_arm'      # e.g., left_arm
+                    gripper_key = f'{side}_gripper' # e.g., left_gripper
+                else: # ee
+                    arm_key = f'{side}_endpose'  # e.g., left_endpose
+                    gripper_key = f'{side}_gripper'
+
+                # Check if this side exists in the group
+                if arm_key in group and gripper_key in group:
+                    arm_data = group[arm_key][()]
+                    gripper_data = group[gripper_key][()]
+
+                    # Ensure gripper is (T, 1)
+                    if gripper_data.ndim == 1:
+                        gripper_data = gripper_data[:, None]
+                    
+                    traj_parts.append(arm_data)
+                    traj_parts.append(gripper_data)
+            
+            if not traj_parts:
+                raise ValueError(f"No valid arm data found in group '{self.hdf5_group_name}' for {path}")
+
+            # Concatenate all found parts (T, sum_dims)
+            traj_data = np.concatenate(traj_parts, axis=1)
+
+            # --- Load Image Bytes ---
+            image_dict = {}
+            potential_cams = ['head_camera', 'left_camera', 'right_camera', 'front_camera']
+            for camera_name in potential_cams:
+                rgb_path = f'/observation/{camera_name}/rgb'
+                if rgb_path in root:
+                    image_dict[camera_name] = root[rgb_path][()]
+        
+        return traj_data, image_dict
+
+    def _load_instruction(self, dataset_path):
+        """Find and load language instruction from JSON."""
+        path_obj = Path(dataset_path)
+        match = re.search(r'episode(\d+)\.hdf5', path_obj.name)
+        episode_id = int(match.group(1)) if match else None
+        
+        if episode_id is None:
+            return ""
+
+        candidates = [
+            path_obj.parent.parent / "instructions" / f"episode{episode_id}.json", 
+            path_obj.parent / "instructions" / f"episode{episode_id}.json",        
+        ]
+        
+        instruction_path = None
+        for p in candidates:
+            if p.exists():
+                instruction_path = p
+                break
+        
+        if not instruction_path:
+            found = list(self.raw_data_dir.rglob(f"instructions/episode{episode_id}.json"))
+            if found:
+                instruction_path = found[0]
+
+        if instruction_path and instruction_path.exists():
             try:
-                left_gripper_all, _, _, _, _ = load_hdf5(dataset_path)
-                # Number of valid transitions is num_frames - 1 (action points to next state)
-                episode_len = max(0, left_gripper_all.shape[0] - 1)
-                all_episode_len.append(episode_len)
-            except Exception as e:
-                logger.error(f"Error getting episode length for {dataset_path}: {e}")
-                all_episode_len.append(0)
-        return all_episode_len
+                with open(instruction_path, "r") as f:
+                    data = json.load(f)
+                    instr = data.get("seen", "")
+                    return instr[0] if isinstance(instr, list) and len(instr) > 0 else str(instr)
+            except Exception:
+                return ""
+        return ""
+
+    # ============================================================================
+    # Public Interface
+    # ============================================================================
 
     def load_onestep_from_episode(self, dataset_path, start_ts=None):
-        """
-        Load one timestep from a raw RoboTwin episode.
-        Converts RoboTwin's native format to ILStudio's standard format.
-        """
-        # Cache episode data
+        """Load single timestep."""
         if dataset_path not in self._episode_cache:
-            self._episode_cache[dataset_path] = load_hdf5(dataset_path)
-
-        left_gripper_all, left_arm_all, right_gripper_all, right_arm_all, image_dict = self._episode_cache[dataset_path]
-
-        # State: current qpos (7 left joints + 1 left gripper + 7 right joints + 1 right gripper)
-        left_gripper = left_gripper_all[start_ts]
-        left_arm = left_arm_all[start_ts]
-        right_gripper = right_gripper_all[start_ts]
-        right_arm = right_arm_all[start_ts]
+            self._episode_cache[dataset_path] = self._load_hdf5(dataset_path)
         
-        state = np.concatenate((left_arm, [left_gripper], right_arm, [right_gripper]), axis=0).astype(np.float32)
+        if dataset_path not in self._instruction_cache:
+            self._instruction_cache[dataset_path] = self._load_instruction(dataset_path)
 
-        # Action: next state (or zeros if at episode end)
-        action = np.zeros(self.action_dim, dtype=np.float32)
-        if start_ts + 1 < left_gripper_all.shape[0]:
-            next_left_gripper = left_gripper_all[start_ts + 1]
-            next_left_arm = left_arm_all[start_ts + 1]
-            next_right_gripper = right_gripper_all[start_ts + 1]
-            next_right_arm = right_arm_all[start_ts + 1]
-            action = np.concatenate((next_left_arm, [next_left_gripper], next_right_arm, [next_right_gripper]), axis=0).astype(np.float32)
+        traj_data, image_dict = self._episode_cache[dataset_path]
+        language_instruction = self._instruction_cache[dataset_path]
 
-        # Images: decode from bytes and resize
+        state = traj_data[start_ts].astype(np.float32)
+        
+        if start_ts + 1 < traj_data.shape[0]:
+            action = traj_data[start_ts + 1].astype(np.float32)
+        else:
+            action = np.zeros_like(state)
+
         images = OrderedDict()
         for cam_name in self.camera_names:
             if cam_name in image_dict and len(image_dict[cam_name]) > start_ts:
-                camera_bits = image_dict[cam_name][start_ts]
-                img = cv2.imdecode(np.frombuffer(camera_bits, np.uint8), cv2.IMREAD_COLOR)
-                img_resized = cv2.resize(img, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
-                images[cam_name] = img_resized  # HWC format
+                img = cv2.imdecode(np.frombuffer(image_dict[cam_name][start_ts], np.uint8), cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
+                images[cam_name] = img 
             else:
-                # Provide black image if missing
                 images[cam_name] = np.zeros((self.image_size[0], self.image_size[1], 3), dtype=np.uint8)
 
-        # Return data dict in ILStudio format
-        data_dict = {
-            'action': action[np.newaxis, :],  # (1, action_dim)
-            'image': images,  # OrderedDict of camera images
-            'state': state,  # (state_dim,)
-            'language_instruction': "",  # Not available in RoboTwin
-            'reasoning': "",
+        if not self._preload_data:
+            del self._episode_cache[dataset_path]
+
+        return {
+            'action': action[np.newaxis, :], 
+            'image': images, 
+            'state': state, 
+            'language_instruction': language_instruction,
             'timestamp': start_ts,
         }
+
+    def load_feat_from_episode(self, dataset_path, feats=[]):
+        """Load entire episode."""
+        data_dict = {}
+        if isinstance(feats, str): feats = [feats]
+        
+        if 'language_instruction' in feats or len(feats) == 0:
+            data_dict['language_instruction'] = self._load_instruction(dataset_path)
+        
+        if len(feats) == 1 and 'language_instruction' in feats:
+            return data_dict
+
+        traj_raw, image_bytes_dict = self._load_hdf5(dataset_path)
+        traj_raw = traj_raw.astype(np.float32)
+
+        if 'state' in feats or 'action' in feats or len(feats) == 0:
+            if 'state' in feats or len(feats) == 0:
+                data_dict['state'] = traj_raw
+
+        if 'action' in feats or len(feats) == 0:
+            next_state = np.zeros_like(traj_raw)
+            next_state[:-1] = traj_raw[1:]
+            next_state[-1] = traj_raw[-1]
+            
+            if self.ctrl_type == 'delta':
+                action = next_state - traj_raw
+            elif self.ctrl_type == 'abs':
+                action = next_state
+            else:
+                raise NotImplementedError(f"ctrl_type '{self.ctrl_type}' not implemented")
+            
+            data_dict['action'] = action
+
+        if 'image' in feats or 'image_wrist' in feats or len(feats) == 0:
+            loaded_images = {}
+            for cam_name in self.camera_names:
+                if cam_name not in image_bytes_dict: continue
+                is_wrist = 'left' in cam_name or 'right' in cam_name
+                should_load = (len(feats)==0) or ('image' in feats) or ('image_wrist' in feats and is_wrist)
+                
+                if should_load:
+                    imgs = []
+                    for b in image_bytes_dict[cam_name]:
+                        img = cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
+                        imgs.append(img)
+                    loaded_images[cam_name] = np.array(imgs)
+            data_dict['image'] = loaded_images
+
         return data_dict
 
-    def _download_and_extract_hf(self, dataset_name):
-        """Download and extract dataset from Hugging Face."""
-        url = f"{self.HF_ENDPOINT}/{self.HF_REPO_ID}/resolve/main/dataset/{dataset_name}.zip"
-        download_path = self.CACHE_DIR / f"{dataset_name.replace('/', '_')}.zip"
-        extract_dir = self.CACHE_DIR / dataset_name
+    def get_episode_len(self):
+        all_episode_len = []
+        for dataset_path in self.dataset_path_list:
+            try:
+                # Peek length without full load
+                with h5py.File(dataset_path, 'r') as f:
+                    # Check which group exists (joint or endpose)
+                    if 'joint_action' in f:
+                        grp = f['joint_action']
+                    elif 'endpose' in f:
+                        grp = f['endpose']
+                    else:
+                        all_episode_len.append(0)
+                        continue
+                    
+                    # Find any valid key to get length
+                    if 'left_gripper' in grp: length = grp['left_gripper'].shape[0]
+                    elif 'right_gripper' in grp: length = grp['right_gripper'].shape[0]
+                    else: length = 0
+                    
+                    all_episode_len.append(max(0, length - 1))
+            except Exception:
+                all_episode_len.append(0)
+        return all_episode_len
 
-        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ============================================================================
+    # Download & Extract Helpers
+    # ============================================================================
+    def _download_and_extract_hf(self, dataset_name):
+        # 修正点：在 HF_ENDPOINT 后加上 /datasets/
+        url = f"{self.HF_ENDPOINT}/datasets/{self.HF_REPO_ID}/resolve/main/dataset/{dataset_name}.zip"
+        
+        download_path = self.CACHE_DIR / f"{dataset_name}.zip"
+        extract_dir = self.CACHE_DIR / dataset_name
+        
+        download_path.parent.mkdir(parents=True, exist_ok=True)
 
         if extract_dir.exists() and any(extract_dir.iterdir()):
-            logger.info(f"RoboTwin data already extracted to {extract_dir}")
-            return self._find_data_dir(extract_dir)
+            logger.info(f"Using cached: {extract_dir}")
+            return extract_dir
 
         if not download_path.exists():
-            logger.info(f"Downloading from {url}...")
-            try:
-                response = requests.get(url, stream=True)
-                response.raise_for_status()
-                total_size = int(response.headers.get('content-length', 0))
-                with open(download_path, 'wb') as f:
-                    for chunk in tqdm(response.iter_content(chunk_size=8192), 
-                                     total=total_size // 8192, unit='KB', 
-                                     desc=f"Downloading {dataset_name}"):
-                        f.write(chunk)
-                logger.info("Download complete.")
-            except Exception as e:
-                logger.error(f"Download failed: {e}")
-                if download_path.exists():
-                    download_path.unlink()
-                raise
-
-        logger.info(f"Extracting to {extract_dir}...")
-        try:
-            with zipfile.ZipFile(download_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
-            logger.info("Extraction complete.")
-        except Exception as e:
-            logger.error(f"Extraction failed: {e}")
-            if extract_dir.exists():
-                shutil.rmtree(extract_dir)
-            raise
-
-        return self._find_data_dir(extract_dir)
-
-    def _extract_local_data(self, dataset_path):
-        """Extract local zip or use directory directly."""
-        path = Path(dataset_path)
-        
-        if path.is_dir():
-            return self._find_data_dir(path)
-        elif path.is_file() and path.suffix == '.zip':
-            extract_dir = self.CACHE_DIR / path.stem
-            self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Downloading {url}...")
             
-            if extract_dir.exists() and any(extract_dir.iterdir()):
-                logger.info(f"Already extracted to {extract_dir}")
-                return self._find_data_dir(extract_dir)
+            # --- Auth Token 处理 ---
+            hf_token = os.getenv("HF_TOKEN")
+            headers = {}
+            if hf_token:
+                headers["Authorization"] = f"Bearer {hf_token}"
+            # ---------------------
 
-            logger.info(f"Extracting {path} to {extract_dir}...")
             try:
-                with zipfile.ZipFile(path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_dir)
-                logger.info("Extraction complete.")
-            except Exception as e:
-                logger.error(f"Extraction failed: {e}")
-                if extract_dir.exists():
-                    shutil.rmtree(extract_dir)
-                raise
-
-            return self._find_data_dir(extract_dir)
-        else:
-            raise ValueError(f"Invalid dataset_path: {dataset_path}")
-
-    def _find_data_dir(self, root_path):
-        """Find directory containing episode*.hdf5 files."""
-        root_path = Path(root_path)
-        
-        # Check if root has episodes directly
-        if list(root_path.glob('episode*.hdf5')):
-            logger.info(f"Found episodes in {root_path}")
-            return root_path
-        
-        # Check for 'data' subdirectory
-        data_dir = root_path / 'data'
-        if data_dir.exists() and list(data_dir.glob('episode*.hdf5')):
-            logger.info(f"Found episodes in {data_dir}")
-            return data_dir
-        
-        # Recursively search subdirectories
-        for subdir in root_path.rglob('*'):
-            if subdir.is_dir() and list(subdir.glob('episode*.hdf5')):
-                logger.info(f"Found episodes in {subdir}")
-                return subdir
-        
-        raise FileNotFoundError(f"No episode*.hdf5 files found in {root_path} or subdirectories")
-
-    def get_dataset_statistics(self):
-        """Compute dataset statistics for normalization."""
-        logger.info("Computing dataset statistics...")
-        
-        all_states = []
-        all_actions = []
-        
-        for dataset_path in tqdm(self.dataset_path_list, desc="Computing statistics"):
-            try:
-                left_gripper_all, left_arm_all, right_gripper_all, right_arm_all, _ = load_hdf5(dataset_path)
+                # 显式允许重定向 (allow_redirects=True 是默认的，但显式写出更安全)
+                resp = requests.get(url, stream=True, headers=headers, allow_redirects=True)
                 
-                # Collect all states and actions
-                for j in range(left_gripper_all.shape[0]):
-                    left_gripper = left_gripper_all[j]
-                    left_arm = left_arm_all[j]
-                    right_gripper = right_gripper_all[j]
-                    right_arm = right_arm_all[j]
-                    
-                    state = np.concatenate((left_arm, [left_gripper], right_arm, [right_gripper])).astype(np.float32)
-                    all_states.append(state)
-                    
-                    # Action is next state (skip last frame)
-                    if j + 1 < left_gripper_all.shape[0]:
-                        next_left_gripper = left_gripper_all[j + 1]
-                        next_left_arm = left_arm_all[j + 1]
-                        next_right_gripper = right_gripper_all[j + 1]
-                        next_right_arm = right_arm_all[j + 1]
-                        action = np.concatenate((next_left_arm, [next_left_gripper], next_right_arm, [next_right_gripper])).astype(np.float32)
-                        all_actions.append(action)
-                        
+                if resp.status_code == 401:
+                    logger.error("Error 401: Unauthorized. Please set HF_TOKEN environment variable.")
+                
+                resp.raise_for_status()
+                total = int(resp.headers.get('content-length', 0))
+                with open(download_path, 'wb') as f:
+                    for chunk in tqdm(resp.iter_content(8192), total=total//8192, unit='KB'):
+                        f.write(chunk)
             except Exception as e:
-                logger.warning(f"Error processing {dataset_path}: {e}")
-                continue
+                logger.error(f"Download error for URL: {url}") # 打印出 URL 方便调试
+                if download_path.exists(): download_path.unlink()
+                raise e
+
+        logger.info(f"Extracting {download_path}...")
+        try:
+            with zipfile.ZipFile(download_path, 'r') as z:
+                z.extractall(extract_dir.parent)
+            return extract_dir
+        except Exception as e:
+            if extract_dir.exists(): shutil.rmtree(extract_dir)
+            raise e
         
-        all_states = np.array(all_states)
-        all_actions = np.array(all_actions)
-        
-        # Return statistics in the format expected by ILStudio normalizers
-        # Format: {key: {stat_name: value}} or {key: {stat_name: value} for each statistic}
-        stats = {
-            'state': {
-                'mean': all_states.mean(axis=0),
-                'std': all_states.std(axis=0),
-                'min': all_states.min(axis=0),
-                'max': all_states.max(axis=0),
-            },
-            'action': {
-                'mean': all_actions.mean(axis=0),
-                'std': all_actions.std(axis=0),
-                'min': all_actions.min(axis=0),
-                'max': all_actions.max(axis=0),
-            }
-        }
-        
-        logger.info("Statistics computed.")
-        return stats
+    def _extract_local_data(self, path):
+        path = Path(path)
+        if path.is_dir(): return path
+        if path.is_file() and path.suffix == '.zip':
+            extract_dir = path.parent / path.stem
+            if extract_dir.exists() and any(extract_dir.iterdir()): return extract_dir
+            logger.info(f"Extracting local {path}...")
+            with zipfile.ZipFile(path, 'r') as z:
+                z.extractall(path.parent)
+            return extract_dir
+        raise ValueError(f"Invalid path: {path}")
