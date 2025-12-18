@@ -139,6 +139,37 @@ class RoboTwinEnv(MetaEnv):
         # Initialize episode counter
         self.episode_num = 0
         self._env_initialized = False
+        self._first_episode_done = False
+        
+        # Pre-initialize the first episode's environment BEFORE torch.inference_mode()
+        # This ensures Curobo planner initialization happens with gradients enabled
+        # Subsequent episodes will reuse this task_env to avoid the inference_mode issue
+        _enter_robotwin_context()
+        try:
+            # Find a valid seed for initialization
+            max_init_attempts = 50
+            for init_attempt in range(max_init_attempts):
+                try:
+                    self.task_config['seed'] = self.seed + init_attempt
+                    self.task_config['now_ep_num'] = 0
+                    self.task_env.setup_demo(is_test=True, **self.task_config)
+                    self.task_env.step_lim = self.max_timesteps
+                    self._env_initialized = True
+                    self._first_episode_done = True
+                    self.episode_num = init_attempt
+                    break
+                except Exception as e:
+                    # Try to close and recreate for next attempt
+                    try:
+                        self.task_env.close_env(clear_cache=True)
+                    except:
+                        pass
+                    # Recreate task_env for next attempt
+                    self.task_env = self._create_task_env()
+                    if init_attempt == max_init_attempts - 1:
+                        raise RuntimeError(f"Failed to pre-initialize environment after {max_init_attempts} attempts: {e}")
+        finally:
+            _exit_robotwin_context()
         
         # Calculate action dimension: (left_arm + left_gripper + right_arm + right_gripper)
         self.action_dim = self.left_arm_dim + 1 + self.right_arm_dim + 1
@@ -262,7 +293,21 @@ class RoboTwinEnv(MetaEnv):
         _enter_robotwin_context()
         
         try:
-            # Setup the demo/episode
+            # For first reset() call, the environment is already initialized in __init__
+            # We need to close and re-setup with a fresh seed
+            if self._env_initialized:
+                # Close the previous episode's environment state
+                try:
+                    self.task_env.close_env(clear_cache=False)
+                except:
+                    pass
+            
+            # Note: We do NOT create a new task_env here because Curobo planner
+            # initialization requires gradients, which aren't available in torch.inference_mode()
+            # The task_env was pre-initialized in __init__ with the planner already warmed up
+            # We just call setup_demo to reset the scene with a new seed
+            
+            # Setup the demo/episode with new seed
             self.task_env.setup_demo(is_test=True, **self.task_config)
             
             # Force override step_lim after setup to ensure our max_timesteps is used
@@ -287,21 +332,27 @@ class RoboTwinEnv(MetaEnv):
         """
         # Close previous environment if exists
         if self._env_initialized:
+            _enter_robotwin_context()
             try:
                 self.task_env.close_env()
             except:
                 pass
+            finally:
+                _exit_robotwin_context()
+            self._env_initialized = False
         
         # Try to initialize new episode (may need multiple attempts)
         max_attempts = 10
+        last_error = None
         for attempt in range(max_attempts):
             try:
                 self._init_env_for_episode()
                 break
             except Exception as e:
+                last_error = e
                 self.episode_num += 1
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(f"Failed to initialize environment after {max_attempts} attempts")
+                    raise RuntimeError(f"Failed to initialize environment after {max_attempts} attempts. Last error: {last_error}")
         
         # Get initial observation
         obs_dict = self.task_env.get_obs()

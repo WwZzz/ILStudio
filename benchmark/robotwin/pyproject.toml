@@ -3,7 +3,7 @@ name = "ilstd-robotwin"
 version = "0.1.0"
 description = "robotwin"
 readme = "README.md"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10.19,<3.11"
 
 dependencies = [
     "torch==2.4.1",

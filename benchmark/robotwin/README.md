@@ -21,7 +21,7 @@ MPLIB_LOCATION=$(uv pip show mplib | grep 'Location' | awk '{print $2}')/mplib
 PLANNER=$MPLIB_LOCATION/planner.py
 sed -i -E 's/(if np.linalg.norm\(delta_twist\) < 1e-4 )(or collide )(or not within_joint_limit:)/\1\3/g' $PLANNER
 
-uv pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+uv pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" --no-build-isolation
 cd RoboTwin/envs
 git clone https://github.com/NVlabs/curobo.git
 cd curobo
