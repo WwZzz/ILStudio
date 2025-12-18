@@ -26,7 +26,11 @@ cd RoboTwin/envs
 git clone https://github.com/NVlabs/curobo.git
 cd curobo
 uv pip install -e . --no-build-isolation
-cd ../../../../..
+
+# Download assets
+cd ../..
+bash script/_download_assets.sh
+cd ../../..
 ```
 
 ## Data Collection & Dataset Usage
