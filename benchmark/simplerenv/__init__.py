@@ -16,7 +16,12 @@ class SimplerEnv(MetaEnv):
         self.state_type = getattr(self.config, 'obs_type', 'pose_rpy') # qpos, pose, or pose_rpy
         self.ctrl_type = 'abs'
         self.max_timesteps = getattr(self.config, 'max_timesteps', 200)
+        self.max_timesteps = getattr(self.config, 'max_timesteps', 200)
         env = self.create_env()
+        if "google_robot" in env.robot_uid:
+            self.camera_name = "overhead_camera"
+        elif "widowx" in env.robot_uid:
+            self.camera_name = "3rd_view_camera"
         if "google_robot" in env.robot_uid:
             self.camera_name = "overhead_camera"
         elif "widowx" in env.robot_uid:
@@ -35,16 +40,8 @@ class SimplerEnv(MetaEnv):
         return actions
         
     def obs2meta(self, obs):
-        if self.state_type == 'qpos':
-            state = obs['agent']['qpos']
-        else:
-            eef_pose = obs['extra']['tcp_pose']
-            gripper_qpos = obs['agent']['qpos'][-1:]*2
-            if 'rpy' in self.state_type:
-                eef_pose = self.pose_to_rpy(eef_pose)
-            state = np.concatenate([eef_pose, gripper_qpos])
+        state = obs['agent']['qpos']
         image = np.stack([obs['image'][self.camera_name]['rgb']])
-        image = image.transpose(0, 3, 1, 2)
         return MetaObs(state=state, image=image, raw_lang=self.raw_lang)
 
 
