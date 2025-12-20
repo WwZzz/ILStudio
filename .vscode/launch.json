@@ -20,9 +20,15 @@
                 "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
+            // "args": [
+            //     "-m", "ckpt/act_qpos"
+            // ],
             "args": [
-                "-e", "robotwin_hammer_3cam", "-o", "results/act_1220", "-bs", "0"
+                "-p", "act_aloha", "-t", "robotwin_hammer_3cam_qpos", "-c", "act", "-o", "ckpt/act_qpos_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "1"
             ],
+            // "args": [
+            //     "-e", "robotwin_hammer_3cam_qpos", "-o", "results/actha_qpos1220_v4", "-bs", "0"
+            // ],
             // "args": [
             //     "-m", "__dummy-14random", "-e", "aloha_transfer", "-o", "results/alohatest", "-bs", "0"
             // ],

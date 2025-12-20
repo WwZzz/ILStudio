@@ -119,6 +119,7 @@ class ACTPolicy(PreTrainedModel):
         image = batch_obs['image'].to(device)
         state = batch_obs['qpos'].to(device)
         # Forward pass
+        image = self.normalize(image)
         a_hat, _, (_, _) = self.model(state, image, None)
         return a_hat
 
