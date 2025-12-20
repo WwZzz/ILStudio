@@ -17,7 +17,7 @@ from collections import OrderedDict
 # Base Class Fallback
 # -----------------------------------------------------------------------------
 
-from .base import EpisodicDataset
+from data_utils.datasets.base import EpisodicDataset
 
 # -----------------------------------------------------------------------------
 # RoboTwin Dataset Class
@@ -228,10 +228,10 @@ class RoboTwinDataset(EpisodicDataset):
 
         state = traj_data[start_ts].astype(np.float32)
         
-        if start_ts + 1 < traj_data.shape[0]:
-            action = traj_data[start_ts + 1].astype(np.float32)
-        else:
-            action = np.zeros_like(state)
+        # if start_ts + self.chunk_size < traj_data.shape[0]:
+        action = traj_data[start_ts: start_ts + self.chunk_size].astype(np.float32)
+        # else:
+        #     action = np.zeros_like(state)
 
         images = OrderedDict()
         for cam_name in self.camera_names:
@@ -242,11 +242,11 @@ class RoboTwinDataset(EpisodicDataset):
             else:
                 images[cam_name] = np.zeros((self.image_size[0], self.image_size[1], 3), dtype=np.uint8)
 
-        if not self._preload_data:
-            del self._episode_cache[dataset_path]
+        # if not self._preload_data:
+        #     del self._episode_cache[dataset_path]
 
         return {
-            'action': action[np.newaxis, :], 
+            'action': action, 
             'image': images, 
             'state': state, 
             'language_instruction': language_instruction,
@@ -392,3 +392,26 @@ class RoboTwinDataset(EpisodicDataset):
                 z.extractall(path.parent)
             return extract_dir
         raise ValueError(f"Invalid path: {path}")
+
+if __name__ == "__main__":
+    """
+    datasets:
+  - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
+    name: robotwin_hammer_3cam_v2
+    args:
+      dataset_path: /home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean
+      image_size: [480, 640]  # [H, W] - matching RoboTwin original size
+      chunk_size: 50          # Action chunk length (matching RoboTwin)
+      camera_names:           # All 3 cameras (matching RoboTwin)
+        - head_camera         # Front/overhead camera (cam_high)
+        - left_camera         # Left wrist camera (cam_left_wrist)
+        - right_camera        # Right wrist camera (cam_right_wrist)
+      ctrl_space: ee          # End-effector control
+      ctrl_type: abs          # Absolute control
+      preload_data: false     # Set to true to load all data into RAM
+    """
+    dataset = RoboTwinDataset(dataset_path="/home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean", ctrl_space="ee", ctrl_type="abs", chunk_size=50)
+    d = dataset[100]
+    # # d121 = dataset[121]
+    # # rawd = dataset.load_onestep_from_episode(dataset.dataset_path_list[0], 0)
+    print('ok')

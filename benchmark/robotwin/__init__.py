@@ -9,6 +9,7 @@ import os
 import numpy as np
 import yaml
 import importlib
+import cv2
 from pathlib import Path
 
 # Add RoboTwin to path
@@ -90,6 +91,7 @@ class RoboTwinEnv(MetaEnv):
         self.task_config_name = getattr(config, 'task_config', 'demo_clean')
         self.max_timesteps = config.max_timesteps
         self.ctrl_space = getattr(config, 'ctrl_space', 'qpos')
+        if self.ctrl_space=='joint': self.ctrl_space = 'qpos'
         self.ctrl_type = 'abs'  # RoboTwin only supports absolute control
         self.seed = getattr(config, 'seed', 0)
         self.image_size = getattr(config, 'image_size', [480, 640])
@@ -366,6 +368,58 @@ class RoboTwinEnv(MetaEnv):
         
         return meta_obs
     
+    def _get_joint_state_from_obs(self, obs_dict):
+        """
+        Get joint state from observation dict (uses drive_target, same as training data).
+        
+        This method extracts joint state from obs_dict['joint_action'], which is 
+        populated by get_left_arm_jointState() / get_right_arm_jointState() that
+        read from drive_target. This ensures consistency with training data.
+        
+        Args:
+            obs_dict: Observation dictionary from get_obs()
+            
+        Returns:
+            np.ndarray: Joint state vector [left_arm, left_gripper, right_arm, right_gripper]
+        """
+        joint_action = obs_dict.get('joint_action', {})
+        
+        # Use 'vector' if available (pre-concatenated)
+        if 'vector' in joint_action and joint_action['vector'] is not None:
+            return np.array(joint_action['vector'], dtype=np.float32)
+        
+        # Otherwise construct from individual components
+        left_arm = joint_action.get('left_arm', [])
+        left_gripper = joint_action.get('left_gripper', 0.0)
+        right_arm = joint_action.get('right_arm', [])
+        right_gripper = joint_action.get('right_gripper', 0.0)
+        
+        state = np.array(
+            list(left_arm) + [left_gripper] + list(right_arm) + [right_gripper],
+            dtype=np.float32
+        )
+        return state
+    
+    def _get_real_joint_state(self):
+        """
+        Get real joint positions from robot entity (actual qpos, not drive targets).
+        
+        This is a fallback method that reads actual joint positions from the robot
+        entity, which may differ from drive_target especially after reset.
+        
+        Returns:
+            np.ndarray: Real joint state vector [left_arm, left_gripper, right_arm, right_gripper]
+        """
+        robot = self.task_env.robot
+        
+        # Use get_*_arm_real_jointState() which reads from entity.get_qpos()
+        left_jointstate = robot.get_left_arm_real_jointState()
+        right_jointstate = robot.get_right_arm_real_jointState()
+        
+        # Combine into vector format: [left_arm_joints, left_gripper, right_arm_joints, right_gripper]
+        state = np.array(left_jointstate + right_jointstate, dtype=np.float32)
+        return state
+    
     def obs2meta(self, obs_dict):
         """
         Convert RoboTwin observation to MetaObs format.
@@ -374,8 +428,8 @@ class RoboTwinEnv(MetaEnv):
         {
             'observation': {
                 'head_camera': {'rgb': (H, W, 3)},
-                'left_wrist_camera': {'rgb': (H, W, 3)},
-                'right_wrist_camera': {'rgb': (H, W, 3)},
+                'left_camera': {'rgb': (H, W, 3)},
+                'right_camera': {'rgb': (H, W, 3)},
             },
             'joint_action': {
                 'left_arm': (N,),
@@ -392,6 +446,10 @@ class RoboTwinEnv(MetaEnv):
             }
         }
         
+        IMPORTANT: For qpos control, we use joint_action from obs_dict which uses
+        get_*_arm_jointState() (drive_target). This ensures consistency with training
+        data collected by RoboTwin's data collection pipeline.
+        
         Returns:
             MetaObs with state and images
         """
@@ -404,6 +462,12 @@ class RoboTwinEnv(MetaEnv):
             # RoboTwin's camera keys: 'head_camera', 'left_camera', 'right_camera'
             if cam_name in observation and 'rgb' in observation[cam_name]:
                 img = observation[cam_name]['rgb']  # (H, W, 3) RGB
+                
+                # Resize to target image_size if needed (for consistency with training)
+                target_h, target_w = self.image_size
+                if img.shape[0] != target_h or img.shape[1] != target_w:
+                    img = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+                
                 # Convert to (C, H, W)
                 img = np.transpose(img, (2, 0, 1))
                 images.append(img)
@@ -415,17 +479,22 @@ class RoboTwinEnv(MetaEnv):
         
         # Extract state based on control space
         if self.ctrl_space == 'qpos':
-            # Use joint positions as state
-            joint_action = obs_dict.get('joint_action', {})
-            if 'vector' in joint_action:
-                state = joint_action['vector'].astype(np.float32)
+            # Use joint_action from obs_dict for consistency with training data
+            # Training data uses get_*_arm_jointState() which reads from drive_target
+            state = self._get_joint_state_from_obs(obs_dict)
+            
+            # Fallback to real joint state if obs_dict data is invalid
+            # Check specifically if ARM joints are all zeros (gripper can be 0 or 1)
+            # Format: [left_arm(6), left_gripper(1), right_arm(6), right_gripper(1)]
+            if state is None or len(state) == 0:
+                state = self._get_real_joint_state()
             else:
-                # Fallback: concatenate left and right
-                left_arm = joint_action.get('left_arm', np.array([]))
-                left_gripper = np.array([joint_action.get('left_gripper', 0.0)])
-                right_arm = joint_action.get('right_arm', np.array([]))
-                right_gripper = np.array([joint_action.get('right_gripper', 0.0)])
-                state = np.concatenate([left_arm, left_gripper, right_arm, right_gripper]).astype(np.float32)
+                # Check if arm joints (excluding grippers at index 6 and 13) are all zeros
+                left_arm_zeros = np.allclose(state[:self.left_arm_dim], 0)
+                right_arm_zeros = np.allclose(state[self.left_arm_dim+1:self.left_arm_dim+1+self.right_arm_dim], 0)
+                if left_arm_zeros and right_arm_zeros:
+                    state = self._get_real_joint_state()
+                
         elif self.ctrl_space == 'ee':
             # Use end-effector poses as state
             endpose = obs_dict.get('endpose', {})
@@ -437,9 +506,12 @@ class RoboTwinEnv(MetaEnv):
         else:
             raise ValueError(f"Unsupported ctrl_space: {self.ctrl_space}")
         
+        # Also get real joint state for state_joint field (for debugging/compatibility)
+        real_joint_state = self._get_real_joint_state()
+        
         return MetaObs(
             state=state,
-            state_joint=obs_dict.get('joint_action', {}).get('vector', None),
+            state_joint=real_joint_state,
             state_ee=None,  # RoboTwin doesn't separate ee state cleanly
             image=image,
             raw_lang=getattr(self.task_env, 'instruction', '')

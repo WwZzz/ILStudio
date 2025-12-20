@@ -1,0 +1,23 @@
+# Dataset configuration for RoboTwin hammer task (3 cameras, matching original RoboTwin)
+datasets:
+  - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
+    name: robotwin_hammer_3cam_v2
+    args:
+      dataset_path: /home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean
+      image_size: [480, 640]  # [H, W] - matching RoboTwin original size
+      chunk_size: 50          # Action chunk length (matching RoboTwin)
+      camera_names:           # All 3 cameras (matching RoboTwin)
+        - head_camera         # Front/overhead camera (cam_high)
+        - left_camera         # Left wrist camera (cam_left_wrist)
+        - right_camera        # Right wrist camera (cam_right_wrist)
+      ctrl_space: ee          # End-effector control
+      ctrl_type: abs          # Absolute control
+      preload_data: false     # Set to true to load all data into RAM
+
+# Metadata
+meta:
+  action_dim: 16
+  state_dim: 16
+  action_normalize: zscore
+  state_normalize: zscore
+

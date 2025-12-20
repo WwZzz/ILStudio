@@ -1,0 +1,25 @@
+# Dataset configuration (for training/offline RL)
+datasets:
+  - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
+    name: robotwin_diverse_hammer_clean
+    args:
+      dataset_path: /home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean # Data source
+      image_size: [240, 320]  # [H, W]
+      chunk_size: 16          # Action chunk length for policies like Diffusion Policy
+      camera_names: # Camera selection
+        - head_camera      # Front/overhead camera
+        - left_camera      # Left wrist camera
+        - right_camera     # Right wrist camera
+      ctrl_space: ee      # Joint position control
+      ctrl_type: abs         # Absolute control
+      preload_data: false    # Set to true to load all data into RAM
+
+# Metadata
+meta:
+  action_dim: 16
+  state_dim: 16
+  action_normalize: zscore
+  state_normalize: zscore
+
+
+

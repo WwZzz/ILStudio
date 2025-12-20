@@ -20,12 +20,15 @@
                 "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
+            "args": [
+                "-e", "robotwin_hammer_3cam", "-o", "results/act_1220", "-bs", "0"
+            ],
             // "args": [
             //     "-m", "__dummy-14random", "-e", "aloha_transfer", "-o", "results/alohatest", "-bs", "0"
             // ],
-            "args": [
-                "-m", "__dummy-7random", "-e", "simplerenv_widowx_spoon", "-o", "results/simtest", "-bs", "0"
-            ],
+            // "args": [
+            //     "-m", "__dummy-7random", "-e", "simplerenv_widowx_spoon", "-o", "results/simtest", "-bs", "0"
+            // ],
             // "args": [
             //     "-p", "act", "-t", "libero_obj0", "-c", "act", "-o", "ckpt/debug_eval243asd", "--training.eval_steps", "10", "--training.do_eval", "true", "--training.eval_strategy", "steps", "--training.max_steps", "50", "--eval_ratio", "0.01"
             // ]

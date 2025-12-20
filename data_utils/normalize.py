@@ -184,17 +184,14 @@ class BaseNormalizer:
         cache_path = os.path.join(self.cache_dir, self.stats_filename)
         if os.path.exists(cache_path):
             return True
-        else:
-            return False
         
-        # # Backward compatibility: check in dataset_dir if it exists
-        # if self.dataset_dir:
-        #     old_path = os.path.join(self.dataset_dir, self.stats_filename)
-        #     old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
-        #     if os.path.exists(old_path) or os.path.exists(old_path_alt):
-        #         return True
+        # Backward compatibility: check in dataset_dir if it exists
+        if self.dataset_dir:
+            old_path = os.path.join(self.dataset_dir, self.stats_filename)
+            if os.path.exists(old_path):
+                return True
         
-        # return False
+        return False
 
     def compute_stats_for_array(self, data_k):
         return {
@@ -477,11 +474,9 @@ class BaseNormalizer:
         # Try cache directory first (new format)
         stats_path = os.path.join(self.cache_dir, self.stats_filename)
         
-        # if not os.path.exists(stats_path) and self.dataset_dir:
-        #     # Backward compatibility: try dataset_dir
-        #     stats_path = os.path.join(self.dataset_dir, self.stats_filename)
-        #     if not os.path.exists(stats_path):
-        #         stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        if not os.path.exists(stats_path) and self.dataset_dir:
+            # Backward compatibility: try dataset_dir
+            stats_path = os.path.join(self.dataset_dir, self.stats_filename)
         
         if not os.path.exists(stats_path):
             raise FileNotFoundError(

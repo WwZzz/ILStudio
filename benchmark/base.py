@@ -189,7 +189,7 @@ class MetaPolicy:
         if hasattr(self.policy, 'act2meta'):
             mact = self.policy.act2meta(action, ctrl_space=ctrl_space, ctrl_type=ctrl_type)
         else:
-            if isinstance(action, torch.Tensor): action = action.float().cpu().numpy()
+            if isinstance(action, torch.Tensor): action = action.detach().float().cpu().numpy()
             mact = MetaAction(action=action, ctrl_space=ctrl_space, ctrl_type=ctrl_type) # (B, chunk_size, dim) or (chunk_size, dim)
         return mact 
     
@@ -284,6 +284,7 @@ class MetaPolicy:
             macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
         else:
             macts.action = macts.action[np.newaxis, :]
+        print(macts.action)
         mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
         # Only truncate if chunk_size is a positive number
         # chunk_size=-1 means use all actions

@@ -8,9 +8,9 @@
 #     -e robotwin_pick_bottles -m <model> --batch_size 0
 
 type: benchmark.robotwin.RoboTwinEnv
-name: robotwin_pick_diverse_bottles
+name: robotwin_beat_block_hammer
 args:
-  task: pick_diverse_bottles  # Task class name (matches Python file)
+  task: beat_block_hammer  # Task class name (matches Python file)
   task_config: demo_clean     # 'demo_clean' or 'demo_randomized'
   max_timesteps: 400         # Maximum steps per episode (RoboTwin default for this task)
   ctrl_space: ee            # 'qpos' or 'ee'
@@ -26,7 +26,7 @@ args:
     - head_camera             # Fixed overhead camera (required)
     # - left_camera           # Uncomment to enable left arm wrist camera
     # - right_camera          # Uncomment to enable right arm wrist camera
-  image_size: [480, 640]      # [H, W] for cameras
+  image_size: [240, 320]      # [H, W] for cameras
   
   # Robot Embodiment Configuration (optional)
   # If not specified, uses embodiment from task_config YAML (default: aloha-agilex)
