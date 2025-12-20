@@ -411,7 +411,8 @@ if __name__ == "__main__":
       preload_data: false     # Set to true to load all data into RAM
     """
     dataset = RoboTwinDataset(dataset_path="/home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean", ctrl_space="joint", ctrl_type="abs", chunk_size=50)
-    d = dataset[100]
+    d0 = dataset[0]
+    d100 = dataset[100]
     # # d121 = dataset[121]
     # # rawd = dataset.load_onestep_from_episode(dataset.dataset_path_list[0], 0)
     print('ok')

@@ -118,11 +118,6 @@ class ACTPolicy(PreTrainedModel):
         device = next(self.parameters()).device
         image = batch_obs['image'].to(device)
         state = batch_obs['qpos'].to(device)
-        # Convert image to float [0, 1] if needed (same as data_utils.py in training)
-        if image.dtype == torch.uint8 or image.max() > 1.0:
-            image = image.float() / 255.0
-        # Normalize image (ACT-specific ImageNet normalization)
-        image = self.normalize(image)
         # Forward pass
         a_hat, _, (_, _) = self.model(state, image, None)
         return a_hat
