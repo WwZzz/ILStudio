@@ -333,7 +333,7 @@ class RoboTwinDataset(EpisodicDataset):
     # Download & Extract Helpers
     # ============================================================================
     def _download_and_extract_hf(self, dataset_name):
-        # 修正点：在 HF_ENDPOINT 后加上 /datasets/
+        # Note: Append /datasets/ to HF_ENDPOINT
         url = f"{self.HF_ENDPOINT}/datasets/{self.HF_REPO_ID}/resolve/main/dataset/{dataset_name}.zip"
         
         download_path = self.CACHE_DIR / f"{dataset_name}.zip"
@@ -348,7 +348,7 @@ class RoboTwinDataset(EpisodicDataset):
         if not download_path.exists():
             logger.info(f"Downloading {url}...")
             
-            # --- Auth Token 处理 ---
+            # --- Auth Token handling ---
             hf_token = os.getenv("HF_TOKEN")
             headers = {}
             if hf_token:
@@ -356,7 +356,7 @@ class RoboTwinDataset(EpisodicDataset):
             # ---------------------
 
             try:
-                # 显式允许重定向 (allow_redirects=True 是默认的，但显式写出更安全)
+                # Explicitly allow redirects (allow_redirects=True is default, but explicit for safety)
                 resp = requests.get(url, stream=True, headers=headers, allow_redirects=True)
                 
                 if resp.status_code == 401:
@@ -368,7 +368,7 @@ class RoboTwinDataset(EpisodicDataset):
                     for chunk in tqdm(resp.iter_content(8192), total=total//8192, unit='KB'):
                         f.write(chunk)
             except Exception as e:
-                logger.error(f"Download error for URL: {url}") # 打印出 URL 方便调试
+                logger.error(f"Download error for URL: {url}")  # Print URL for debugging
                 if download_path.exists(): download_path.unlink()
                 raise e
 
@@ -410,7 +410,7 @@ if __name__ == "__main__":
       ctrl_type: abs          # Absolute control
       preload_data: false     # Set to true to load all data into RAM
     """
-    dataset = RoboTwinDataset(dataset_path="/home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean", ctrl_space="ee", ctrl_type="abs", chunk_size=50)
+    dataset = RoboTwinDataset(dataset_path="/home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean", ctrl_space="joint", ctrl_type="abs", chunk_size=50)
     d = dataset[100]
     # # d121 = dataset[121]
     # # rawd = dataset.load_onestep_from_episode(dataset.dataset_path_list[0], 0)

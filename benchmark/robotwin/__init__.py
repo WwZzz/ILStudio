@@ -400,26 +400,6 @@ class RoboTwinEnv(MetaEnv):
         )
         return state
     
-    def _get_real_joint_state(self):
-        """
-        Get real joint positions from robot entity (actual qpos, not drive targets).
-        
-        This is a fallback method that reads actual joint positions from the robot
-        entity, which may differ from drive_target especially after reset.
-        
-        Returns:
-            np.ndarray: Real joint state vector [left_arm, left_gripper, right_arm, right_gripper]
-        """
-        robot = self.task_env.robot
-        
-        # Use get_*_arm_real_jointState() which reads from entity.get_qpos()
-        left_jointstate = robot.get_left_arm_real_jointState()
-        right_jointstate = robot.get_right_arm_real_jointState()
-        
-        # Combine into vector format: [left_arm_joints, left_gripper, right_arm_joints, right_gripper]
-        state = np.array(left_jointstate + right_jointstate, dtype=np.float32)
-        return state
-    
     def obs2meta(self, obs_dict):
         """
         Convert RoboTwin observation to MetaObs format.
@@ -482,18 +462,6 @@ class RoboTwinEnv(MetaEnv):
             # Use joint_action from obs_dict for consistency with training data
             # Training data uses get_*_arm_jointState() which reads from drive_target
             state = self._get_joint_state_from_obs(obs_dict)
-            
-            # Fallback to real joint state if obs_dict data is invalid
-            # Check specifically if ARM joints are all zeros (gripper can be 0 or 1)
-            # Format: [left_arm(6), left_gripper(1), right_arm(6), right_gripper(1)]
-            if state is None or len(state) == 0:
-                state = self._get_real_joint_state()
-            else:
-                # Check if arm joints (excluding grippers at index 6 and 13) are all zeros
-                left_arm_zeros = np.allclose(state[:self.left_arm_dim], 0)
-                right_arm_zeros = np.allclose(state[self.left_arm_dim+1:self.left_arm_dim+1+self.right_arm_dim], 0)
-                if left_arm_zeros and right_arm_zeros:
-                    state = self._get_real_joint_state()
                 
         elif self.ctrl_space == 'ee':
             # Use end-effector poses as state
@@ -507,12 +475,9 @@ class RoboTwinEnv(MetaEnv):
             raise ValueError(f"Unsupported ctrl_space: {self.ctrl_space}")
         
         # Also get real joint state for state_joint field (for debugging/compatibility)
-        real_joint_state = self._get_real_joint_state()
         
         return MetaObs(
             state=state,
-            state_joint=real_joint_state,
-            state_ee=None,  # RoboTwin doesn't separate ee state cleanly
             image=image,
             raw_lang=getattr(self.task_env, 'instruction', '')
         )
