@@ -306,12 +306,12 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_training and is_distributed() else None
         
         generator = None
-        if is_training and sampler is None:  # 只在没有 sampler 且需要 shuffle 时使用
+        if is_training and sampler is None:  
             seed = getattr(args, 'seed', 0)
             generator = torch.Generator()
             generator.manual_seed(seed)
         
-        # Worker 初始化函数（确保每个 worker 有不同但确定的种子）
+        # Worker init func
         def worker_init_fn(worker_id):
             import random
             seed = getattr(args, 'seed', 0)
