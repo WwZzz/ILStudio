@@ -15,7 +15,8 @@ def load_model(args):
             action_dim=args.action_dim, 
             state_dim = args.state_dim, 
             chunk_size = args.chunk_size,
-            clip_sample = args.clip_sample,
+            clip_sample = args.model_args.get('clip_sample', True),
+            clip_sample_range = args.model_args.get('clip_sample_range', 1.0),
         ) 
         model = DiffusionPolicyModel(config=config)
     else:
