@@ -35,6 +35,7 @@ class DiffusionPolicyConfig(PretrainedConfig):
         beta_schedule='squaredcos_cap_v2',
         # variance_type='fixed_small', # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
         clip_sample=True, # required when predict_epsilon=False
+        clip_sample_range=1.0,
         prediction_type='epsilon', # or sample
         **kwargs
     ):
@@ -55,6 +56,7 @@ class DiffusionPolicyConfig(PretrainedConfig):
         self.beta_schedule = beta_schedule
         # self.variance_type = variance_type
         self.clip_sample = clip_sample
+        self.clip_sample_range = clip_sample_range
         self.prediction_type = prediction_type
 
 # Converted model
@@ -120,6 +122,7 @@ class DiffusionPolicyModel(PreTrainedModel):
             beta_schedule=self.config.beta_schedule,
             # variance_type=self.config.variance_type,
             clip_sample=self.config.clip_sample,
+            clip_sample_range=self.config.clip_sample_range,
             set_alpha_to_one=True,
             steps_offset=0,
             prediction_type=self.config.prediction_type,
