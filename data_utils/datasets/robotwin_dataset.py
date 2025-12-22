@@ -267,23 +267,11 @@ class RoboTwinDataset(EpisodicDataset):
         traj_raw, image_bytes_dict = self._load_hdf5(dataset_path)
         traj_raw = traj_raw.astype(np.float32)
 
-        if 'state' in feats or 'action' in feats or len(feats) == 0:
-            if 'state' in feats or len(feats) == 0:
-                data_dict['state'] = traj_raw
+        if 'state' in feats or len(feats) == 0:
+            data_dict['state'] = traj_raw
 
         if 'action' in feats or len(feats) == 0:
-            next_state = np.zeros_like(traj_raw)
-            next_state[:-1] = traj_raw[1:]
-            next_state[-1] = traj_raw[-1]
-            
-            if self.ctrl_type == 'delta':
-                action = next_state - traj_raw
-            elif self.ctrl_type == 'abs':
-                action = next_state
-            else:
-                raise NotImplementedError(f"ctrl_type '{self.ctrl_type}' not implemented")
-            
-            data_dict['action'] = action
+            data_dict['action'] = traj_raw
 
         if 'image' in feats or 'image_wrist' in feats or len(feats) == 0:
             loaded_images = {}

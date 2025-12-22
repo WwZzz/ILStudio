@@ -1,7 +1,7 @@
 # Dataset configuration for RoboTwin hammer task (3 cameras, matching original RoboTwin)
 datasets:
   - type: data_utils.datasets.robotwin_dataset.RoboTwinDataset
-    name: robotwin_hammer_3cam_qpos_v2
+    name: robotwin_hammer_3cam_qpos_v1222
     args:
       dataset_path: /home/wz/Code/ILStudio/benchmark/robotwin/RoboTwin/data/beat_block_hammer/demo_clean
       image_size: [480, 640]  # [H, W] - matching RoboTwin original size
