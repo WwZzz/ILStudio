@@ -237,7 +237,7 @@ class RoboTwinDataset(EpisodicDataset):
         for cam_name in self.camera_names:
             if cam_name in image_dict and len(image_dict[cam_name]) > start_ts:
                 img = cv2.imdecode(np.frombuffer(image_dict[cam_name][start_ts], np.uint8), cv2.IMREAD_COLOR)
-                img = cv2.resize(img, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
+                img = cv2.resize(img, (self.image_size[1], self.image_size[0]))
                 images[cam_name] = img 
             else:
                 images[cam_name] = np.zeros((self.image_size[0], self.image_size[1], 3), dtype=np.uint8)

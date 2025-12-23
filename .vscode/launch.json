@@ -24,7 +24,7 @@
             //     "-p", "act", "-t", "sim_transfer_cube_scripted", "-c", "act", "-o", "ckpt/act_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "1"
             // ],
             // "args": [
-            //     "-m", "ckpt/act_qpos"
+            //     "-m", "ckpt/act_qpos_v2/checkpoint-20000"
             // ],
             "args": [
                 "-p", "act_aloha", "-t", "robotwin_hammer_3cam_qpos", "-c", "act", "-o", "ckpt/act_qpos_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "8", "--eval_ratio", "0.05"

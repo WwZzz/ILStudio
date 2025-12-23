@@ -15,7 +15,7 @@ from pathlib import Path
 # Add RoboTwin to path
 ROBOTWIN_ROOT = os.path.join(os.path.dirname(__file__), 'RoboTwin')
 ROBOTWIN_ROOT = os.path.abspath(ROBOTWIN_ROOT)
-
+GLOBAL_EPISODE_NUM = 0
 # Change to RoboTwin directory for relative path resolution
 _original_cwd = None
 
@@ -139,7 +139,7 @@ class RoboTwinEnv(MetaEnv):
             _exit_robotwin_context()
         
         # Initialize episode counter
-        self.episode_num = 0
+        self.episode_num = GLOBAL_EPISODE_NUM
         self._env_initialized = False
         self._first_episode_done = False
         
@@ -288,8 +288,10 @@ class RoboTwinEnv(MetaEnv):
     def _init_env_for_episode(self):
         """Initialize environment for a new episode."""
         # Update seed for this episode
-        self.task_config['seed'] = self.seed + self.episode_num
+        self.task_config['seed'] = self.seed + np.random.randint(0, 1000000)
         self.task_config['now_ep_num'] = self.episode_num
+        global GLOBAL_EPISODE_NUM
+        GLOBAL_EPISODE_NUM += 1
         
         # Change to RoboTwin directory for episode setup
         _enter_robotwin_context()
@@ -342,7 +344,6 @@ class RoboTwinEnv(MetaEnv):
             finally:
                 _exit_robotwin_context()
             self._env_initialized = False
-        
         # Try to initialize new episode (may need multiple attempts)
         max_attempts = 10
         last_error = None
@@ -352,7 +353,6 @@ class RoboTwinEnv(MetaEnv):
                 break
             except Exception as e:
                 last_error = e
-                self.episode_num += 1
                 if attempt == max_attempts - 1:
                     raise RuntimeError(f"Failed to initialize environment after {max_attempts} attempts. Last error: {last_error}")
         
@@ -446,7 +446,7 @@ class RoboTwinEnv(MetaEnv):
                 # Resize to target image_size if needed (for consistency with training)
                 target_h, target_w = self.image_size
                 if img.shape[0] != target_h or img.shape[1] != target_w:
-                    img = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+                    img = cv2.resize(img, (target_w, target_h))
                 
                 # Convert to (C, H, W)
                 img = np.transpose(img, (2, 0, 1))
