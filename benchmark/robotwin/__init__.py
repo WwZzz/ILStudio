@@ -35,6 +35,22 @@ sys.path.insert(0, ROBOTWIN_ROOT)
 sys.path.insert(0, os.path.join(ROBOTWIN_ROOT, 'policy'))
 sys.path.insert(0, os.path.join(ROBOTWIN_ROOT, 'description/utils'))
 
+# RoboTwin imports are done lazily in _enter_robotwin_context to avoid path issues
+# These will be set when first needed
+_UnStableError = None
+_generate_episode_descriptions = None
+
+def _ensure_robotwin_imports():
+    """Lazily import RoboTwin utilities that require being in RoboTwin directory."""
+    global _UnStableError, _generate_episode_descriptions
+    if _UnStableError is None:
+        from envs.utils.create_actor import UnStableError
+        _UnStableError = UnStableError
+    if _generate_episode_descriptions is None:
+        from generate_episode_instructions import generate_episode_descriptions
+        _generate_episode_descriptions = generate_episode_descriptions
+    return _UnStableError, _generate_episode_descriptions
+
 from ..base import MetaEnv, MetaObs, MetaAction
 
 
@@ -100,6 +116,13 @@ class RoboTwinEnv(MetaEnv):
         # Robot embodiment configuration (optional override)
         # If not specified, will use embodiment from task_config YAML
         self.embodiment = getattr(config, 'embodiment', None)
+        
+        # Expert check: run play_once() to verify seed produces a solvable episode
+        # If expert fails, skip to next seed (same as RoboTwin's eval_policy.py)
+        self.expert_check = getattr(config, 'expert_check', True)
+        
+        # Instruction type for language instructions ('seen' or 'unseen')
+        self.instruction_type = getattr(config, 'instruction_type', 'seen')
         
         # Planner configuration
         # use_planner=False: Skip planner initialization (faster, no GPU required)
@@ -285,12 +308,16 @@ class RoboTwinEnv(MetaEnv):
         except Exception as e:
             raise ValueError(f"Failed to load task '{self.task_name}': {e}")
     
-    def _init_env_for_episode(self):
-        """Initialize environment for a new episode."""
+    def _init_env_for_episode(self, seed_offset=0):
+        """
+        Initialize environment for a new episode.
+        
+        Args:
+            seed_offset: Additional offset to add to seed (used when retrying with expert_check)
+        """
         # Update seed for this episode
         global GLOBAL_EPISODE_NUM
-        self.task_config['seed'] = self.seed + GLOBAL_EPISODE_NUM
-        GLOBAL_EPISODE_NUM += 1
+        self.task_config['seed'] = self.seed + GLOBAL_EPISODE_NUM + seed_offset
         self.task_config['now_ep_num'] = GLOBAL_EPISODE_NUM
 
         # Change to RoboTwin directory for episode setup
@@ -312,7 +339,7 @@ class RoboTwinEnv(MetaEnv):
             # We just call setup_demo to reset the scene with a new seed
             
             # Setup the demo/episode with new seed
-            print(self.task_config)
+            # print(self.task_config)
             self.task_config['eval_mode'] = True
             self.task_env.setup_demo(is_test=True, **self.task_config)
             
@@ -329,13 +356,128 @@ class RoboTwinEnv(MetaEnv):
             # Restore original directory
             _exit_robotwin_context()
     
+    def _run_expert_check(self, seed_offset=0):
+        """
+        Run expert check to verify if the current seed produces a solvable episode.
+        
+        This mimics RoboTwin's expert_check logic in eval_policy.py:
+        1. Setup environment with current seed (no rendering)
+        2. Run play_once() to execute expert trajectory
+        3. Check if plan_success and check_success() both pass
+        4. Return True if solvable, False otherwise (with episode_info for instruction)
+        
+        Args:
+            seed_offset: Additional offset to add to seed
+            
+        Returns:
+            tuple: (success: bool, episode_info: dict or None)
+        """
+        _enter_robotwin_context()
+        
+        try:
+            # Ensure imports are available
+            UnStableError, _ = _ensure_robotwin_imports()
+            
+            # Close previous environment if initialized
+            if self._env_initialized:
+                try:
+                    self.task_env.close_env(clear_cache=False)
+                except:
+                    pass
+                self._env_initialized = False
+            
+            # Setup with no rendering for expert check (faster)
+            global GLOBAL_EPISODE_NUM
+            self.task_config['seed'] = self.seed + GLOBAL_EPISODE_NUM + seed_offset
+            self.task_config['now_ep_num'] = GLOBAL_EPISODE_NUM
+            original_render_freq = self.task_config.get('render_freq', 0)
+            self.task_config['render_freq'] = 0  # Disable rendering for expert check
+            self.task_config['eval_mode'] = True
+            
+            try:
+                self.task_env.setup_demo(is_test=True, **self.task_config)
+                episode_info = self.task_env.play_once()
+                self.task_env.close_env(clear_cache=False)
+            except UnStableError as e:
+                # Unstable object placement - seed is invalid
+                try:
+                    self.task_env.close_env(clear_cache=False)
+                except:
+                    pass
+                self.task_config['render_freq'] = original_render_freq
+                return False, None
+            except Exception as e:
+                # Other errors - seed is invalid
+                try:
+                    self.task_env.close_env(clear_cache=False)
+                except:
+                    pass
+                self.task_config['render_freq'] = original_render_freq
+                print(f"Expert check error at seed offset {seed_offset}: {e}")
+                return False, None
+            
+            # Restore render_freq
+            self.task_config['render_freq'] = original_render_freq
+            
+            # Check if expert succeeded
+            if self.task_env.plan_success and self.task_env.check_success():
+                return True, episode_info
+            else:
+                return False, None
+                
+        finally:
+            _exit_robotwin_context()
+    
+    def _generate_instruction(self, episode_info):
+        """
+        Generate language instruction for the episode using RoboTwin's instruction generator.
+        
+        Args:
+            episode_info: Episode info dict from play_once() containing placeholders
+            
+        Returns:
+            str: Generated instruction text
+        """
+        if episode_info is None:
+            return None
+        
+        _enter_robotwin_context()
+        try:
+            # Ensure imports are available
+            _, generate_episode_descriptions = _ensure_robotwin_imports()
+            
+            episode_info_list = [episode_info.get("info", {})]
+            results = generate_episode_descriptions(
+                self.task_config['task_name'], 
+                episode_info_list, 
+                max_descriptions=100
+            )
+            
+            if results and len(results) > 0 and self.instruction_type in results[0]:
+                instructions = results[0][self.instruction_type]
+                if instructions:
+                    return np.random.choice(instructions)
+            return None
+        except Exception as e:
+            print(f"Failed to generate instruction: {e}")
+            return None
+        finally:
+            _exit_robotwin_context()
+    
     def reset(self):
         """
         Reset environment and return initial observation.
         
+        If expert_check is enabled (default), this method will:
+        1. Try seeds until finding one where expert trajectory succeeds
+        2. Generate language instruction from the successful expert's episode info
+        3. Setup the environment with that seed for policy evaluation
+        
         Returns:
             MetaObs: Initial observation in ILStudio format
         """
+        global GLOBAL_EPISODE_NUM
+        
         # Close previous environment if exists
         if self._env_initialized:
             _enter_robotwin_context()
@@ -346,17 +488,48 @@ class RoboTwinEnv(MetaEnv):
             finally:
                 _exit_robotwin_context()
             self._env_initialized = False
-        # Try to initialize new episode (may need multiple attempts)
-        max_attempts = 10
+        
+        max_attempts = 50  # Maximum seeds to try
+        seed_offset = 0
+        episode_info = None
+        
+        if self.expert_check:
+            # Expert check mode: find a seed where expert succeeds
+            while seed_offset < max_attempts:
+                success, episode_info = self._run_expert_check(seed_offset)
+                if success:
+                    # Found a valid seed, now setup for actual evaluation
+                    break
+                seed_offset += 1
+            
+            if seed_offset >= max_attempts:
+                raise RuntimeError(f"Failed to find valid seed after {max_attempts} attempts with expert_check")
+        
+        # Initialize environment for the selected seed
         last_error = None
-        for attempt in range(max_attempts):
+        for attempt in range(10):
             try:
-                self._init_env_for_episode()
+                self._init_env_for_episode(seed_offset)
                 break
             except Exception as e:
                 last_error = e
-                if attempt == max_attempts - 1:
-                    raise RuntimeError(f"Failed to initialize environment after {max_attempts} attempts. Last error: {last_error}")
+                seed_offset += 1  # Try next seed
+                if attempt == 9:
+                    raise RuntimeError(f"Failed to initialize environment after 10 attempts. Last error: {last_error}")
+        
+        # Update global episode number now that we have a valid episode
+        GLOBAL_EPISODE_NUM += 1 + seed_offset
+        
+        # Generate and set instruction if episode_info available
+        if episode_info is not None:
+            instruction = self._generate_instruction(episode_info)
+            if instruction is not None:
+                _enter_robotwin_context()
+                try:
+                    self.task_env.set_instruction(instruction=instruction)
+                    print(f"[RoboTwin] Instruction: {instruction}")
+                finally:
+                    _exit_robotwin_context()
         
         # Get initial observation
         obs_dict = self.task_env.get_obs()
