@@ -166,7 +166,7 @@ python start_teleop_recorder.py -c so101_follower
 - robomimic
 - simplerenv
 - robotwin
-- rlbench (Under Testing)
+- rlbench 
 - calvin (Under Testing)
 
 ## 🦾 Robot Gallery
@@ -242,3 +242,5 @@ This repo is built on the open source codebases below. Thanks to the authors' wo
 - [DiVLA](https://diffusion-vla.github.io/)
 
 - [RoboTwin](https://robotwin-platform.github.io)
+
+- [RLBench](https://github.com/stepjam/RLBench/)
