@@ -27,12 +27,16 @@ if 'COPPELIASIM_ROOT' in os.environ:
 
 import numpy as np
 from rlbench.action_modes.action_mode import MoveArmThenGripper
-from rlbench.action_modes.arm_action_modes import JointVelocity, EndEffectorPoseViaPlanning
+from rlbench.action_modes.arm_action_modes import JointPosition, EndEffectorPoseViaPlanning, JointVelocity, EndEffectorPoseViaIK
 from rlbench.action_modes.gripper_action_modes import Discrete
 from rlbench.environment import Environment
 from rlbench.observation_config import ObservationConfig
 from ..base import MetaEnv, MetaObs, MetaAction
 import importlib
+import time
+
+# Track active environment instance to ensure proper cleanup
+_active_env = None
 
 
 def create_env(config):
@@ -41,6 +45,9 @@ def create_env(config):
     
     IMPORTANT: RLBench does NOT support parallel execution (SubprocVectorEnv)
     because CoppeliaSim cannot safely run in multiple processes.
+    
+    This function reuses the same environment instance to avoid OpenGL context
+    issues when creating multiple environments in the same process.
     
     When using eval_sim.py, always use --batch_size 0 to force sequential mode:
         python eval_sim.py -e rlbench_reach -m <model> --batch_size 0
@@ -67,7 +74,16 @@ def create_env(config):
             stacklevel=2
         )
     
-    return RLBenchEnv(config)
+    # Reuse existing environment to avoid CoppeliaSim/OpenGL context issues
+    # CoppeliaSim cannot properly reinitialize OpenGL after shutdown in the same process
+    global _active_env
+    if _active_env is not None and not getattr(_active_env, '_force_closed', False):
+        # Reuse existing environment - just return it, reset() will be called by caller
+        return _active_env
+    
+    env = RLBenchEnv(config)
+    _active_env = env
+    return env
 
 
 class RLBenchEnv(MetaEnv):
@@ -119,7 +135,8 @@ class RLBenchEnv(MetaEnv):
         
         # Configure action mode based on ctrl_space
         if self.ctrl_space == 'joint':
-            arm_action_mode = JointVelocity()
+            # arm_action_mode = JointVelocity()
+            arm_action_mode = JointPosition()
         elif self.ctrl_space == 'ee':
             arm_action_mode = EndEffectorPoseViaPlanning()
         else:
@@ -299,9 +316,43 @@ class RLBenchEnv(MetaEnv):
         return meta_obs
     
     def close(self):
-        """Close the environment."""
+        """
+        Close the environment.
+        
+        NOTE: This is a no-op to allow environment reuse across rollouts.
+        CoppeliaSim has issues with shutdown/restart in the same process.
+        Real cleanup happens in __del__ or when force_close() is called.
+        """
+        # Don't actually close - just mark as "closed" for the caller
+        # but keep CoppeliaSim running to avoid OpenGL context issues
+        pass
+    
+    def force_close(self):
+        """Force close the environment - only call at program exit."""
+        if hasattr(self, '_force_closed') and self._force_closed:
+            return
+        
+        self._force_closed = True
+        
+        global _active_env
+        if _active_env is self:
+            _active_env = None
+        
         if self.rlbench_env is not None:
-            self.rlbench_env.shutdown()
+            try:
+                self.rlbench_env.shutdown()
+            except Exception:
+                pass
+            finally:
+                self.rlbench_env = None
+                self.task = None
+    
+    def __del__(self):
+        """Ensure clean shutdown when object is garbage collected."""
+        try:
+            self.force_close()
+        except:
+            pass
     
     def get_action_dim(self):
         """Return action dimension."""

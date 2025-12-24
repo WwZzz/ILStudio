@@ -34,6 +34,48 @@ python eval_sim.py -e rlbench_pick -m <model_path> --batch_size 0
 python eval_sim.py -e rlbench_reach -m <model_path> --batch_size 0 --num_rollout 10
 ```
 
+## Dataset Generation
+
+Generate HDF5 datasets for training using the built-in demo collection:
+
+```bash
+# Generate 50 demos for ReachTarget task
+python benchmark/rlbench/generate_dataset.py \
+    --env_config configs/env/rlbench_reach.yaml \
+    --output_dir data/rlbench/reach_target \
+    --num_demos 50
+
+# Generate demos for other tasks (create corresponding env config first)
+python benchmark/rlbench/generate_dataset.py \
+    --env_config configs/env/rlbench_pick.yaml \
+    --output_dir data/rlbench/pick_and_lift \
+    --num_demos 100
+```
+
+### Generated Data Format
+
+Each episode is saved as an HDF5 file with the following structure:
+- `/action`: Action sequence (T, 8) - depends on ctrl_space
+- `/state`: State sequence (T, 8) - depends on ctrl_space
+- `/observations/joint_positions`: (T, 7)
+- `/observations/joint_velocities`: (T, 7)
+- `/observations/gripper_pose`: (T, 7)
+- `/observations/gripper_open`: (T, 1)
+- `/observations/images/front`: (T, H, W, 3)
+- `/observations/images/wrist`: (T, H, W, 3)
+- `/language_instruction`: Task descriptions
+- `/episode_len`: Episode length
+
+### Training with Generated Data
+
+```bash
+# Train ACT policy
+python train.py --policy act --task rlbench_reach --output_dir ckpt/act_rlbench_reach
+
+# Train Diffusion Policy
+python train.py --policy diffusion_policy --task rlbench_reach --output_dir ckpt/dp_rlbench_reach
+```
+
 ## Available Tasks
 
 Create config files for other RLBench tasks:
@@ -44,3 +86,13 @@ Create config files for other RLBench tasks:
 
 See full list: https://github.com/stepjam/RLBench/tree/master/rlbench/tasks
 
+# TroubleShooting 
+
+## Headless Server 
+```shell
+nohup X :99 & disown
+export DISPLAY=:99
+export COPPELIASIM_ROOT=${HOME}/CoppeliaSim
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT
+export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT
+```

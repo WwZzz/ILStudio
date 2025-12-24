@@ -72,37 +72,9 @@ datasets:
 **Cache Location**:
 Downloaded data will be cached in `~/.cache/ilstudio/robotwin`. Original data is NOT copied or converted - only metadata is cached for efficiency.
 
-### `RoboTwinDataset` Real-Time Processing
+### Generate data locally
 
-`RoboTwinDataset` directly loads RoboTwin's raw HDF5 demonstration format and converts to ILStudio's standard `sample` dictionary format (as defined in `.cursor/rules/data-rule.mdc`) **on-the-fly** without intermediate processing steps. It performs:
 
-1. **Raw HDF5 Loading**: Reads `.hdf5` files directly from:
-   - **Joint Actions**: `/joint_action/left_arm`, `/joint_action/left_gripper`, `/joint_action/right_arm`, `/joint_action/right_gripper`
-   - **Images**: `/observation/{camera_name}/rgb` (encoded as JPEG bytes)
-
-2. **Dynamic Dimension Inference**: Automatically detects action/state dimensions from the first episode:
-   - For aloha-agilex: 6 left joints + 1 left gripper + 6 right joints + 1 right gripper = 14
-   - Adapts to different robot types (fewer joints = smaller dimensions)
-
-3. **Real-Time Image Decoding**: On-demand JPEG decoding using `cv2.imdecode` and resizing to configured `image_size`
-
-4. **State & Action Formatting**: Concatenates left/right arm and gripper states into a single `qpos` vector
-
-5. **Efficient Caching**: Loaded episodes are cached in memory (`_episode_cache`) to avoid reloading for multiple timesteps
-
-**Benefits**:
-- ✅ No intermediate data conversion step needed
-- ✅ Lower disk space requirements (uses original HDF5 files)
-- ✅ Adapts automatically to different robot types and DOF
-- ✅ On-demand processing (memory efficient when not using `preload_data`)
-
-**Note**: RoboTwin's raw data does not contain language instructions. The `raw_lang` field will be an empty string for all frames.
-
-- 🤖 **Dual-arm manipulation**: Coordinated bimanual control
-- 🎯 **50 diverse tasks**: Pick, place, stack, open, close, etc.
-- 📷 **Rich observations**: RGB, depth, point cloud, segmentation
-- 🎲 **Domain randomization**: Background, lighting, table height
-- 🔧 **Flexible control**: Joint space (qpos) or end-effector (ee) control
 
 ## Usage with ILStudio
 
