@@ -288,11 +288,11 @@ class RoboTwinEnv(MetaEnv):
     def _init_env_for_episode(self):
         """Initialize environment for a new episode."""
         # Update seed for this episode
-        self.task_config['seed'] = self.seed + np.random.randint(0, 1000000)
-        self.task_config['now_ep_num'] = self.episode_num
         global GLOBAL_EPISODE_NUM
+        self.task_config['seed'] = self.seed + GLOBAL_EPISODE_NUM
         GLOBAL_EPISODE_NUM += 1
-        
+        self.task_config['now_ep_num'] = GLOBAL_EPISODE_NUM
+
         # Change to RoboTwin directory for episode setup
         _enter_robotwin_context()
         
@@ -312,6 +312,8 @@ class RoboTwinEnv(MetaEnv):
             # We just call setup_demo to reset the scene with a new seed
             
             # Setup the demo/episode with new seed
+            print(self.task_config)
+            self.task_config['eval_mode'] = True
             self.task_env.setup_demo(is_test=True, **self.task_config)
             
             # Force override step_lim after setup to ensure our max_timesteps is used
