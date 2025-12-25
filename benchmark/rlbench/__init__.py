@@ -139,6 +139,10 @@ class RLBenchEnv(MetaEnv):
             arm_action_mode = JointPosition()
         elif self.ctrl_space == 'ee':
             arm_action_mode = EndEffectorPoseViaPlanning()
+        elif self.ctrl_space == 'ee_ik':
+            arm_action_mode = EndEffectorPoseViaIK()
+        elif self.ctrl_space == 'joint_vel':
+            arm_action_mode = JointVelocity()
         else:
             raise ValueError(f"Unsupported ctrl_space: {self.ctrl_space}")
         

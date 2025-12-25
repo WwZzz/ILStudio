@@ -13,7 +13,7 @@ args:
   hidden_dim: 512
   dropout: 0.1
   nheads: 8
-  chunk_size: 100
+  chunk_size: 16
   pre_norm: false
   masks: false
   lr_backbone: 1.0e-05
