@@ -2,8 +2,9 @@
 ```shell
 cd policy/octo/octo_pytorch
 cp ../pyproject.toml pyproject.toml
-uv sync # if uv was not found, use 'pip install uv' to install it
+uv venv
 source .venv/bin/activate
+uv sync # if uv was not found, use 'pip install uv' to install it
 uv pip install -e .
 cd ../../..
 ```

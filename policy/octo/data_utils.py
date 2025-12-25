@@ -2,11 +2,12 @@ import numpy as np
 import torch
 from benchmark.utils import resize_with_pad
 class OctoDataProcessor:
-    def __init__(self, text_processor, use_wrist=False, image_size=(256,256)):
+    def __init__(self, text_processor, use_wrist=False, image_size=(256,256), wrist_image_size=(128,128)):
         self.text_processor = text_processor
         self.use_wrist = use_wrist
         self.image_size = image_size
-    
+        self.wrist_image_size = wrist_image_size
+
     def _np2pt(self, data, dtype=None):
         """Transform dictionary with numpy arrays to torch tensors.
         Trnsform images to channel-first format: NHWC -> NCHW, NTHWC -> NTCHW
@@ -55,7 +56,7 @@ class OctoDataProcessor:
         }
         if self.use_wrist:
             assert sample['image'].shape[0]>1
-            obs['image_wrist'] = sample['image'][1:2,:]
+            obs['image_wrist'] = resize_with_pad(sample['image'][1:2,:], self.wrist_image_size[0], self.wrist_image_size[1])
             obs['pad_mask_dict']['image_wrist'] = np.array([True])
         data_dict['observation'] = obs
         # action

@@ -14,21 +14,24 @@
             "env": {
                 "MUJOCO_GL": "egl",
                 "CUDA_VISIBLE_DEVICES": "0",
-                "HF_ENDPOINT": "https://hf-mirror.com",
+                // "HF_ENDPOINT": "https://hf-mirror.com",
                 // "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 // "ILSTD_CACHE": "/mnt/model/ilstd/data",
                 "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
+            "args": [
+                "-p", "octo", "-t", "rlbench_reach_ee", "-c", "act", "-o", "ckpt/octo_rlbench", "--eval_ratio", "0.05"
+            ]
             // "args": [
             //     "-p", "act", "-t", "sim_transfer_cube_scripted", "-c", "act", "-o", "ckpt/act_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "1"
             // ],
             // "args": [
             //     "-m", "ckpt/act_qpos_v2/checkpoint-20000"
             // ],
-            "args": [
-                "-p", "act_aloha", "-t", "robotwin_hammer_3cam_qpos", "-c", "act", "-o", "ckpt/act_qpos_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "8", "--eval_ratio", "0.05"
-            ],
+            // "args": [
+            //     "-p", "act_aloha", "-t", "robotwin_hammer_3cam_qpos", "-c", "act", "-o", "ckpt/act_qpos_debug", "--training.max_steps", "10000", "--training.per_device_train_batch_size", "8", "--eval_ratio", "0.05"
+            // ],
             // "args": [
             //     "-e", "robotwin_hammer_3cam_qpos", "-o", "results/actha_qpos1220_v4", "-bs", "0"
             // ],

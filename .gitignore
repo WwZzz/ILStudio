@@ -28,3 +28,4 @@ configs/policy/*gc*
 configs/action_manager/so101*
 benchmark/simplerenv/ManiSkill2_real2sim/*
 benchmark/simplerenv/ManiSkill2_real2sim
+policy/*pose*

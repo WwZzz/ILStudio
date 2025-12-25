@@ -14,7 +14,7 @@ def load_model(args):
     return {"model": model, 'text_processor': model.text_processor}
 
 def get_data_processor(args, model_components):
-    return OctoDataProcessor(model_components['text_processor'], model_components['model'].config.use_wrist, model_components['model'].config.image_size)
+    return OctoDataProcessor(model_components['text_processor'], model_components['model'].config.use_wrist, model_components['model'].config.image_size, model_components['model'].config.wrist_image_size)
 
 def get_data_collator(args, model_components):
     return OctoCollator()

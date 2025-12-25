@@ -22,6 +22,7 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations me
 from loguru import logger
 import sys
 import logging
+import warnings
 
 # Remove default handler
 logger.remove()
@@ -59,12 +60,19 @@ logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 logging.getLogger("transformers").setLevel(logging.WARNING)
 logging.getLogger("datasets").setLevel(logging.WARNING)
 
+# Suppress tokenizers parallelism warnings
+logging.getLogger("huggingface.tokenizers").setLevel(logging.ERROR)
+
 # Suppress TensorFlow logging
 logging.getLogger("tensorflow").setLevel(logging.WARNING)
 logging.getLogger("tensorboard").setLevel(logging.WARNING)
 
 # Suppress other noisy libraries
 logging.getLogger("absl").setLevel(logging.ERROR)  # TensorFlow uses absl for logging
+
+# Suppress tokenizers parallelism warnings (these are emitted via warnings module, not logging)
+warnings.filterwarnings("ignore", message=".*tokenizers.*parallelism.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*The current process just got forked.*", category=UserWarning)
 
 # Export for convenience
 __all__ = ['logger']
