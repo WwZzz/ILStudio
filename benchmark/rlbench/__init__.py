@@ -34,6 +34,7 @@ from rlbench.observation_config import ObservationConfig
 from ..base import MetaEnv, MetaObs, MetaAction
 import importlib
 import time
+from loguru import logger
 
 # Track active environment instance to ensure proper cleanup
 _active_env = None
@@ -281,9 +282,12 @@ class RLBenchEnv(MetaEnv):
         
         # Convert to RLBench format
         rlbench_action = self.meta2act(MetaAction(action=action))
-        
-        # Execute step
-        obs, reward, terminate = self.task.step(rlbench_action)
+        try:
+            # Execute step
+            obs, reward, terminate = self.task.step(rlbench_action)
+        except Exception as e:
+            logger.info(f"Error in RLBench step: {e}")
+            return self.prev_obs, 0.0, False, {'success': False, 'terminated': True, 'truncated': False}
         
         # Convert observation
         meta_obs = self.obs2meta(obs)

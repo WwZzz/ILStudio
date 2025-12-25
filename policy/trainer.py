@@ -7,6 +7,20 @@ from loguru import logger
 
 class BaseTrainer(Trainer):
     def __init__(self, *, train_loader=None, eval_loader=None, **kwargs):
+        # If no eval dataset/loader is provided, force evaluation off to avoid HF Trainer errors
+        training_args = kwargs.get('args', None)
+        no_eval_inputs = eval_loader is None and (kwargs.get('eval_dataset', None) is None)
+        if no_eval_inputs and training_args is not None:
+            if hasattr(training_args, 'eval_strategy'):
+                training_args.eval_strategy = "no"
+            if hasattr(training_args, 'evaluation_strategy'):
+                training_args.evaluation_strategy = "no"
+            if hasattr(training_args, 'do_eval'):
+                training_args.do_eval = False
+            # Disable best-model tracking which requires evaluation
+            if hasattr(training_args, 'load_best_model_at_end'):
+                training_args.load_best_model_at_end = False
+
         # If eval_loader is provided but eval_dataset is not, set a dummy eval_dataset
         # This is needed because Trainer checks eval_dataset in its initialization
         if eval_loader is not None and 'eval_dataset' not in kwargs:
