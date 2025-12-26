@@ -12,5 +12,5 @@ args:
   pi05: false
   discrete_state_input: false
   pytorch_weight_path: ~/.cache/openpi/openpi-assets/checkpoints/pi0_base_pytorch
-  lora_module: []
+  lora_module: ['gemma_expert', 'language_model']
 trainer_class: Trainer

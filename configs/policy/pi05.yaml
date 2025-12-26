@@ -9,8 +9,8 @@ args:
   max_token_len: 48
   paligemma_variant: gemma_2b
   action_expert_variant: gemma_300m
-  pi05: false
-  discrete_state_input: false
-  pytorch_weight_path: ~/.cache/openpi/openpi-assets/checkpoints/pi0_base_pytorch
+  pi05: true
+  discrete_state_input: true
+  pytorch_weight_path: ~/.cache/openpi/openpi-assets/checkpoints/pi05_base_pytorch
   lora_module: []
 trainer_class: Trainer

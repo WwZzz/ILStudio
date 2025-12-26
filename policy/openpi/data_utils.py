@@ -3,7 +3,7 @@ import numpy as np
 import openpi.models.model
 from PIL import Image
 import openpi.models.tokenizer as _tokenizer
-
+from loguru import logger
 # openpi.models.model.Observation
 
 def _resize_with_pad_pil(image: Image.Image, height: int, width: int, method: int) -> Image.Image:
@@ -59,13 +59,30 @@ def pad_to_dim(x: np.ndarray, target_dim: int, axis: int = -1, value: float = 0.
         return np.pad(x, pad_width, constant_values=value)
     return x
 
+    def __call__(self, data: DataDict) -> DataDict:
+        if (prompt := data.pop("prompt", None)) is None:
+            raise ValueError("Prompt is required")
+
+        if self.discrete_state_input:
+            if (state := data.get("state", None)) is None:
+                raise ValueError("State is required.")
+        else:
+            state = None
+
+        if not isinstance(prompt, str):
+            prompt = prompt.item()
+
+        tokens, token_masks = self.tokenizer.tokenize(prompt, state)
+        return {**data, "tokenized_prompt": tokens, "tokenized_prompt_mask": token_masks}
+
 class OpenPiProcessor:
-    def __init__(self, max_token_len:int=48, image_size=[224,224], discrete_state_input: bool = False, model_action_dim: int=32):
+    def __init__(self, max_token_len:int=48, image_size=[224,224], discrete_state_input: bool = False, model_action_dim: int=32, pi05: bool = False):
         self.image_size = image_size
         self.tokenizer = _tokenizer.PaligemmaTokenizer(max_token_len)
         self.discrete_state_input = discrete_state_input
         self.model_action_dim = model_action_dim
-    
+        self.pi05 = pi05
+
     def __call__(self, sample):
         # process image (k c h w)
         if isinstance(sample['image'], torch.Tensor):
@@ -80,18 +97,21 @@ class OpenPiProcessor:
         num_imgs = min(len(img_keys), img.shape[0])
         images = {img_keys[i]:img[i] if i<num_imgs else np.zeros_like(img[0]) for i in range(3)}
         image_masks = {img_keys[i]: i<num_imgs for i in range(3)}
-        # process language
-        if self.discrete_state_input:
-            if (state := sample.get("state", None)) is None:
-                raise ValueError("State is required.")
-        else:
-            state = None
-        tokens, token_masks = self.tokenizer.tokenize(sample['raw_lang'], state)
-        lanugage_dict = {"tokenized_prompt": tokens, "tokenized_prompt_mask": token_masks}
-        
-        # process state and action
+        # padding state
         state = sample['state']
         state = pad_to_dim(state, self.model_action_dim, axis=-1)
+        prompt = sample['raw_lang']
+        if not isinstance(prompt, str):
+            prompt = prompt.item()
+        # process language and tokenize data
+        if self.pi05 or self.discrete_state_input:
+            if (state := sample.get("state", None)) is None:
+                raise ValueError("State is required.")
+            tokens, token_masks = self.tokenizer.tokenize(prompt, state)
+        else:
+            tokens, token_masks = self.tokenizer.tokenize(prompt, None)
+        lanugage_dict = {"tokenized_prompt": tokens, "tokenized_prompt_mask": token_masks}
+        # process action
         if "action" in sample:
             action = pad_to_dim(sample["action"], self.model_action_dim, axis=-1)
         else:

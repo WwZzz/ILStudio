@@ -61,6 +61,9 @@ class OpenPiPolicy(PreTrainedModel):
     config_class = OpenPiPolicyConfig
     
     def __init__(self, config: OpenPiPolicyConfig):
+        # expand path if config.pytorch_weight_path if it is not null and is a user home directory
+        if config.pytorch_weight_path is not None and config.pytorch_weight_path.startswith('~'):
+            config.pytorch_weight_path = os.path.expanduser(config.pytorch_weight_path)
         super().__init__(config)
         self.model_cfg = openpi.models.pi0_config.Pi0Config(
             dtype=config.pytorch_training_precision,
