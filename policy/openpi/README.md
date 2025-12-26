@@ -10,7 +10,6 @@ GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972
 cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/
 cd ../../..
-source policy/openpi/openpi/.venv/bin/activate
 ```
 
 
