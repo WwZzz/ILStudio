@@ -120,7 +120,7 @@ python start_policy_server.py -m ckpt/smolvla_metaworld
 # -bs denotes the number of rollouts in parallel for acceleration
 # the default address is localhost:5000. You can use other address or /path/to/ckpt to evaluate locally without policy server
 source benchmark/metaworld/.venv/bin/activate
-python eval_sim.py -o results/smolvla_mw_easy -e mw_easy -n 10 -bs 10
+python eval_sim.py -o results/smolvla_mw_easy -e metaworld.easy -n 10 -bs 10
 ```
 
 ## Overview
