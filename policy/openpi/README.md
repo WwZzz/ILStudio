@@ -30,7 +30,8 @@ cd policy/openpi/openpi
 # /path/to/jax/checkpoint, e.g., custom/path/pi0_base, /path/to/converted/pytorch/checkpoint=custom/path/pi0_base_pytorch
 python examples/convert_jax_model_to_pytorch.py \
     --checkpoint_dir /path/to/jax/checkpoint \
-    --output_path /path/to/converted/pytorch/checkpoint
+    --output_path /path/to/converted/pytorch/checkpoint \
+    --config-name pi05_droid # replaced by pi0_droid for pi0
 ```
 ### Use pretrained weights
 Set `model_args: pytorch_weight_path: ...` in the .yaml config of `configs/policy/pi0_xx.yaml` like
