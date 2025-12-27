@@ -64,7 +64,5 @@ trainer_class: Trainer
 
 # Training Example
 ```shell
-python train.py -p pi0_lora -t sim_transfer_cube_scripted -o ckpt/pi0_aloha_lora -c openpi_lora
-
-python train.py -p pi0_libero_object -t libero_object_rlds -o ckpt/pi0_libero_obj -c default
+python train.py -p pi05 -t sim_transfer_cube_scripted -o ckpt/pi05_aloha -c openpi_lora
 ```
