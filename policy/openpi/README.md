@@ -7,7 +7,7 @@ uv venv
 source .venv/bin/activate
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972 tyro==1.0.3
+uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972 tyro==1.0.3 loguru
 cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/
 cd ../../..
 ```
