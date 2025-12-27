@@ -6,7 +6,7 @@ args:
   state_dim: 8
   max_action_dim: 32
   chunk_size: 16
-  max_token_len: 48
+  max_token_len: 180
   paligemma_variant: gemma_2b
   action_expert_variant: gemma_300m
   pi05: false

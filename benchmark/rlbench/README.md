@@ -80,15 +80,15 @@ bash benchmark/rlbench/generate_all_datasets.sh --no-headless --num_demos 10
 
 Each episode is saved as an HDF5 file with the following structure:
 - `/action`: Action sequence (T, 8) - depends on ctrl_space
-- `/state`: State sequence (T, 8) - depends on ctrl_space
-- `/observations/joint_positions`: (T, 7)
-- `/observations/joint_velocities`: (T, 7)
+- `/state`ations/joint_velocities`: (T, 7)
 - `/observations/gripper_pose`: (T, 7)
 - `/observations/gripper_open`: (T, 1)
 - `/observations/images/front`: (T, H, W, 3)
 - `/observations/images/wrist`: (T, H, W, 3)
 - `/language_instruction`: Task descriptions
-- `/episode_len`: Episode length
+- `/episode_len`: Episode length: State sequence (T, 8) - depends on ctrl_space
+- `/observations/joint_positions`: (T, 7)
+- `/observ
 
 ### Training with Generated Data
 
@@ -102,17 +102,18 @@ python train.py --policy diffusion_policy --task rlbench_reach --output_dir ckpt
 
 ## Available Tasks
 
-Create config files for other RLBench tasks:
-- ReachTarget, PickAndLift, PickUpCup
-- OpenDrawer, CloseJar, PushButton
-- StackBlocks, SlideBlockToTarget
-- And 100+ more tasks...
-
 See full list: https://github.com/stepjam/RLBench/tree/master/rlbench/tasks
 
 # TroubleShooting 
 
 ## Headless Server 
+You can use the following command to test whether the rlbench was succesfully installed.
+```shell
+cd benchmark/rlbench
+python test.py
+```
+
+Since the RLBench needs Xorg environment, you can use the following commands to add a virtual screen.
 ```shell
 nohup X :99 & disown
 export DISPLAY=:99
@@ -120,3 +121,30 @@ export COPPELIASIM_ROOT=${HOME}/CoppeliaSim
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT
 export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT
 ```
+
+If X was not Found, here is a possible solution
+```shell
+apt-get install -y xvfb
+nohup Xvfb :99 -screen 0 1024x768x24 &
+export DISPLAY=:99
+```
+
+If it raises errors like 
+```shell
+qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "/root/CoppeliaSim" even though it was found.
+
+This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application
+```
+you can further try
+```shell
+apt-get install -y \
+    libxcb-cursor0 \
+    libxcb-xinerama0 \
+    libxcb-randr0 \
+    libxi6 \
+    libxrender1 \
+    libxkbcommon-x11-0 \
+    libfontconfig1 \
+    libdbus-1-3
+```
+

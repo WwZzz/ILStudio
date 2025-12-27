@@ -637,7 +637,7 @@ requires-dist = [
     { name = "mujoco", specifier = "==2.3.7" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "opencv-python", specifier = ">=4.9.0.80" },
-    { name = "peft", specifier = ">=0.17.1" },
+    { name = "peft", specifier = "<0.17.1" },
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "pytest" },
     { name = "rich" },
@@ -1239,7 +1239,7 @@ wheels = [
 
 [[package]]
 name = "peft"
-version = "0.18.0"
+version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -1253,9 +1253,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/0c/f2938db546ac7fc961ab5917cd50fcf5d0d70b406de93e3faccaa504e152/peft-0.18.0.tar.gz", hash = "sha256:c81c80b2056ab40c23d58ef25f74daab417ac653970718589a11a8af28218588", size = 634141, upload-time = "2025-11-13T11:13:06.603Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/60/65efe0186e3d4cf52c187f56daf6ebaac162f3166f4f5c8f65f72240658f/peft-0.17.0.tar.gz", hash = "sha256:cb647a931c8da434446d6a196c402b1c2d087b12e050e098215f906f12771f1e", size = 565680, upload-time = "2025-08-01T17:04:29.475Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/55/481bf25613d40ef53534f664deba7b138fe566356b6ca10304e2b3b2529c/peft-0.18.0-py3-none-any.whl", hash = "sha256:624f69ca6393b765ccc6734adda7ca57d80b238f0900a42c357d8b67a03d62ff", size = 556427, upload-time = "2025-11-13T11:13:03.664Z" },
+    { url = "https://files.pythonhosted.org/packages/80/da/36118931e155e7f403889be1e20054fffc9bb48a8e27e2c34b0f7d42c6d8/peft-0.17.0-py3-none-any.whl", hash = "sha256:0190c28bdbdc24c3de549f2b42cd182cbb89d3e82aa3069c6db690c4ef6fccbb", size = 503901, upload-time = "2025-08-01T17:04:27.256Z" },
 ]
 
 [[package]]

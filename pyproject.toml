@@ -16,7 +16,7 @@ dependencies = [
     "torchdiffeq",
     "transformers<=4.45.2",
     "accelerate",
-    "peft>=0.17.1",
+    "peft<0.17.1",
     "opencv-python>=4.9.0.80",
     "rospkg==1.5.0",
     "imageio==2.37.0",
