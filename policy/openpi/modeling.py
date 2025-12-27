@@ -45,6 +45,7 @@ class OpenPiPolicyConfig(PretrainedConfig):
         self.action_dim = action_dim
         self.max_action_dim = max_action_dim
         self.action_horizon = chunk_size
+        self.chunk_size = chunk_size
         self.max_token_len = max_token_len
         self.paligemma_variant = paligemma_variant
         self.action_expert_variant = action_expert_variant

@@ -21,8 +21,11 @@
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [
-                "-p", "act_gc_cam2", "-t", "rlbench_reach_ee", "-o", "ckpt/act_pose_rlbench_reach_ee", "-c", "act", "--training.max_steps", "10000"
+                "-e", "aloha_transfer", "-o", "results/pi05_5k_aloha", "--use_spawn"
             ],
+            // "args": [
+            //     "-p", "act_gc_cam2", "-t", "rlbench_reach_ee", "-o", "ckpt/act_pose_rlbench_reach_ee", "-c", "act", "--training.max_steps", "10000"
+            // ],
             // "args": [
             //     "-p", "octo", "-t", "rlbench_reach_ee", "-c", "act", "-o", "ckpt/octo_rlbench", "--eval_ratio", "0.05"
             // ],
