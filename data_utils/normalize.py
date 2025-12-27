@@ -492,7 +492,7 @@ class BaseNormalizer:
         
         with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
-        # all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
+        all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         return all_stats
     
     def get_stat_by_key(self, key='action'):
