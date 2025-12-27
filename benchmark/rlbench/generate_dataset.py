@@ -43,7 +43,9 @@ def parse_args():
     parser.add_argument('--output_dir', '-o', type=str, required=True,
                         help='Output directory for HDF5 files')
     parser.add_argument('--num_demos', '-n', type=int, default=50,
-                        help='Number of demonstrations to collect')
+                        help='Number of successful demonstrations to collect')
+    parser.add_argument('--max_attempts', type=int, default=None,
+                        help='Maximum attempts per demo (default: num_demos * 2)')
     parser.add_argument('--variation', '-v', type=int, default=0,
                         help='Task variation index')
     parser.add_argument('--headless', action='store_true', default=True,
@@ -282,30 +284,59 @@ def main():
     # Set variation
     task.set_variation(args.variation)
     
-    # Get language descriptions from task reset
-    descriptions, _ = task.reset()
-    print(f"Task descriptions: {descriptions}")
+    # Get language descriptions from task reset (with retry logic)
+    max_reset_attempts = 10
+    descriptions = None
+    for reset_attempt in range(max_reset_attempts):
+        try:
+            descriptions, _ = task.reset()
+            print(f"Task descriptions: {descriptions}")
+            break
+        except Exception as e:
+            print(f"Warning: task.reset() failed (attempt {reset_attempt + 1}/{max_reset_attempts}): {e}")
+            if reset_attempt == max_reset_attempts - 1:
+                print(f"Error: Failed to reset task after {max_reset_attempts} attempts. Exiting.")
+                env.shutdown()
+                raise RuntimeError(f"Failed to initialize task {task_name}") from e
+            import time
+            time.sleep(1)  # Brief pause before retry
     
-    # Collect demos
-    print(f"Collecting {args.num_demos} demonstrations...")
+    # Collect demos - keep trying until we get the required number of successful demos
+    print(f"Collecting {args.num_demos} successful demonstrations...")
+    
+    # Set max attempts (default: 2x num_demos to allow for some failures)
+    max_attempts = args.max_attempts if args.max_attempts is not None else args.num_demos * 2
     
     success_count = 0
-    for i in tqdm(range(args.num_demos), desc="Collecting demos"):
-        try:
-            # Get a single demo
-            demos = task.get_demos(1, live_demos=True)
-            demo = demos[0]
-            
-            # Save to HDF5
-            output_path = os.path.join(args.output_dir, f'episode_{i:04d}.hdf5')
-            save_demo_to_hdf5(demo, descriptions, output_path, camera_names, config_args)
-            success_count += 1
-            
-        except Exception as e:
-            print(f"Warning: Failed to collect demo {i}: {e}")
-            continue
+    attempt_count = 0
     
-    print(f"Successfully collected {success_count}/{args.num_demos} demonstrations")
+    with tqdm(total=args.num_demos, desc="Collecting demos") as pbar:
+        while success_count < args.num_demos:
+            attempt_count += 1
+            
+            # Check if we've exceeded max attempts
+            if attempt_count > max_attempts:
+                print(f"\nWarning: Reached maximum attempts ({max_attempts}). Collected {success_count}/{args.num_demos} demos.")
+                break
+            
+            try:
+                # Get a single demo
+                demos = task.get_demos(1, live_demos=True)
+                demo = demos[0]
+                
+                # Save to HDF5
+                output_path = os.path.join(args.output_dir, f'episode_{success_count:04d}.hdf5')
+                save_demo_to_hdf5(demo, descriptions, output_path, camera_names, config_args)
+                success_count += 1
+                pbar.update(1)
+                
+            except Exception as e:
+                # Continue trying on failure
+                if attempt_count % 10 == 0:  # Print warning every 10 failures
+                    print(f"\nWarning: Failed to collect demo (attempt {attempt_count}): {e}")
+                continue
+    
+    print(f"\nSuccessfully collected {success_count}/{args.num_demos} demonstrations (after {attempt_count} attempts)")
     
     # Save dataset metadata
     metadata_path = os.path.join(args.output_dir, 'metadata.yaml')
