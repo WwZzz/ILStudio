@@ -3,13 +3,18 @@ from pathlib import Path
 
 def resolve_yaml(name_or_path: str, base_dir: str) -> str:
     """Resolve a YAML config by either absolute/relative path or by name within base_dir.
+    
+    Supports dot notation for subdirectories:
+        - 'rlbench.rlbench_reach' -> '{base_dir}/rlbench/rlbench_reach.yaml'
+        - 'subdir.nested.config' -> '{base_dir}/subdir/nested/config.yaml'
+    
     Returns an existing file path or raises FileNotFoundError.
     """
     if not name_or_path:
         raise FileNotFoundError("Empty config name or path")
 
     p = Path(name_or_path)
-    # If looks like a path and exists, return as-is
+    # If looks like a path (has .yaml/.yml suffix or contains path separators), treat as path
     if p.suffix.lower() == '.yaml' or p.suffix.lower() == '.yml' or any(sep in name_or_path for sep in ['/', '\\']):
         candidate = Path(name_or_path)
         if candidate.exists():
@@ -21,6 +26,20 @@ def resolve_yaml(name_or_path: str, base_dir: str) -> str:
 
     # Treat as name under base_dir
     base = Path(base_dir)
+    
+    # Support dot notation for subdirectories: 'rlbench.rlbench_reach' -> 'rlbench/rlbench_reach.yaml'
+    if '.' in name_or_path:
+        # Convert dots to path separators
+        subpath = name_or_path.replace('.', os.sep)
+        candidate = base / f"{subpath}.yaml"
+        if candidate.exists():
+            return str(candidate)
+        # Also try without conversion (for backward compatibility with names containing dots)
+        candidate_flat = base / f"{name_or_path}.yaml"
+        if candidate_flat.exists():
+            return str(candidate_flat)
+        raise FileNotFoundError(f"Config '{name_or_path}' not found under {base_dir} (tried: {subpath}.yaml, {name_or_path}.yaml)")
+    
     candidate = base / f"{name_or_path}.yaml"
     if candidate.exists():
         return str(candidate)

@@ -52,6 +52,30 @@ python benchmark/rlbench/generate_dataset.py \
     --num_demos 100
 ```
 
+### Batch Generation
+
+Generate datasets for all RLBench tasks automatically:
+
+```bash
+# Generate datasets for all tasks (50 demos per task, default)
+bash benchmark/rlbench/generate_all_datasets.sh
+
+# Generate with custom number of demos
+bash benchmark/rlbench/generate_all_datasets.sh --num_demos 100
+
+# Custom output directory
+bash benchmark/rlbench/generate_all_datasets.sh --base_dir /path/to/output --num_demos 50
+
+# Disable headless mode (for debugging)
+bash benchmark/rlbench/generate_all_datasets.sh --no-headless --num_demos 10
+```
+
+**Note**: The script automatically:
+- Finds all `rlbench_*.yaml` config files (excluding `*_ee.yaml` versions)
+- Skips tasks if dataset already exists (with confirmation prompt)
+- Generates one dataset per task (joint and ee versions share the same dataset)
+- Provides progress summary at the end
+
 ### Generated Data Format
 
 Each episode is saved as an HDF5 file with the following structure:
