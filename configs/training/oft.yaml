@@ -1,0 +1,94 @@
+# OpenVLA-OFT Training Configuration
+# This file contains core training process parameters for OpenVLA-OFT
+# Converted from original OpenVLA-OFT training arguments
+
+# =============================================================================
+# CORE TRAINING PROCESS PARAMETERS
+# =============================================================================
+# These parameters are typically set once and don't change between runs
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION
+# =============================================================================
+# Data processing parameters that are related to training process
+# Note: Model-specific data processing parameters are now in configs/model/default.yaml
+
+# Data loading (training process related)
+preload_data: false
+
+# Image augmentation (note: actual augmentation implementation should be in data processor)
+# image_aug: true  # This is typically handled in the data processor, not here
+
+# =============================================================================
+# OPTIMIZER CONFIGURATION
+# =============================================================================
+# Core optimizer settings that are typically set once per training setup
+
+# Learning rate and scheduling
+learning_rate: 5e-4  # Converted from --learning_rate 5e-4
+weight_decay: 1e-10
+warmup_steps: 0  # OpenVLA-OFT uses num_steps_before_decay instead of warmup
+warmup_ratio: 0.0
+lr_scheduler_type: "cosine"  # Assuming cosine decay after num_steps_before_decay
+# Note: num_steps_before_decay (50000) indicates when learning rate starts decaying
+# This may need custom scheduler implementation or can be approximated with warmup_steps
+
+# Optimizer settings
+optim: "adamw_torch"
+adam_beta1: 0.9
+adam_beta2: 0.95
+adam_epsilon: 1e-8
+
+max_grad_norm: 1.0
+
+# Note: LoRA rank (32) should be configured in policy config, not training config
+# lora_rank: 32  # Configure this in configs/policy/openvla_oft.yaml
+
+# =============================================================================
+# LOGGING AND SAVING CONFIGURATION
+# =============================================================================
+# Logging and saving settings that are typically set once
+
+# Logging settings
+logging_strategy: "steps"
+logging_steps: 10
+report_to: "tensorboard"
+
+# Saving settings
+save_strategy: "steps"
+save_steps: 10000  # Converted from --save_freq 10000
+save_total_limit: 50  # Converted from --save_latest_checkpoint_only False (False means save all, but we limit to 50 for practicality)
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION (TrainingArguments)
+# =============================================================================
+# Data processing settings for the training process
+
+# DataLoader settings
+dataloader_num_workers: 4
+dataloader_pin_memory: true
+remove_unused_columns: false
+
+# Evaluation settings
+do_eval: true  # Converted from --use_val_set True
+eval_steps: 10000  # Converted from --val_freq 10000
+
+# System settings
+seed: 0
+
+# =============================================================================
+# CORE TRAINING PARAMETERS
+# =============================================================================
+# Basic training settings that are typically set once per experiment
+
+# Training duration
+num_train_epochs: 3
+max_steps: 100005  # Converted from --max_steps 100005
+
+# Batch sizes (typically determined by hardware)
+per_device_train_batch_size: 32
+per_device_eval_batch_size: 32
+
+# Checkpoint resuming (often handled automatically)
+resume_from_checkpoint: true
+ddp_find_unused_parameters: True

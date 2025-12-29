@@ -16,10 +16,13 @@ from policy.policy_loader import (
 from policy.trainer import BaseTrainer
 import torch
 import numpy
-torch.serialization.add_safe_globals([numpy.ndarray])
-torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
-torch.serialization.add_safe_globals([numpy.dtype])
-torch.serialization.safe_globals([numpy.dtype])
+try:
+    torch.serialization.add_safe_globals([numpy.ndarray])
+    torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
+    torch.serialization.add_safe_globals([numpy.dtype])
+    torch.serialization.safe_globals([numpy.dtype])
+except:
+    pass
 
 def parse_param():
     """
