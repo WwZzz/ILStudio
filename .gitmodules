@@ -18,4 +18,4 @@
 	url = https://github.com/WwZzz/RoboTwin.git
 [submodule "policy/openvla_oft/openvla-oft"]
 	path = policy/openvla_oft/openvla-oft
-	url = https://github.com/moojink/openvla-oft
+	url = https://github.com/WwZzz/openvla-oft.git
