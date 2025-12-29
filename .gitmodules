@@ -16,3 +16,6 @@
 [submodule "benchmark/robotwin/RoboTwin"]
 	path = benchmark/robotwin/RoboTwin
 	url = https://github.com/WwZzz/RoboTwin.git
+[submodule "policy/openvla_oft/openvla-oft"]
+	path = policy/openvla_oft/openvla-oft
+	url = https://github.com/moojink/openvla-oft
