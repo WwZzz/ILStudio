@@ -5,7 +5,12 @@ import numpy as np
 import torch
 import queue
 import torch.distributed as dist
-import dlimp as dl
+try:
+    import dlimp as dl
+except ImportError:
+    class DummyDL:
+        Dataset = None
+    dl = DummyDL()
 from typing import Optional, Any, List, Union, Tuple
 from torch.utils.data import DataLoader, Sampler
 from torch.utils.data import DataLoader, ConcatDataset

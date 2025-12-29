@@ -267,3 +267,5 @@ This repo is built on the open source codebases below. Thanks to the authors' wo
 - [RoboTwin](https://robotwin-platform.github.io)
 
 - [RLBench](https://github.com/stepjam/RLBench/)
+
+- [StarVLA](https://github.com/starVLA/starVLA/)
