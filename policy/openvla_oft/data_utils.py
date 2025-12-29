@@ -28,10 +28,10 @@ IGNORE_INDEX = -100
 
 class OpenVLAOFTCollator:
     """
-    Collator for batching OpenVLA-OFT training samples.
+    Collator for batching OpenVLA-OFT samples.
     
     Handles padding of variable-length sequences and proper formatting
-    of pixel values, input IDs, labels, and actions for training.
+    of pixel values, input IDs, labels, and actions for both training and inference.
     """
     
     def __init__(self, tokenizer, dtype=torch.bfloat16, num_actions_chunk: int = 8):
@@ -46,24 +46,74 @@ class OpenVLAOFTCollator:
         """
         Collate a list of samples into a batch.
         
+        Works for both training (with labels) and inference (without labels).
+        
         Args:
             instances: List of dictionaries from data processor
         
         Returns:
             Batched dictionary with properly padded tensors
         """
-        # Use the base collator for pixel_values, input_ids, labels, attention_mask
-        batch = self.collator(instances)
+        # Check if this is inference (no labels) or training (with labels)
+        has_labels = 'labels' in instances[0] and instances[0]['labels'] is not None
+        
+        if has_labels:
+            # Training mode: use the full collator
+            batch = self.collator(instances)
+        else:
+            # Inference mode: manually collate without labels
+            batch = self._collate_inference(instances)
         
         # Handle proprio if present
-        if 'proprio' in instances[0]:
+        if instances[0].get('proprio') is not None:
             proprios = [inst['proprio'] for inst in instances]
             batch['proprio'] = torch.stack(proprios)
         
         # Handle actions if present (for training)
-        if 'actions' in instances[0]:
+        if instances[0].get('actions') is not None:
             actions = [inst['actions'] for inst in instances]
             batch['actions'] = torch.stack(actions)
+        
+        return batch
+    
+    def _collate_inference(self, instances: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        """
+        Collate samples for inference (without labels).
+        
+        Args:
+            instances: List of sample dictionaries
+        
+        Returns:
+            Batched dictionary with pixel_values, input_ids, attention_mask
+        """
+        # Stack pixel_values
+        pixel_values = torch.stack([inst['pixel_values'] for inst in instances])
+        
+        # Pad input_ids to same length
+        input_ids_list = [inst['input_ids'] for inst in instances]
+        max_len = max(ids.shape[0] for ids in input_ids_list)
+        
+        padded_input_ids = []
+        attention_masks = []
+        
+        for ids in input_ids_list:
+            pad_len = max_len - ids.shape[0]
+            if pad_len > 0:
+                # Pad on the right
+                padded_ids = torch.cat([ids, torch.full((pad_len,), self.tokenizer.pad_token_id, dtype=ids.dtype)])
+                mask = torch.cat([torch.ones(ids.shape[0], dtype=torch.long), torch.zeros(pad_len, dtype=torch.long)])
+            else:
+                padded_ids = ids
+                mask = torch.ones(ids.shape[0], dtype=torch.long)
+            
+            padded_input_ids.append(padded_ids)
+            attention_masks.append(mask)
+        
+        batch = {
+            'pixel_values': pixel_values,
+            'input_ids': torch.stack(padded_input_ids),
+            'attention_mask': torch.stack(attention_masks),
+        }
         
         return batch
 

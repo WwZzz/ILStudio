@@ -10,6 +10,7 @@ import pickle
 import struct
 import threading
 import torch
+import traceback
 from loguru import logger
 from typing import Optional
 from benchmark.base import MetaObs, MetaAction, MetaPolicy
@@ -100,7 +101,9 @@ class PolicyServer:
                     self.send_mact_list(client_socket, [])
                     
         except Exception as e:
-            logger.error(f"✗ Error handling client #{client_id}: {e}")
+            error_trace = traceback.format_exc()
+            logger.error(f"✗ Inference error for client #{client_id}:\n{error_trace}")
+            # logger.error(f"✗ Error handling client #{client_id}: {e}")
         finally:
             client_socket.close()
             logger.info(f"  Client #{client_id} connection closed (processed {request_count} requests)")

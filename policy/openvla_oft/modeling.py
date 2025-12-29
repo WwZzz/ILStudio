@@ -32,6 +32,7 @@ if OPENVLA_OFT_PATH not in sys.path:
 
 # Import from openvla-oft
 from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
+import prismatic.extern.hf.modeling_prismatic as modeling_prismatic_module
 from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from prismatic.models.projectors import ProprioProjector, NoisyActionProjector
@@ -49,12 +50,19 @@ OPENVLA_IMAGE_SIZE = 224
 
 def _set_vla_constants(action_dim: int, chunk_size: int, state_dim: int):
     """
-    Dynamically set VLA constants before importing action heads.
-    This is necessary because openvla-oft's action heads use global constants.
+    Dynamically set VLA constants in all relevant modules.
+    This is necessary because openvla-oft's action heads and modeling modules
+    use global constants that are copied at import time.
     """
+    # Set in the constants module
     vla_constants.ACTION_DIM = action_dim
     vla_constants.NUM_ACTIONS_CHUNK = chunk_size
     vla_constants.PROPRIO_DIM = state_dim
+    
+    # Also patch the copies in modeling_prismatic module
+    # These are copied at import time, so we need to update them directly
+    modeling_prismatic_module.ACTION_DIM = action_dim
+    modeling_prismatic_module.NUM_ACTIONS_CHUNK = chunk_size
 
 
 class OpenVLAOFTConfig(PretrainedConfig):
@@ -347,7 +355,7 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         
         Args:
             batch_obs: Dictionary containing:
-                - pixel_values: Image inputs [B, num_images, C, H, W]
+                - pixel_values: Image inputs [B, C, H, W] or [B, num_images*C, H, W]
                 - input_ids: Tokenized text [B, seq_len]
                 - attention_mask: Attention mask [B, seq_len]
                 - proprio (optional): Proprioceptive state [B, proprio_dim]
@@ -355,6 +363,14 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         Returns:
             Action predictions as numpy array [B, chunk_size, action_dim]
         """
+        # CRITICAL: Ensure VLA constants are set correctly for this config
+        # This patches both vla_constants and modeling_prismatic module-level copies
+        _set_vla_constants(
+            action_dim=self.config.action_dim,
+            chunk_size=self.config.chunk_size,
+            state_dim=self.config.state_dim,
+        )
+        
         device = next(self.vla.parameters()).device
         
         # Move inputs to device
@@ -363,6 +379,8 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         attention_mask = batch_obs.get('attention_mask')
         if attention_mask is not None:
             attention_mask = attention_mask.to(device)
+        else:
+            attention_mask = torch.ones_like(input_ids)
         
         batch_size = pixel_values.shape[0]
         
@@ -371,36 +389,42 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         if self.config.use_proprio and 'proprio' in batch_obs:
             proprio = batch_obs['proprio'].to(device).to(torch.bfloat16)
         
-        # If using continuous action head, predict via forward pass
+        # Use VLA's predict_action method for continuous action prediction
         if self.config.use_l1_regression or self.config.use_diffusion:
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                output = self.vla(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    pixel_values=pixel_values,
-                    labels=None,
-                    output_hidden_states=True,
-                    proprio=proprio if self.config.use_proprio else None,
-                    proprio_projector=self.proprio_projector if self.config.use_proprio else None,
-                    use_film=self.config.use_film,
-                )
+            # Process each sample in the batch
+            all_actions = []
             
-            # Get hidden states and predict actions
-            num_patches = self._get_num_patches()
-            last_hidden_states = output.hidden_states[-1]
-            text_hidden_states = last_hidden_states[:, num_patches:-1]
+            for i in range(batch_size):
+                sample_input_ids = input_ids[i:i+1]
+                sample_attention_mask = attention_mask[i:i+1]
+                sample_pixel_values = pixel_values[i:i+1]
+                sample_proprio = proprio[i:i+1] if proprio is not None else None
+                
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    # Use VLA's predict_action which handles action token preparation
+                    # skip_unnorm=True because ILStudio handles normalization externally
+                    normalized_actions, _ = self.vla.predict_action(
+                        input_ids=sample_input_ids,
+                        pixel_values=sample_pixel_values,
+                        attention_mask=sample_attention_mask,
+                        proprio=sample_proprio.float().cpu().numpy() if sample_proprio is not None else None,
+                        proprio_projector=self.proprio_projector if self.config.use_proprio else None,
+                        action_head=self.action_head,
+                        noisy_action_projector=self.noisy_action_projector if self.config.use_diffusion else None,
+                        use_film=self.config.use_film,
+                        skip_unnorm=True,
+                    )
+                
+                # Convert to numpy float32 if tensor
+                if isinstance(normalized_actions, torch.Tensor):
+                    normalized_actions = normalized_actions.float().cpu().numpy()
+                elif isinstance(normalized_actions, np.ndarray):
+                    normalized_actions = normalized_actions.astype(np.float32)
+                
+                all_actions.append(normalized_actions)
             
-            num_action_tokens = self.config.num_actions_chunk * self.config.action_dim
-            actions_hidden_states = text_hidden_states[:, -num_action_tokens:].to(torch.bfloat16)
-            
-            if self.config.use_l1_regression:
-                predicted_actions = self.action_head.predict_action(actions_hidden_states)
-            elif self.config.use_diffusion:
-                predicted_actions = self._run_diffusion_sampling(
-                    pixel_values, input_ids, attention_mask, proprio
-                )
-            
-            actions = predicted_actions.cpu().numpy()
+            # Stack actions: shape [B, chunk_size, action_dim]
+            actions = np.stack(all_actions, axis=0).astype(np.float32)
         else:
             # Fall back to discrete token prediction
             generated_ids = self.vla.generate(
