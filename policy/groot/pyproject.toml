@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ilstd_groot"
+version = "0.1.0"
+description = "GR00T policy adapter for ILStudio"
+readme = "README.md"
+requires-python = ">=3.10, <3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "einops",
+    "scipy",
+    "pillow",
+    "numpy==1.26.4",
+    "dm-tree",
+    "loguru",
+    "safetensors",
+    "deepspeed>=0.14.0",
+    "tianshou==0.2.0",
+    "h5py",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
