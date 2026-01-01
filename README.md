@@ -184,16 +184,19 @@ python start_teleop_recorder.py -c so101_follower
 | GR00T| [[12]](https://arxiv.org/abs/2503.14734)|
 
 ## 🏆 Simulation Benchmark Gallery
-- aloha_sim
-- gymnasium_robotics
-- libero
-- metaworld
-- pandagym
-- robomimic
-- simplerenv
-- robotwin
-- rlbench 
-- calvin (Under Testing)
+
+| Environment | 可并行 | 需要 Vulkan |
+|------------|--------|------------|
+| aloha_sim | ✅ | ❌ |
+| gymnasium_robotics | ✅ | ❌ |
+| libero | ✅ | ❌ |
+| metaworld | ✅ | ❌ |
+| pandagym | ✅ | ❌ |
+| robomimic | ✅ | ❌ |
+| simplerenv | ✅ | ✅ |
+| robotwin | ❌ | ✅ |
+| rlbench | ❌ | ❌ |
+| calvin (Under Testing) | ❌ | ❌ |
 
 ## 🦾 Robot Gallery
 - SO101
