@@ -185,7 +185,7 @@ python start_teleop_recorder.py -c so101_follower
 
 ## 🏆 Simulation Benchmark Gallery
 
-| Environment | 可并行 | 需要 Vulkan |
+| Environment | IsParallal | Need Vulkan |
 |------------|--------|------------|
 | aloha_sim | ✅ | ❌ |
 | gymnasium_robotics | ✅ | ❌ |
