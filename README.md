@@ -173,14 +173,15 @@ python start_teleop_recorder.py -c so101_follower
 | Qwen2.5VL+DP          | [[3]](https://arxiv.org/abs/2308.12966) + [[2]](https://arxiv.org/abs/2303.04137)                          |
 | DiVLA                 | [[4]](https://arxiv.org/html/2412.03293v1)                                                                |
 | OpenVLA               | [[5]](https://arxiv.org/abs/2406.09246)                                                      |
-| OpenVLA-OFT               | [[5]](https://arxiv.org/abs/2502.19645)                                                      |
-| Pi0                   | [[6]](https://arxiv.org/html/2410.24164v1)                                                             |
-| Pi0.5                   | [[6]](https://arxiv.org/abs/2504.16054)                                                             |
+| OpenVLA-OFT               | [[6]](https://arxiv.org/abs/2502.19645)                                                      |
+| Pi0                   | [[7]](https://arxiv.org/html/2410.24164v1)                                                             |
+| Pi0.5                   | [[8]](https://arxiv.org/abs/2504.16054)                                                             |
 | MLP                   | -                                                                                                      |
-| ResNet                | [[7]](https://arxiv.org/abs/1512.03385)                                                                |
-| SMolVLA               | [[8]](https://arxiv.org/abs/2506.01844)                                                                |
-| Octo                  | [[9]](https://octo-models.github.io/)    |
+| ResNet                | [[9]](https://arxiv.org/abs/1512.03385)                                                                |
+| SMolVLA               | [[10]](https://arxiv.org/abs/2506.01844)                                                                |
+| Octo                  | [[11]](https://octo-models.github.io/)    |
 | FlowMatching                  |  -    |
+| GR00T| [[12]](https://arxiv.org/abs/2503.14734)|
 
 ## 🏆 Simulation Benchmark Gallery
 - aloha_sim

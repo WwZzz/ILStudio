@@ -1,6 +1,6 @@
 name: sim_transfer_cube_scripted
 
-# 数据集列表
+# dataset list
 datasets:
 - type: data_utils.datasets.AlohaSimDataset
   name: sim_transfer_cube_scripted
