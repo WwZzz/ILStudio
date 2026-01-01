@@ -12,8 +12,7 @@ except ImportError:
         Dataset = None
     dl = DummyDL()
 from typing import Optional, Any, List, Union, Tuple
-from torch.utils.data import DataLoader, Sampler
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
 
@@ -248,12 +247,6 @@ class BackgroundPrefetcher:
             except queue.Empty: break
         # logger.info("[BGPrefetcher] Shutdown complete.")
  
-def _create_loader(dataset, processor, collator, args, is_training):
-    if isinstance(dataset, list):
-        return _create_mixed_dataloader(dataset, processor, collator, args, is_training=is_training)
-    else:
-        return _create_single_dataloader(dataset, processor, collator, args, is_training=is_training)
-
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
     """
     Create DataLoader from single dataset or multiple datasets.
@@ -303,15 +296,52 @@ def is_map_data(dataset):
 def is_iter_data(dataset):
     return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
 
-def _create_single_dataloader(dataset, processor, collator, args, is_training=True):
+def _create_single_dataloader(dataset, processor, collator, args, is_training=True, sample_weights=None):
     """Create DataLoader for a single dataset (map-style or iterable)"""
     # Identify the type of the dataset: iter or map
     if is_map_data(dataset):
         wrapped_data = WrappedDataset(dataset, processor)
-        sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_training and is_distributed() else None
+
+        # 1. Sampler Logic
+        sampler = None
+        if sample_weights is None:
+            sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_distributed() else None
+        else:
+            if is_training:
+                # Case A: Training with Weights
+                # Ensure weights are a Double Tensor for precision
+                weights_tensor = torch.as_tensor(sample_weights, dtype=torch.double)
+                if is_distributed():
+                    # 
+                    # Simulate DDP behavior with WeightedRandomSampler.
+                    # We restrict num_samples so each GPU processes a fraction of the total.
+                    world_size = dist.get_world_size() 
+                    rank = dist.get_rank()
+                    num_samples = int(np.ceil(len(wrapped_data) / world_size))
+                    
+                    # CRITICAL: Use a distinct seed per rank. 
+                    # Otherwise, all GPUs will sample the exact same indices.
+                    sampler_generator = torch.Generator()
+                    sampler_generator.manual_seed(getattr(args, 'seed', 0) + rank)
+                    
+                    sampler = WeightedRandomSampler(
+                        weights=weights_tensor,
+                        num_samples=num_samples,
+                        replacement=True,
+                        generator=sampler_generator
+                    )
+                else:
+                    # Single GPU Standard Weighted Sampling
+                    sampler = WeightedRandomSampler(
+                        weights=weights_tensor,
+                        num_samples=len(wrapped_data),
+                        replacement=True
+                    )
+            else:
+                sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_distributed() else None
         
         generator = None
-        if is_training and sampler is None:  
+        if sampler is None:  
             seed = getattr(args, 'seed', 0)
             generator = torch.Generator()
             generator.manual_seed(seed)
@@ -320,7 +350,8 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         def worker_init_fn(worker_id):
             import random
             seed = getattr(args, 'seed', 0)
-            worker_seed = seed + worker_id
+            rank = dist.get_rank() if dist.is_initialized() else 0
+            worker_seed = seed + worker_id + (rank * 1000) # ensure different GPU seeds
             random.seed(worker_seed)
             np.random.seed(worker_seed)
             torch.manual_seed(worker_seed)
@@ -330,7 +361,7 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         loader = DataLoader(
             wrapped_data,
             batch_size=args.per_device_train_batch_size,
-            shuffle=(sampler is None) and is_training,  
+            shuffle=(sampler is None),  
             sampler=sampler,
             num_workers=args.dataloader_num_workers,
             collate_fn=collator,
@@ -420,21 +451,37 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
     # Mix map-style datasets using ConcatDataset
     map_loader = None
     if len(all_map_datasets)>0:
+        if hasattr(all_map_datasets[0], '__weight__'):
+            sample_weights = []
+            for ds in all_map_datasets:
+                sample_weights.extend([ds.__weight__] * len(ds))
+        else:
+            sample_weights = None
         mixed_map_data = torch.utils.data.ConcatDataset(all_map_datasets)
-        map_loader = _create_single_dataloader(mixed_map_data, processor, collator, args, is_training=is_training)
+        map_loader = _create_single_dataloader(mixed_map_data, processor, collator, args, is_training=is_training, sample_weights=sample_weights)
     
     # mix iterable datasets using huggingface's datasets
     iter_loader = None
     if len(all_iter_datasets)>0:
         from datasets import interleave_datasets
-        mixed_iter_data = interleave_datasets(all_iter_datasets)
+        if hasattr(all_iter_datasets[0], '__weight__'):
+            sample_weights = [ds.__weight__ for ds in all_iter_datasets]
+            sample_weights_sum = sum(sample_weights)
+            sample_weights = [w / sample_weights_sum for w in sample_weights]
+        else:
+            sample_weights = None
+        mixed_iter_data = interleave_datasets(all_iter_datasets, probabilities=sample_weights)
         iter_loader = _create_single_dataloader(mixed_iter_data, processor, collator, args, is_training=is_training)
     
     # mix rlds datasets using tf.data
     rlds_loader = None
     if len(all_rlds_datasets)>0:
         import dlimp as dl
-        mixed_rlds_data_raw = dl.DLataset.sample_from_datasets([ds.dataset if hasattr(ds, 'dataset') else ds for ds in all_rlds_datasets])
+        if hasattr(all_rlds_datasets[0], '__weight__'):
+            sample_weights = [ds.__weight__ for ds in all_rlds_datasets]
+        else:
+            sample_weights = None
+        mixed_rlds_data_raw = dl.DLataset.sample_from_datasets([ds.dataset if hasattr(ds, 'dataset') else ds for ds in all_rlds_datasets], weights=sample_weights)
         # _create_single_dataloader has specific logic for rlds_data
         rlds_loader = _create_single_dataloader(mixed_rlds_data_raw, processor, collator, args, is_training=is_training)
     

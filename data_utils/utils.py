@@ -693,6 +693,16 @@ def _apply_transforms_to_datasets(datasets, args, task_config):
             raise ValueError(f"Dataset type {type(dataset)} not supported for transformation.")
     return transformed_datasets
 
+def _maybe_assign_weights_to_datasets(datasets, task_config):
+    sample_weights = task_config.get('sample_weights', None)
+    if sample_weights is None or not isinstance(datasets, list): return datasets
+    datasets_config = task_config['datasets']
+    if isinstance(sample_weights, dict):
+        sample_weights = [sample_weights.get(dcfg['name'], 1.0) for dcfg in datasets_config]
+    for wi, dataset_i in zip(sample_weights, datasets):
+        dataset_i.__weight__ = wi
+    return datasets
+
 def load_data(args, task_config, save_norm=True):
     """Load datasets with flexible configuration support
     
@@ -746,6 +756,9 @@ def load_data(args, task_config, save_norm=True):
     # Split datasets into train and eval sets
     train_data, eval_data = _train_val_split_datasets(datasets, args)
 
+    # Assigning weights to each dataset
+    train_data = _maybe_assign_weights_to_datasets(train_data, task_config)
+    
     return {'train': train_data, 'eval': eval_data}
 
 def is_rlds_data(ds):
