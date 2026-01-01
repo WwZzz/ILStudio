@@ -457,74 +457,11 @@ def _create_dataset_from_config(dataset_config: dict, args):
     except Exception as e:
         raise RuntimeError(f"Failed to create dataset {class_path} with args {final_args}: {e}")
 
-def load_data(args, task_config, save_norm=True):
-    """Load datasets with flexible configuration support
-    
-    Required format:
-    ```yaml
-    datasets:
-      - name: "main_dataset"
-        class: "data_utils.datasets.EpisodicDataset"
-        args:
-          dataset_path_list: ['path1']
-          camera_names: ['primary']
-          chunk_size: 64
-          ctrl_space: 'ee'
-          ctrl_type: 'delta'
-      - name: "auxiliary_dataset"  
-        class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
-        args:
-          dataset_path_list: ['path2']
-          camera_names: ['primary']
-          # ... custom args for this specific dataset
-    ```
-    """
-    
-    # Ensure new flexible format is used
-    if 'datasets' not in task_config:
-        raise ValueError(
-            "Task config must use the new flexible format with 'datasets' key. "
-            "Old format with 'dataset_dir' is no longer supported. "
-            "Please update your task config to use the datasets format."
-        )
-    return _load_data_flexible_format(args, task_config, save_norm)
-
-def is_rlds_data(ds):
-    import dlimp as dl # Ensure dlimp is imported here as well if needed
-    return isinstance(ds, dl.DLataset)
-
-def is_map_data(dataset):
-    return hasattr(dataset, '__len__') and hasattr(dataset, '__getitem__')
-
-def is_iter_data(dataset):
-    return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
-
-def _load_data_flexible_format(args, task_config, save_norm=True):
-    """Load data using the new flexible configuration format"""
-    
+def _normalize_datasets(datasets, args, task_config, save_norm=True):
     datasets_config = task_config['datasets']
-    
     # Get normalization types
     action_normtype = getattr(args, 'action_normalize', task_config.get('action_normalize', 'zscore'))
     state_normtype = getattr(args, 'state_normalize', task_config.get('state_normalize', 'zscore'))
-    
-    # Create datasets
-    rank = dist.get_rank() if is_distributed() else 0
-    datasets = []
-    
-    if rank == 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    
-    if is_distributed():
-        dist.barrier()
-        
-    if rank != 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    
     # Compute normalizers
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
@@ -635,15 +572,18 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             dataset_name=dataset_id
         )
         wrapped_datasets.append(wrapped_dataset)
-    
-    # Data splitting logic based on eval_ratio and dataset types
+    return wrapped_datasets
+
+def _train_val_split_datasets(datasets, args):
+    """Split datasets into train and eval sets"""
+        # Data splitting logic based on eval_ratio and dataset types
     eval_ratio = getattr(args, 'eval_ratio', 0.0)
     train_data_splits = []
     eval_data_splits = []
 
     if eval_ratio > 0:
         logger.info(f"Splitting each dataset with eval_ratio: {eval_ratio}")
-        for ds in wrapped_datasets:
+        for ds in datasets:
             # --- Handle RLDS Datasets ---
             if hasattr(ds, 'rlds_dataset') and hasattr(ds.rlds_dataset, 'split'):
                 train_rlds_ds, eval_rlds_ds = ds.rlds_dataset.split(
@@ -705,7 +645,7 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         # Per user request, do not create an eval set if eval_ratio is not specified (or is <= 0).
         # All datasets will be used for training.
         logger.info("eval_ratio <= 0. All datasets will be used for training. No evaluation dataset will be created.")
-        train_data_splits.extend(wrapped_datasets)
+        train_data_splits.extend(datasets)
         # eval_data_splits remains an empty list, so eval_data will be None.
 
     # --- Finalize train and eval data ---
@@ -720,8 +660,103 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
         eval_data = eval_data_splits[0]
     elif len(eval_data_splits) > 1:
         eval_data = eval_data_splits
+    return train_data, eval_data
+
+def _apply_transforms_to_datasets(datasets, args, task_config):
+    """Apply transforms to datasets
+    Args:
+        datasets: List of datasets
+        args: Training arguments
+        task_config: Task configuration
+    Returns:
+        List of transformed datasets
+    """
+    transform_configs = task_config.get('transforms', [])
+    if not transform_configs or len(transform_configs) == 0:
+        return datasets
+    # dynamically import the transform class
+    from .transform import TransformPipeline, MapTransformPipeline, IterableTransformPipeline
+    transform_pipes = []
+    
+    for transform_config in transform_configs:
+        transform_class = _import_class_from_path(transform_config.get('type'))
+        transform = transform_class(**transform_config.get('args', {}))
+        transform_pipes.append(transform)
+    transform_pipe = TransformPipeline(transform_pipes)
+    transformed_datasets = []
+    for dataset in datasets:
+        if is_map_data(dataset):
+            transformed_datasets.append(MapTransformPipeline(dataset, transform_pipe))
+        elif is_iter_data(dataset):
+            transformed_datasets.append(IterableTransformPipeline(dataset, transform_pipe))
+        else:
+            raise ValueError(f"Dataset type {type(dataset)} not supported for transformation.")
+    return transformed_datasets
+
+def load_data(args, task_config, save_norm=True):
+    """Load datasets with flexible configuration support
+    
+    Required format:
+    ```yaml
+    datasets:
+      - name: "main_dataset"
+        class: "data_utils.datasets.EpisodicDataset"
+        args:
+          dataset_path_list: ['path1']
+          camera_names: ['primary']
+          chunk_size: 64
+          ctrl_space: 'ee'
+          ctrl_type: 'delta'
+      - name: "auxiliary_dataset"  
+        class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
+        args:
+          dataset_path_list: ['path2']
+          camera_names: ['primary']
+          # ... custom args for this specific dataset
+    ```
+    """
+    
+    # Ensure new flexible format is used
+    if 'datasets' not in task_config:
+        raise ValueError(
+            "Task config must use the new flexible format with 'datasets' key. "
+            "Old format with 'dataset_dir' is no longer supported. "
+            "Please update your task config to use the datasets format."
+        )
+    datasets_config = task_config['datasets']
+    # Create datasets
+    rank = dist.get_rank() if is_distributed() else 0
+    datasets = []
+    if rank == 0:
+        for dataset_config in datasets_config:
+            dataset = _create_dataset_from_config(dataset_config, args)
+            datasets.append(dataset)
+    if is_distributed():
+        dist.barrier()
+    if rank != 0:
+        for dataset_config in datasets_config:
+            dataset = _create_dataset_from_config(dataset_config, args)
+            datasets.append(dataset)
+    # Normalize datasets
+    datasets = _normalize_datasets(datasets, args, task_config, save_norm)
+
+    # Apply transforms to datasets
+    datasets = _apply_transforms_to_datasets(datasets, args, task_config)
+
+    # Split datasets into train and eval sets
+    train_data, eval_data = _train_val_split_datasets(datasets, args)
 
     return {'train': train_data, 'eval': eval_data}
+
+def is_rlds_data(ds):
+    import dlimp as dl # Ensure dlimp is imported here as well if needed
+    return isinstance(ds, dl.DLataset)
+
+def is_map_data(dataset):
+    return hasattr(dataset, '__len__') and hasattr(dataset, '__getitem__')
+
+def is_iter_data(dataset):
+    return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
 
 def _convert_to_type(value):
     """

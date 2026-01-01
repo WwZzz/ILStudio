@@ -213,7 +213,6 @@ class GrootOFTForPolicy(PreTrainedModel):
         
         return {
             'loss': loss,
-            'action_loss': loss,
         }
 
     @torch.no_grad()
@@ -263,9 +262,5 @@ class GrootOFTForPolicy(PreTrainedModel):
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device)
         
-        if len(self._action_queue) == 0:
-            actions = self.predict_action_chunk(batch)
-            self._action_queue.extend(actions.transpose(0, 1))
-        
-        return self._action_queue.popleft().cpu().numpy()
-
+        actions = self.predict_action_chunk(batch)
+        return actions.cpu().numpy()

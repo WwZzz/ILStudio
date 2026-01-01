@@ -11,7 +11,7 @@ from collections import defaultdict
 import json
 import robomimic.utils.obs_utils as ObsUtils
 from benchmark.robomimic.constant import ALL_ENV_CONFIGS, ALL_ENV_LANGUAGES
-from data_utils.rotate import quat2axisangle
+from data_utils.pose_utils import quat2axisangle
 from ..base import *
 from .constant import ALL_ENV_CONFIGS
 from multiprocessing import current_process

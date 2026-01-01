@@ -850,7 +850,6 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
     
     return {'state': state_normalizer, 'action': action_normalizer}
 
-
 def load_normalizers(args):
     """Load normalizers from saved metadata
     
@@ -916,3 +915,4 @@ def load_normalizers(args):
         warnings.warn(f"Failed to load normalizers from {args.model_name_or_path} because {e}")
         identity_normalizer = {'state':Identity(), 'action':Identity()}
         return identity_normalizer, 'ee', 'delta'
+

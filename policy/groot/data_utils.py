@@ -68,9 +68,6 @@ class GrootDataProcessor:
         max_action_dim: int = 32,
         embodiment_tag: str = "new_embodiment",
         image_size: tuple = (224, 224),
-        normalize_state: bool = True,
-        normalize_action: bool = True,
-        stats: Optional[Dict] = None,
         tokenizer_assets_repo: str = "lerobot/eagle2hg-processor-groot-n1p5",
     ):
         self.eagle_processor = eagle_processor
@@ -79,9 +76,6 @@ class GrootDataProcessor:
         self.max_action_dim = max_action_dim
         self.embodiment_tag = embodiment_tag
         self.image_size = image_size
-        self.normalize_state = normalize_state
-        self.normalize_action = normalize_action
-        self.stats = stats or {}
         self.tokenizer_assets_repo = tokenizer_assets_repo
         
         # Embodiment mapping (matches GR00T)
@@ -137,26 +131,6 @@ class GrootDataProcessor:
             padding = torch.zeros(pad_size, *tensor.shape[1:], dtype=tensor.dtype)
             return torch.cat([tensor, padding], dim=0)
 
-    def _normalize_minmax(self, data: torch.Tensor, key: str) -> torch.Tensor:
-        """Apply min-max normalization to [-1, 1]."""
-        if key not in self.stats:
-            return data
-        
-        stats = self.stats[key]
-        if 'min' in stats and 'max' in stats:
-            data_min = stats['min']
-            data_max = stats['max']
-            if isinstance(data_min, torch.Tensor):
-                data_min = data_min[:data.shape[-1]]
-                data_max = data_max[:data.shape[-1]]
-            # Normalize to [-1, 1]
-            denom = data_max - data_min
-            denom = torch.where(denom != 0, denom, torch.ones_like(denom))
-            data = 2 * (data - data_min) / denom - 1
-            data = torch.clamp(data, -1, 1)
-        
-        return data
-
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a single sample.
@@ -188,11 +162,7 @@ class GrootDataProcessor:
             
             orig_state_dim = state.shape[-1]
             
-            # Normalize state
-            if self.normalize_state:
-                state = self._normalize_minmax(state, 'observation.state')
-            
-            # Pad state
+            # Pad state (normalization handled by ILStudio)
             state = self._pad_to_dim(state, self.max_state_dim)
             state = state.unsqueeze(0).numpy()  # (1, state_dim) for state_horizon=1
         
@@ -213,11 +183,7 @@ class GrootDataProcessor:
             orig_action_len = action.shape[0]
             orig_action_dim = action.shape[-1]
             
-            # Normalize action
-            if self.normalize_action:
-                action = self._normalize_minmax(action, 'action')
-            
-            # Truncate and pad
+            # Truncate and pad (normalization handled by ILStudio)
             action = action[:self.chunk_size]
             action = self._pad_to_dim(action, self.max_action_dim, dim=-1)
             
