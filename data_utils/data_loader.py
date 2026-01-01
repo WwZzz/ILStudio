@@ -246,7 +246,100 @@ class BackgroundPrefetcher:
             try: self.data_queue.get_nowait()
             except queue.Empty: break
         # logger.info("[BGPrefetcher] Shutdown complete.")
- 
+
+class MultiplexedDataLoader:
+    """
+    A DataLoader multiplexer that iterates over multiple DataLoaders.
+    
+    Strategies:
+    - Training: Weighted Random Selection using Numpy. Loaders are chosen based on their cumulative weights.
+                Loaders are restarted infinitely upon exhaustion.
+    - Evaluation: Deterministic Round-Robin. Iterates until ALL loaders are exhausted.
+    """
+    def __init__(self, loaders, loader_weights=None, is_training=True):
+        self.loaders = loaders
+        self.is_training = is_training
+        self.num_loaders = len(loaders)
+        
+        # Handle weights for loader selection
+        if loader_weights is None or not is_training:
+            # Use uniform weights for evaluation or if not provided
+            self.loader_weights = [1.0] * self.num_loaders
+        else:
+            self.loader_weights = loader_weights
+            
+        assert len(self.loader_weights) == self.num_loaders, "Length of weights must match number of loaders"
+
+        # Calculate approximate length for progress bars
+        self._len = 0
+        if not is_training:
+            # For eval, the length is the sum of all sub-loaders
+            for l in loaders:
+                if hasattr(l, '__len__'): self._len += len(l)
+        else:
+            # For training, return the max length of sub-loaders as a proxy
+            lens = [len(l) for l in loaders if hasattr(l, '__len__')]
+            self._len = max(lens) if lens else 0
+
+    def __len__(self):
+        return self._len
+
+    def __iter__(self):
+        # Create iterators for all loaders
+        iterators = [iter(l) for l in self.loaders]
+        
+        # Track active indices and their weights (dynamic for eval mode)
+        active_indices = list(range(self.num_loaders))
+        active_weights = list(self.loader_weights)
+        
+        # Cycle pointer for Round-Robin (Eval only)
+        cycle_ptr = 0
+        
+        while len(active_indices) > 0:
+            # === Selection Strategy ===
+            if self.is_training:
+                # Weighted Random Selection using Numpy
+                # 1. Convert to numpy array
+                w_arr = np.array(active_weights, dtype=np.float64)
+                # 2. Normalize to probabilities (sum must be 1.0 for np.random.choice)
+                if w_arr.sum() == 0:
+                    probs = None # Let numpy handle uniform if sum is 0 (edge case)
+                else:
+                    probs = w_arr / w_arr.sum()
+                
+                # 3. Select an INDEX from the active_indices list
+                # np.random.choice returns a scalar here
+                chosen_list_idx = np.random.choice(len(active_indices), p=probs)
+                
+            else:
+                # Deterministic Round-Robin (No random needed)
+                chosen_list_idx = cycle_ptr % len(active_indices)
+            
+            # Map back to the original loader index
+            loader_idx = active_indices[chosen_list_idx]
+            iterator = iterators[loader_idx]
+            
+            try:
+                batch = next(iterator)
+                yield batch
+                
+                # Advance cycle pointer (only affects Eval)
+                cycle_ptr += 1
+                
+            except StopIteration:
+                if self.is_training:
+                    # === Training: Infinite Restart ===
+                    # Re-initialize the exhausted loader
+                    iterators[loader_idx] = iter(self.loaders[loader_idx])
+                    
+                    # Immediately retry fetching from this re-initialized loader
+                    continue 
+                else:
+                    # === Evaluation: Drain and Remove ===
+                    # Remove this loader from active pool
+                    active_indices.pop(chosen_list_idx)
+                    active_weights.pop(chosen_list_idx)
+
 def get_dataloader(train_dataset, val_dataset=None, processor=None, collator=None, args=None):
     """
     Create DataLoader from single dataset or multiple datasets.
@@ -455,8 +548,10 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
             sample_weights = []
             for ds in all_map_datasets:
                 sample_weights.extend([ds.__weight__] * len(ds))
+            map_loader_weight = sum([ds.__weight__ for ds in all_map_datasets])
         else:
             sample_weights = None
+            map_loader_weight = 1.0
         mixed_map_data = torch.utils.data.ConcatDataset(all_map_datasets)
         map_loader = _create_single_dataloader(mixed_map_data, processor, collator, args, is_training=is_training, sample_weights=sample_weights)
     
@@ -468,8 +563,10 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
             sample_weights = [ds.__weight__ for ds in all_iter_datasets]
             sample_weights_sum = sum(sample_weights)
             sample_weights = [w / sample_weights_sum for w in sample_weights]
+            iter_loader_weight = sample_weights_sum
         else:
             sample_weights = None
+            iter_loader_weight = 1.0
         mixed_iter_data = interleave_datasets(all_iter_datasets, probabilities=sample_weights)
         iter_loader = _create_single_dataloader(mixed_iter_data, processor, collator, args, is_training=is_training)
     
@@ -479,28 +576,32 @@ def _create_mixed_dataloader(datasets, processor, collator, args, is_training=Tr
         import dlimp as dl
         if hasattr(all_rlds_datasets[0], '__weight__'):
             sample_weights = [ds.__weight__ for ds in all_rlds_datasets]
+            rlds_loader_weight = sum([ds.__weight__ for ds in all_rlds_datasets])
         else:
             sample_weights = None
+            rlds_loader_weight = 1.0
         mixed_rlds_data_raw = dl.DLataset.sample_from_datasets([ds.dataset if hasattr(ds, 'dataset') else ds for ds in all_rlds_datasets], weights=sample_weights)
         # _create_single_dataloader has specific logic for rlds_data
         rlds_loader = _create_single_dataloader(mixed_rlds_data_raw, processor, collator, args, is_training=is_training)
     
     # Combine all loaders
     loaders_available = []
+    loaders_weights = []
     if map_loader is not None:
         loaders_available.append(map_loader)
+        loaders_weights.append(map_loader_weight)
     if iter_loader is not None:
         loaders_available.append(iter_loader)
+        loaders_weights.append(iter_loader_weight)
     if rlds_loader is not None:
         loaders_available.append(rlds_loader)
+        loaders_weights.append(rlds_loader_weight)
     
     if len(loaders_available) == 1:
         return loaders_available[0]
     elif len(loaders_available) > 1:
         # If multiple types of loaders are present, we need a multiplexer.
-        # This part assumes a SampleMultiplexer class is available or will be implemented.
-        # For now, we'll keep the NotImplementedError to highlight this.
-        raise NotImplementedError("Mixing different types of DataLoaders (map-style, generic iterable, RLDS) is not yet implemented.")
+        return MultiplexedDataLoader(loaders_available, loaders_weights, is_training=is_training)
     else:
-        return None
+        raise ValueError("No loaders available.")
     
