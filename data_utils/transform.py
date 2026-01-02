@@ -24,25 +24,35 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
 class MapTransformPipeline(Dataset):
-    def __init__(self, dataset: Dataset, transforms: Sequence[Callable]):
+    def __init__(self, dataset: Dataset, transforms: Sequence[Callable]=None, add_dataset_id: bool=True):
         self.dataset = dataset
         self.transforms = transforms
+        self.add_dataset_id = add_dataset_id
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return self.transforms(self.dataset[idx])
+        data = self.dataset[idx]
+        if self.transforms is not None:
+            data = self.transforms(data)
+        if self.add_dataset_id:
+            data['dataset_id'] = getattr(self.dataset, 'dataset_id', 'unknown')
+        return data
 
 class IterableTransformPipeline(IterableDataset):
-    def __init__(self, dataset: IterableDataset, transforms: Sequence[Callable]):
+    def __init__(self, dataset: IterableDataset, transforms: Sequence[Callable]=None, add_dataset_id: bool=True):
         self.dataset = dataset
         self.transforms = transforms
+        self.add_dataset_id = add_dataset_id
 
     def __iter__(self):
         for item in self.dataset:
-            yield self.transforms(item)
-
+            if self.transforms is not None:
+                item = self.transforms(item)
+            if self.add_dataset_id:
+                item['dataset_id'] = getattr(self.dataset, 'dataset_id', 'unknown')
+            yield item
 
 class TransformPipeline:
     def __init__(self, transforms: list[Callable]):

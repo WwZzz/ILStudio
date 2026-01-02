@@ -405,24 +405,6 @@ def _create_dataset_from_config(dataset_config: dict, args):
     # Extract constructor arguments
     constructor_args = dataset_config.get('args', {})
     
-    # # Handle legacy parameters for backward compatibility (only if not in constructor_args)
-    # legacy_params = {}
-    # if 'dataset_dir' not in constructor_args and 'dataset_path_list' not in constructor_args:
-    #     if 'dataset_dir' in dataset_config or 'path' in dataset_config:
-    #         legacy_params['dataset_dir'] = dataset_config.get('dataset_dir', dataset_config.get('path'))
-    
-    # if 'camera_names' not in constructor_args:
-    #     legacy_params['camera_names'] = dataset_config.get('camera_names', [])
-    
-    # if 'chunk_size' not in constructor_args:
-    #     legacy_params['chunk_size'] = dataset_config.get('chunk_size', getattr(args, 'chunk_size', 16))
-    
-    # if 'ctrl_space' not in constructor_args:
-    #     legacy_params['ctrl_space'] = dataset_config.get('ctrl_space', 'ee')
-    
-    # if 'ctrl_type' not in constructor_args:
-    #     legacy_params['ctrl_type'] = dataset_config.get('ctrl_type', 'delta')
-    
     # Merge legacy params with constructor args (constructor args take priority)
     final_args = {}
     # final_args.update(legacy_params)
@@ -662,17 +644,17 @@ def _apply_transforms_to_datasets(datasets, args, task_config):
         List of transformed datasets
     """
     transform_configs = task_config.get('transforms', [])
-    if not transform_configs or len(transform_configs) == 0:
-        return datasets
-    # dynamically import the transform class
     from .transform import TransformPipeline, MapTransformPipeline, IterableTransformPipeline
-    transform_pipes = []
-    
-    for transform_config in transform_configs:
-        transform_class = _import_class_from_path(transform_config.get('type'))
-        transform = transform_class(**transform_config.get('args', {}))
-        transform_pipes.append(transform)
-    transform_pipe = TransformPipeline(transform_pipes)
+    if transform_configs and len(transform_configs) > 0:
+        # dynamically import the transform class
+        transform_pipes = []
+        for transform_config in transform_configs:
+            transform_class = _import_class_from_path(transform_config.get('type'))
+            transform = transform_class(**transform_config.get('args', {}))
+            transform_pipes.append(transform)
+        transform_pipe = TransformPipeline(transform_pipes)
+    else:
+        transform_pipe = None # keep None to append dataset_id to each dataset's samples
     transformed_datasets = []
     for dataset in datasets:
         if is_map_data(dataset):
