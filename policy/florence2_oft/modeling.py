@@ -343,8 +343,8 @@ class Florence2OFTForPolicy(PreTrainedModel):
 
         return {
             'loss': action_loss,
-            # 'action_loss': action_loss,
-            # 'pred_actions': pred_actions,
+            'action_loss': action_loss,
+            'pred_actions': pred_actions,
         }
 
     @torch.inference_mode()
