@@ -5,7 +5,7 @@ args:
   # Supported models:
   #   - microsoft/Florence-2-base
   #   - microsoft/Florence-2-large
-  vlm_model_name_or_path: microsoft/Florence-2-large
+  vlm_model_name_or_path: microsoft/Florence-2-base
   
   # Policy Dimensions
   action_dim: 7
@@ -21,7 +21,8 @@ args:
   # Set to reduce token count per image (default Florence2 uses 768x768)
   # Options: null (use default), int (e.g. 384), or [h, w] list (e.g. [384, 384])
   # 768x768 -> 577 tokens, 384x384 -> 145 tokens, 224x224 -> 50 tokens
-  image_size: null
+  # NOTE: Florence2 requires SQUARE images, so always use [h, h] format
+  image_size: [384, 384]
   
   # Action Token
   action_token: "🔍"  # Special token for action prediction
@@ -30,7 +31,7 @@ args:
   task_prompt: "Predict the next robot actions:"
   
   # LoRA Configuration
-  lora_enable: true
+  lora_enable: false
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.1
@@ -39,8 +40,8 @@ args:
   
   # Training Configuration
   bits: 16
-  bf16: false
-  fp16: true  # Florence2 uses fp16 by default
+  bf16: true   # Use bfloat16 for better numerical stability (larger dynamic range than fp16)
+  fp16: false  # fp16 can cause NaN in Florence2 vision encoder due to overflow
   gradient_checkpointing: true
   freeze_backbone: false
   freeze_vision_tower: false
