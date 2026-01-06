@@ -429,6 +429,110 @@ def _create_dataset_from_config(dataset_config: dict, args):
     except Exception as e:
         raise RuntimeError(f"Failed to create dataset {class_path} with args {final_args}: {e}")
 
+
+def _create_vqa_dataset_from_config(dataset_config: dict, args):
+    """Create a VQA dataset instance from configuration
+    
+    Args:
+        dataset_config: Individual VQA dataset configuration
+        args: Training arguments
+    
+    Returns:
+        VQA Dataset instance with added 'name' and 'dataset_id' attributes
+    """
+    # Get dataset class
+    class_path = dataset_config.get('type') or dataset_config.get('class')
+    if not class_path:
+        raise ValueError(f"VQA dataset configuration must include a 'type' or 'class' field: {dataset_config}")
+    
+    dataset_class = _import_class_from_path(class_path)
+    
+    # Extract dataset name from config (required for identification)
+    dataset_name = dataset_config.get('name')
+    if not dataset_name:
+        raise ValueError(f"VQA dataset configuration must include a 'name' field: {dataset_config}")
+    
+    # Extract constructor arguments
+    constructor_args = dataset_config.get('args', {})
+    
+    # Create dataset instance
+    try:
+        dataset = dataset_class(**constructor_args)
+        
+        # Add name and dataset_id attributes for identification
+        dataset.name = dataset_name
+        dataset.dataset_id = dataset_name
+        
+        logger.info(f"Created VQA dataset '{dataset_name}' with class {class_path}")
+        
+        return dataset
+    except Exception as e:
+        raise RuntimeError(f"Failed to create VQA dataset {class_path} with args {constructor_args}: {e}")
+
+
+def _wrap_vqa_datasets(vqa_datasets, args, task_config):
+    """Wrap VQA datasets with MapVQAWrapper or IterVQAWrapper
+    
+    This function wraps VQA datasets to add dummy action, state, and is_pad fields
+    so they can be used alongside regular robot datasets.
+    
+    Args:
+        vqa_datasets: List of VQA datasets
+        args: Training arguments
+        task_config: Task configuration containing meta information
+    
+    Returns:
+        List of wrapped VQA datasets
+    """
+    from data_utils.dataset_wrappers import MapVQAWrapper, IterVQAWrapper
+    
+    # Get action_dim, state_dim, chunk_size from task_config meta
+    meta = task_config.get('meta', {})
+    action_dim = meta.get('action_dim')
+    state_dim = meta.get('state_dim')
+    chunk_size = meta.get('chunk_size')
+    
+    # Fallback to args if not in meta
+    if action_dim is None:
+        action_dim = getattr(args, 'action_dim', 7)
+    if state_dim is None:
+        state_dim = getattr(args, 'state_dim', 7)
+    if chunk_size is None:
+        chunk_size = getattr(args, 'chunk_size', 16)
+    
+    logger.info(f"Wrapping VQA datasets with action_dim={action_dim}, state_dim={state_dim}, chunk_size={chunk_size}")
+    
+    wrapped_datasets = []
+    for dataset in vqa_datasets:
+        # Check if it's a map-style or iterable dataset
+        if is_map_data(dataset):
+            wrapped = MapVQAWrapper(
+                dataset=dataset,
+                action_dim=action_dim,
+                state_dim=state_dim,
+                chunk_size=chunk_size,
+            )
+        elif is_iter_data(dataset):
+            wrapped = IterVQAWrapper(
+                dataset=dataset,
+                action_dim=action_dim,
+                state_dim=state_dim,
+                chunk_size=chunk_size,
+            )
+        else:
+            logger.warning(f"Unknown dataset type for VQA dataset {getattr(dataset, 'name', 'unknown')}, skipping wrap")
+            wrapped = dataset
+        
+        # Preserve name and dataset_id
+        wrapped.name = getattr(dataset, 'name', 'vqa_dataset')
+        wrapped.dataset_id = getattr(dataset, 'dataset_id', wrapped.name)
+        
+        wrapped_datasets.append(wrapped)
+        logger.info(f"Wrapped VQA dataset '{wrapped.name}' with {type(wrapped).__name__}")
+    
+    return wrapped_datasets
+
+
 def _normalize_datasets(datasets, args, task_config, save_norm=True):
     datasets_config = task_config['datasets']
     # Get normalization types
@@ -668,7 +772,9 @@ def _apply_transforms_to_datasets(datasets, args, task_config):
 def _maybe_assign_weights_to_datasets(datasets, task_config):
     sample_weights = task_config.get('sample_weights', None)
     if sample_weights is None or not isinstance(datasets, list): return datasets
-    datasets_config = task_config['datasets']
+    datasets_config = task_config.get('datasets', [])
+    vqa_configs = task_config.get('vqa', [])
+    datasets_config.extend(vqa_configs)
     if isinstance(sample_weights, dict):
         sample_weights = [sample_weights.get(dcfg['name'], 1.0) for dcfg in datasets_config]
     for wi, dataset_i in zip(sample_weights, datasets):
@@ -699,31 +805,51 @@ def load_data(args, task_config, save_norm=True):
     """
     
     # Ensure new flexible format is used
-    if 'datasets' not in task_config:
-        raise ValueError(
-            "Task config must use the new flexible format with 'datasets' key. "
-            "Old format with 'dataset_dir' is no longer supported. "
-            "Please update your task config to use the datasets format."
-        )
-    datasets_config = task_config['datasets']
-    # Create datasets
-    rank = dist.get_rank() if is_distributed() else 0
-    datasets = []
-    if rank == 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    if is_distributed():
-        dist.barrier()
-    if rank != 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    # Normalize datasets
-    datasets = _normalize_datasets(datasets, args, task_config, save_norm)
+    if 'datasets' not in task_config and 'vqa' not in task_config:
+        raise ValueError("There is not dataset in task config")
+    if 'datasets' in task_config:
+        datasets_config = task_config['datasets']
+        # Create datasets
+        rank = dist.get_rank() if is_distributed() else 0
+        datasets = []
+        if rank == 0:
+            for dataset_config in datasets_config:
+                dataset = _create_dataset_from_config(dataset_config, args)
+                datasets.append(dataset)
+        if is_distributed():
+            dist.barrier()
+        if rank != 0:
+            for dataset_config in datasets_config:
+                dataset = _create_dataset_from_config(dataset_config, args)
+                datasets.append(dataset)
+        # Normalize datasets
+        datasets = _normalize_datasets(datasets, args, task_config, save_norm)
 
-    # Apply transforms to datasets
-    datasets = _apply_transforms_to_datasets(datasets, args, task_config)
+        # Apply transforms to datasets
+        datasets = _apply_transforms_to_datasets(datasets, args, task_config)
+    else:
+        datasets = []
+    if 'vqa' in task_config:
+        vqa_configs = task_config['vqa']
+        rank = dist.get_rank() if is_distributed() else 0
+        vqa_datasets = []
+        if rank == 0:
+            for dataset_config in vqa_configs:
+                dataset = _create_vqa_dataset_from_config(dataset_config, args)
+                vqa_datasets.append(dataset)
+        if is_distributed():
+            dist.barrier()
+        if rank != 0:
+            for dataset_config in vqa_configs:
+                dataset = _create_vqa_dataset_from_config(dataset_config, args)
+                vqa_datasets.append(dataset)
+        # Apply transforms to vqa datasets
+        vqa_datasets = _apply_transforms_to_datasets(vqa_datasets, args, task_config)
+        # Wrap vqa datasets
+        vqa_datasets = _wrap_vqa_datasets(vqa_datasets, args, task_config)
+        datasets.extend(vqa_datasets)
+        
+        
 
     # Split datasets into train and eval sets
     train_data, eval_data = _train_val_split_datasets(datasets, args)
