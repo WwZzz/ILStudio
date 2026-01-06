@@ -475,11 +475,12 @@ class ConfigLoader:
             for key, value in all_params.items():
                 setattr(args, key, value)
             # Generate image_sizes for backward compatibility with policies that still use it
-            if isinstance(args.image_size, str):
-                args.image_size = eval(args.image_size)
-            elif isinstance(args.image_size, int):
-                args.image_size = [args.image_size, args.image_size]
-            args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
+            if hasattr(args, 'image_size'):
+                if isinstance(args.image_size, str):
+                    args.image_size = eval(args.image_size)
+                elif isinstance(args.image_size, int):
+                    args.image_size = [args.image_size, args.image_size]
+                args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
             
             # IMPORTANT: Update args.model_args for policies that use it directly (like ACT)
             # This ensures the updated action_dim/state_dim are used during model initialization
