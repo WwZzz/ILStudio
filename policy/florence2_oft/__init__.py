@@ -73,10 +73,34 @@ def load_model(args):
             trust_remote_code=True
         )
         
+        # Add action token to tokenizer BEFORE loading model to ensure vocab size matches
+        # This is critical because checkpoint may contain the added token
+        tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
+        action_token = getattr(config, 'action_token', '🔍')
+        
+        # Check if token needs to be added
+        action_token_only = tokenizer(action_token, add_special_tokens=False)["input_ids"]
+        tokens_per_action = len(action_token_only)
+        num_added = 0
+        
+        if tokens_per_action != 1 and hasattr(tokenizer, 'add_tokens'):
+            num_added = tokenizer.add_tokens([action_token], special_tokens=True)
+            if num_added > 0:
+                logger.info(
+                    f"Added action token '{action_token}' as special token before loading model. "
+                    f"Tokenizer vocabulary size increased by {num_added}."
+                )
+        
         # Check for PEFT adapter
         peft_path = os.path.join(args.model_name_or_path, 'adapter_config.json')
         if os.path.exists(peft_path):
             model = Florence2OFTForPolicy(config=config)
+            # Resize embeddings if token was added
+            if num_added > 0:
+                if hasattr(model.vlm, 'resize_token_embeddings'):
+                    model.vlm.resize_token_embeddings(len(tokenizer))
+                elif hasattr(model.vlm, 'language_model') and hasattr(model.vlm.language_model, 'resize_token_embeddings'):
+                    model.vlm.language_model.resize_token_embeddings(len(tokenizer))
             model = PeftModel.from_pretrained(model, args.model_name_or_path)
             
             # Load extra trainable parameters
@@ -87,15 +111,63 @@ def load_model(args):
             
             model = model.merge_and_unload()
         else:
-            model = Florence2OFTForPolicy.from_pretrained(args.model_name_or_path, config=config)
+            # Create model first, then resize embeddings if token was added
+            # This ensures vocab size matches checkpoint before loading weights
+            model = Florence2OFTForPolicy(config=config)
+            
+            # Resize embeddings if token was added (before loading checkpoint)
+            if num_added > 0:
+                if hasattr(model.vlm, 'resize_token_embeddings'):
+                    model.vlm.resize_token_embeddings(len(tokenizer))
+                    logger.info("Resized VLM embeddings to match tokenizer vocabulary size")
+                elif hasattr(model.vlm, 'language_model') and hasattr(model.vlm.language_model, 'resize_token_embeddings'):
+                    model.vlm.language_model.resize_token_embeddings(len(tokenizer))
+                    logger.info("Resized language_model embeddings to match tokenizer vocabulary size")
+            
+            # Now load checkpoint weights
+            # Use from_pretrained but skip the model creation part by loading state dict manually
+            try:
+                # Try to load state dict directly
+                state_dict_path = os.path.join(args.model_name_or_path, 'pytorch_model.bin')
+                if os.path.exists(state_dict_path):
+                    state_dict = torch.load(state_dict_path, map_location='cpu')
+                else:
+                    # Try safetensors format
+                    state_dict_path = os.path.join(args.model_name_or_path, 'model.safetensors')
+                    if os.path.exists(state_dict_path):
+                        state_dict = load_file(state_dict_path)
+                    else:
+                        raise FileNotFoundError(f"No checkpoint file found in {args.model_name_or_path}")
+                
+                model.load_state_dict(state_dict, strict=False)
+                logger.info("Loaded checkpoint weights successfully")
+            except Exception as e:
+                # Fallback: use from_pretrained with ignore_mismatched_sizes
+                logger.warning(f"Failed to load state dict directly: {e}. Using from_pretrained with ignore_mismatched_sizes")
+                model = Florence2OFTForPolicy.from_pretrained(
+                    args.model_name_or_path, 
+                    config=config,
+                    ignore_mismatched_sizes=True
+                )
+                # Resize again after from_pretrained
+                if num_added > 0:
+                    if hasattr(model.vlm, 'resize_token_embeddings'):
+                        model.vlm.resize_token_embeddings(len(tokenizer))
+                    elif hasattr(model.vlm, 'language_model') and hasattr(model.vlm.language_model, 'resize_token_embeddings'):
+                        model.vlm.language_model.resize_token_embeddings(len(tokenizer))
         
-        # Set processor
+        # Set processor (this will verify tokenization but won't add tokens again)
         model.set_processor(processor)
+        
+        # Get image_size from config
+        image_size = getattr(config, 'image_size', None)
         
         # Initialize data processor and collator for inference
         model.data_processor = Florence2OFTDataProcessor(
             processor=processor,
             chunk_size=config.chunk_size,
+            action_token=config.action_token,
+            image_size=image_size,
         )
         model.data_collator = Florence2OFTDataCollator(
             processor=processor,
@@ -114,7 +186,8 @@ def load_model(args):
             action_dim=args.action_dim,
             state_dim=args.state_dim,
             chunk_size=args.chunk_size,
-            use_pooled_output=getattr(args, 'use_pooled_output', True),
+            action_token=getattr(args, 'action_token', '🔍'),
+            image_size=getattr(args, 'image_size', None),
         )
         model = Florence2OFTForPolicy(config=config)
         
@@ -165,6 +238,11 @@ def load_model(args):
     else:
         model.to(dtype=torch.float16, device=args.device)
     
+    # Keep action_head in float32 for numerical stability
+    unwrapped_model = model.base_model if hasattr(model, 'base_model') else model
+    if hasattr(unwrapped_model, 'action_head'):
+        unwrapped_model.action_head.float()
+    
     # Save config
     if hasattr(args, 'output_dir') and args.is_training:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -188,10 +266,15 @@ def get_data_processor(args, model_components):
     Returns:
         Florence2OFTDataProcessor instance
     """
+    # Get image_size from args
+    image_size = getattr(args, 'image_size', None)
+    
     return Florence2OFTDataProcessor(
         processor=model_components['processor'],
         chunk_size=args.chunk_size,
-        task_prompt=getattr(args, 'task_prompt', "Locate the objects with category name in the image."),
+        task_prompt=getattr(args, 'task_prompt', "Predict the next robot actions:"),
+        action_token=getattr(args, 'action_token', '🔍'),
+        image_size=image_size,
     )
 
 

@@ -17,11 +17,17 @@ args:
   action_head_hidden_mult: 2  # Hidden dim multiplier
   action_head_num_blocks: 2  # Number of MLP ResNet blocks
   
-  # Pooling Strategy
-  use_pooled_output: true  # Use mean pooling of encoder output
+  # Image Size Configuration
+  # Set to reduce token count per image (default Florence2 uses 768x768)
+  # Options: null (use default), int (e.g. 384), or [h, w] list (e.g. [384, 384])
+  # 768x768 -> 577 tokens, 384x384 -> 145 tokens, 224x224 -> 50 tokens
+  image_size: null
+  
+  # Action Token
+  action_token: "🔍"  # Special token for action prediction
   
   # Task Prompt (for Florence2 format)
-  task_prompt: "Locate the objects with category name in the image."
+  task_prompt: "Predict the next robot actions:"
   
   # LoRA Configuration
   lora_enable: true

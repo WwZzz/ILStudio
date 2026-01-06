@@ -17,8 +17,8 @@ args:
   action_head_hidden_mult: 2  # Hidden dim multiplier
   action_head_num_blocks: 2  # Number of MLP ResNet blocks
   
-  # Action Query Strategy
-  use_last_token: true  # Use last token hidden state (UniAct style)
+  # Action Token
+  action_token: "🔍"  # Special token for action prediction
   
   # LoRA Configuration
   lora_enable: false

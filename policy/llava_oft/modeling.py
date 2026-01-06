@@ -119,7 +119,7 @@ class LlavaOFTConfig(PretrainedConfig):
         action_hidden_dim: Hidden dimension for action head (auto-set from VLM)
         action_head_hidden_mult: Multiplier for action head hidden dimension
         action_head_num_blocks: Number of MLP ResNet blocks
-        use_last_token: Whether to use last token for action prediction
+        action_token: Special token for action prediction
     """
     model_type = "llava_oft"
 
@@ -132,7 +132,7 @@ class LlavaOFTConfig(PretrainedConfig):
         action_hidden_dim: int = None,  # Will be set from VLM hidden size
         action_head_hidden_mult: int = 2,
         action_head_num_blocks: int = 2,
-        use_last_token: bool = True,  # Use last valid token for action prediction
+        action_token: str = "🔍",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -143,7 +143,7 @@ class LlavaOFTConfig(PretrainedConfig):
         self.action_hidden_dim = action_hidden_dim
         self.action_head_hidden_mult = action_head_hidden_mult
         self.action_head_num_blocks = action_head_num_blocks
-        self.use_last_token = use_last_token
+        self.action_token = action_token
 
 
 # =============================================================================
@@ -199,14 +199,15 @@ class LlavaOFTForPolicy(PreTrainedModel):
             num_blocks=config.action_head_num_blocks,
         )
         
-        # Settings
+        # Action token setup
+        self.action_token = config.action_token
         self.chunk_size = config.chunk_size
-        self.use_last_token = config.use_last_token
         
         # L1 loss
         self.l1_loss = nn.L1Loss()
         
         # Will be set after processor is loaded
+        self.action_token_id = None
         self.multimodal_processor = None
         self.tokenizer = None
         
@@ -221,9 +222,24 @@ class LlavaOFTForPolicy(PreTrainedModel):
             return False
 
     def set_processor(self, processor):
-        """Set the multimodal processor."""
+        """Set the multimodal processor.
+        
+        Note: We use last-N-embeddings approach for action prediction, so action token
+        encoding is not critical. The action tokens in the prompt simply serve to
+        extend the sequence length to provide positions for action prediction.
+        """
         self.multimodal_processor = processor
         self.tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
+        
+        # Check action token tokenization (informational only)
+        test_tokenization = self.tokenizer(
+            self.action_token, add_special_tokens=False
+        )["input_ids"]
+        
+        logger.info(
+            f"Action token '{self.action_token}' -> {len(test_tokenization)} token(s). "
+            f"Using last-{self.chunk_size}-embeddings approach for action prediction."
+        )
 
     def get_input_embeddings(self):
         return self.vlm.get_input_embeddings()
@@ -247,37 +263,59 @@ class LlavaOFTForPolicy(PreTrainedModel):
         # Action head always trainable
         self.action_head.requires_grad_(True)
 
-    def _get_last_token_hidden(
+    def _get_last_n_embeddings(
         self,
-        hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor,
+        last_hidden: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Extract the last valid token's hidden state for each sample.
+        Extract the last chunk_size embeddings from hidden states.
         
-        Following UniAct's approach:
-            last_indices = (attention_mask.cumsum(dim=1) * attention_mask).argmax(dim=1)
+        This is the correct approach for decoder models like LLaVA:
+        - Each position in the sequence has unique hidden states due to causal attention
+        - The last chunk_size positions contain the most context-rich representations
+        - Action tokens at the end of the prompt provide natural positions for action prediction
         
         Args:
-            hidden_states: (B, L, H) - Hidden states from VLM
-            attention_mask: (B, L) - Attention mask
+            last_hidden: (B, L, H) - Last layer hidden states
+            attention_mask: (B, L) - Optional attention mask
             
         Returns:
-            last_hidden: (B, H) - Last valid token hidden state for each sample
+            action_queries: (B, chunk_size, H)
         """
-        # Find the last valid token index for each sample
-        # cumsum gives position counts, multiply by mask to zero out padded positions
-        # argmax finds the last non-zero position
-        last_indices = (attention_mask.cumsum(dim=1) * attention_mask).argmax(dim=1)
+        B, L, H = last_hidden.shape
         
-        # Gather the hidden states at those positions
-        batch_size = hidden_states.shape[0]
-        last_hidden = hidden_states[
-            torch.arange(batch_size, device=hidden_states.device),
-            last_indices.to(hidden_states.device)
-        ]
+        if attention_mask is not None:
+            # Find the last valid position for each sample
+            # Then take chunk_size positions ending at that position
+            seq_lengths = attention_mask.sum(dim=1)  # (B,)
+            
+            # Build indices for gathering
+            # For each sample, we want positions [seq_len - chunk_size, seq_len)
+            action_queries_list = []
+            for i in range(B):
+                seq_len = seq_lengths[i].item()
+                start_pos = max(0, seq_len - self.chunk_size)
+                end_pos = seq_len
+                
+                # Get embeddings for this sample
+                sample_embeddings = last_hidden[i, start_pos:end_pos, :]  # (actual_len, H)
+                
+                # Pad if needed (shouldn't happen normally)
+                actual_len = sample_embeddings.shape[0]
+                if actual_len < self.chunk_size:
+                    # Repeat the last embedding to fill
+                    padding = sample_embeddings[-1:].repeat(self.chunk_size - actual_len, 1)
+                    sample_embeddings = torch.cat([sample_embeddings, padding], dim=0)
+                
+                action_queries_list.append(sample_embeddings)
+            
+            action_queries = torch.stack(action_queries_list, dim=0)  # (B, chunk_size, H)
+        else:
+            # No attention mask, simply take last chunk_size positions
+            action_queries = last_hidden[:, -self.chunk_size:, :]
         
-        return last_hidden
+        return action_queries
 
     def forward(
         self,
@@ -310,19 +348,10 @@ class LlavaOFTForPolicy(PreTrainedModel):
             # Get last layer hidden states
             last_hidden = outputs.hidden_states[-1]  # (B, L, H)
 
-        # Predict actions
+        # Predict actions using last chunk_size embeddings
+        # For decoder models like LLaVA, the last positions have the richest context
         with torch.autocast("cuda", dtype=torch.float32):
-            if self.use_last_token:
-                # Get last valid token hidden state
-                last_token_hidden = self._get_last_token_hidden(last_hidden, attention_mask)  # (B, H)
-                # Expand to chunk_size
-                action_queries = last_token_hidden.unsqueeze(1).expand(-1, self.chunk_size, -1)  # (B, chunk_size, H)
-            else:
-                # Use mean pooling
-                masked_hidden = last_hidden * attention_mask.unsqueeze(-1)
-                pooled = masked_hidden.sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
-                action_queries = pooled.unsqueeze(1).expand(-1, self.chunk_size, -1)
-            
+            action_queries = self._get_last_n_embeddings(last_hidden, attention_mask)
             pred_actions = self.action_head(action_queries)
 
             # Compute loss if actions provided
@@ -383,17 +412,10 @@ class LlavaOFTForPolicy(PreTrainedModel):
             last_hidden = outputs.hidden_states[-1]
 
         with torch.autocast("cuda", dtype=torch.float32):
-            if self.use_last_token:
-                last_token_hidden = self._get_last_token_hidden(last_hidden, attention_mask)
-                action_queries = last_token_hidden.unsqueeze(1).expand(-1, self.chunk_size, -1)
-            else:
-                masked_hidden = last_hidden * attention_mask.unsqueeze(-1)
-                pooled = masked_hidden.sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
-                action_queries = pooled.unsqueeze(1).expand(-1, self.chunk_size, -1)
-            
+            action_queries = self._get_last_n_embeddings(last_hidden, attention_mask)
             pred_actions = self.action_head(action_queries)
 
-        return {'pred_actions': pred_actions.detach().cpu().numpy()}
+        return {'pred_actions': pred_actions.detach().float().cpu().numpy()}
 
     def select_action(self, batch_obs: Dict[str, Any]) -> np.ndarray:
         """

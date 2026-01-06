@@ -119,7 +119,8 @@ class Florence2OFTConfig(PretrainedConfig):
         action_hidden_dim: Hidden dimension for action head (auto-set from VLM)
         action_head_hidden_mult: Multiplier for action head hidden dimension
         action_head_num_blocks: Number of MLP ResNet blocks
-        use_pooled_output: Whether to use pooled output for action prediction
+        action_token: Special token for action prediction
+        image_size: Image size for processing (can be int or [h, w] list)
     """
     model_type = "florence2_oft"
 
@@ -132,7 +133,8 @@ class Florence2OFTConfig(PretrainedConfig):
         action_hidden_dim: int = None,  # Will be set from VLM projection_dim
         action_head_hidden_mult: int = 2,
         action_head_num_blocks: int = 2,
-        use_pooled_output: bool = True,  # Use mean pooling of encoder output
+        action_token: str = "@",
+        image_size = None,  # Image size for processing (int or [h, w])
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -143,7 +145,8 @@ class Florence2OFTConfig(PretrainedConfig):
         self.action_hidden_dim = action_hidden_dim
         self.action_head_hidden_mult = action_head_hidden_mult
         self.action_head_num_blocks = action_head_num_blocks
-        self.use_pooled_output = use_pooled_output
+        self.action_token = action_token
+        self.image_size = image_size
 
 
 # =============================================================================
@@ -189,32 +192,101 @@ class Florence2OFTForPolicy(PreTrainedModel):
             del self.vlm.lm_head
             logger.info("Removed Florence2 lm_head to save memory")
         
-        # Build action head
+        # Build action head (kept in float32 for numerical stability)
         self.action_head = L1RegressionActionHead(
             input_dim=config.action_hidden_dim,
             hidden_dim=config.action_hidden_dim * config.action_head_hidden_mult,
             action_dim=config.action_dim,
             num_blocks=config.action_head_num_blocks,
-        )
+        ).float()  # Keep action head in float32
         
-        # Settings
+        # Action token setup
+        self.action_token = config.action_token
         self.chunk_size = config.chunk_size
-        self.use_pooled_output = config.use_pooled_output
         
         # L1 loss
         self.l1_loss = nn.L1Loss()
         
         # Will be set after processor is loaded
+        self.action_token_id = None
         self.multimodal_processor = None
         self.tokenizer = None
+        
+        # Register action_head as float32 module (won't be converted by model.to())
+        self._action_head_dtype = torch.float32
         
         logger.info(f"Florence2OFT initialized with hidden_size={vlm_hidden_size}")
 
     def set_processor(self, processor):
-        """Set the multimodal processor."""
+        """Set the multimodal processor and add action token as special token if needed."""
         self.multimodal_processor = processor
-        # Florence2 processor doesn't have separate tokenizer
-        self.tokenizer = processor
+        # Florence2 processor has tokenizer attribute
+        self.tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
+        
+        # Check current tokenization
+        action_token_only = self.tokenizer(self.action_token, add_special_tokens=False)["input_ids"]
+        tokens_per_action_before = len(action_token_only)
+        
+        # Try to add action_token as a special token to force single-token tokenization
+        if tokens_per_action_before != 1:
+            # Check if tokenizer supports add_tokens
+            if hasattr(self.tokenizer, 'add_tokens'):
+                num_added = self.tokenizer.add_tokens([self.action_token], special_tokens=True)
+                if num_added > 0:
+                    logger.info(
+                        f"Added action token '{self.action_token}' as special token. "
+                        f"Tokenizer vocabulary size increased by {num_added}."
+                    )
+                    # Resize model embeddings if needed
+                    # For Florence2, embeddings are in language_model.embed_tokens
+                    if hasattr(self.vlm, 'resize_token_embeddings'):
+                        try:
+                            self.vlm.resize_token_embeddings(len(self.tokenizer))
+                            logger.info("Resized VLM embeddings to match new vocabulary size")
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to resize VLM embeddings: {e}. "
+                                f"This may be fine if embeddings are handled differently."
+                            )
+                    elif hasattr(self.vlm, 'language_model') and hasattr(self.vlm.language_model, 'resize_token_embeddings'):
+                        try:
+                            self.vlm.language_model.resize_token_embeddings(len(self.tokenizer))
+                            logger.info("Resized language_model embeddings to match new vocabulary size")
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to resize language_model embeddings: {e}. "
+                                f"This may be fine if embeddings are handled differently."
+                            )
+                else:
+                    logger.warning(
+                        f"Failed to add action token '{self.action_token}' as special token. "
+                        f"It may already exist or tokenizer doesn't support adding tokens."
+                    )
+            else:
+                logger.warning(
+                    f"Tokenizer doesn't support add_tokens method. "
+                    f"Action token '{self.action_token}' will remain as {tokens_per_action_before} token(s)."
+                )
+        
+        # Verify tokenization after adding
+        action_token_only_after = self.tokenizer(self.action_token, add_special_tokens=False)["input_ids"]
+        tokens_per_action_after = len(action_token_only_after)
+        
+        logger.info(
+            f"Action token '{self.action_token}' tokenization: "
+            f"{tokens_per_action_before} token(s) before -> {tokens_per_action_after} token(s) after. "
+            f"Will use last {self.chunk_size} hidden states for action prediction."
+        )
+        
+        if tokens_per_action_after != 1:
+            logger.warning(
+                f"Action token '{self.action_token}' is still tokenized into {tokens_per_action_after} tokens. "
+                f"This may cause misalignment. The model will use last {self.chunk_size} hidden states."
+            )
+        else:
+            logger.info(f"Successfully configured action token '{self.action_token}' as single token.")
+        
+        logger.info("Florence2OFT processor set")
 
     def get_input_embeddings(self):
         return self.vlm.get_input_embeddings()
@@ -240,6 +312,28 @@ class Florence2OFTForPolicy(PreTrainedModel):
         
         # Action head always trainable
         self.action_head.requires_grad_(True)
+
+    def _get_last_n_embeddings(
+        self,
+        last_hidden: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Extract the last chunk_size embeddings from hidden states.
+        
+        For Florence2 encoder, the merged sequence is [image_features, text_embeddings].
+        Since action tokens are appended at the end of the prompt, the last chunk_size
+        hidden states correspond to the action token positions.
+        
+        Args:
+            last_hidden: (B, L, H) - Last layer hidden states
+            
+        Returns:
+            action_queries: (B, chunk_size, H)
+        """
+        # Simply take the last chunk_size hidden states
+        # Florence2 encoder output: [image_features, text_embeddings]
+        # Action tokens are at the end of text, so last chunk_size positions
+        return last_hidden[:, -self.chunk_size:, :]
 
     def forward_encoder(
         self,
@@ -305,15 +399,13 @@ class Florence2OFTForPolicy(PreTrainedModel):
                 attention_mask=attention_mask,
             )
 
-        # Predict actions
-        with torch.autocast("cuda", dtype=torch.float32):
-            if self.use_pooled_output:
-                # Use mean pooling and expand to chunk_size
-                pooled = last_hidden.mean(dim=1)  # (B, H)
-                action_queries = pooled.unsqueeze(1).expand(-1, self.chunk_size, -1)  # (B, chunk_size, H)
-            else:
-                # Use last chunk_size tokens
-                action_queries = last_hidden[:, -self.chunk_size:, :]
+        # Predict actions using last chunk_size embeddings
+        with torch.autocast("cuda", enabled=False):
+            # Convert to float32 for action head computation
+            last_hidden_f32 = last_hidden.float()
+            
+            # Get last chunk_size embeddings (corresponding to action tokens)
+            action_queries = self._get_last_n_embeddings(last_hidden_f32)
             
             pred_actions = self.action_head(action_queries)
 
@@ -325,6 +417,9 @@ class Florence2OFTForPolicy(PreTrainedModel):
                 else:
                     actions_target = actions
                 
+                # Ensure targets are float32
+                actions_target = actions_target.float()
+                
                 # Apply padding mask if provided
                 if is_pad is not None:
                     is_pad_chunk = is_pad[:, -self.chunk_size:]
@@ -335,11 +430,11 @@ class Florence2OFTForPolicy(PreTrainedModel):
                             actions_target[valid_mask]
                         )
                     else:
-                        action_loss = torch.tensor(0.0, device=pred_actions.device)
+                        action_loss = torch.tensor(0.0, device=pred_actions.device, dtype=torch.float32)
                 else:
                     action_loss = self.l1_loss(pred_actions, actions_target)
             else:
-                action_loss = torch.tensor(0.0, device=pred_actions.device)
+                action_loss = torch.tensor(0.0, device=pred_actions.device, dtype=torch.float32)
 
         return {
             'loss': action_loss,
@@ -369,13 +464,9 @@ class Florence2OFTForPolicy(PreTrainedModel):
                 attention_mask=attention_mask,
             )
 
-        with torch.autocast("cuda", dtype=torch.float32):
-            if self.use_pooled_output:
-                pooled = last_hidden.mean(dim=1)
-                action_queries = pooled.unsqueeze(1).expand(-1, self.chunk_size, -1)
-            else:
-                action_queries = last_hidden[:, -self.chunk_size:, :]
-            
+        with torch.autocast("cuda", enabled=False):
+            last_hidden_f32 = last_hidden.float()
+            action_queries = self._get_last_n_embeddings(last_hidden_f32)
             pred_actions = self.action_head(action_queries)
 
         return {'pred_actions': pred_actions.detach().cpu().numpy()}

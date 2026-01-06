@@ -10,6 +10,7 @@ data
 __pycache__/
 .*__pycache__/.*
 scripts/*
+\.local/
 tmp_scripts/*
 !scripts/visualize/
 !scripts/*example*.sh

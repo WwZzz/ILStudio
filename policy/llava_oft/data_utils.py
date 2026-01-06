@@ -40,12 +40,14 @@ class LlavaOFTDataProcessor:
         max_seq_len: int = 512,
         image_size: Optional[List[int]] = None,
         prompt_template: str = "USER: <image>\n{instruction}\nASSISTANT:",
+        action_token: str = "🔍",
     ):
         self.processor = processor
         self.chunk_size = chunk_size
         self.max_seq_len = max_seq_len
         self.image_size = image_size
         self.prompt_template = prompt_template
+        self.action_token = action_token
 
     def _preprocess_image(self, image_tensor) -> Image.Image:
         """Convert tensor to PIL Image."""
@@ -65,14 +67,29 @@ class LlavaOFTDataProcessor:
         else:
             raise ValueError(f"Unsupported image type: {type(image_tensor)}")
 
+    def _build_prompt_with_action_tokens(self, instruction: str) -> str:
+        """Build prompt with action prediction tokens.
+        
+        The action tokens serve to extend the sequence length, providing positions
+        for action prediction. The model uses the last chunk_size hidden states
+        for action prediction, so the exact tokenization of action tokens is not critical.
+        """
+        # Add action tokens to extend sequence length
+        # The model will use last chunk_size hidden states for action prediction
+        action_tokens = self.action_token * self.chunk_size
+        prompt_suffix = f" Please predict the next {self.chunk_size} robot actions: {action_tokens}"
+        return instruction + prompt_suffix
+
     def _build_conversation(self, instruction: str) -> List[Dict]:
         """Build LLaVA conversation format."""
+        # Add action tokens to instruction
+        instruction_with_actions = self._build_prompt_with_action_tokens(instruction)
         conversation = [
             {
                 "role": "user",
                 "content": [
                     {"type": "image"},
-                    {"type": "text", "text": instruction},
+                    {"type": "text", "text": instruction_with_actions},
                 ],
             },
         ]

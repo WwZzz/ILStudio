@@ -42,13 +42,27 @@ class Florence2OFTDataProcessor:
         chunk_size: int = 16,
         max_seq_len: int = 512,
         image_size: Optional[List[int]] = None,
-        task_prompt: str = "Locate the objects with category name in the image.",
+        task_prompt: str = "Predict the next robot actions:",
+        action_token: str = "🔍",
     ):
         self.processor = processor
         self.chunk_size = chunk_size
         self.max_seq_len = max_seq_len
         self.image_size = image_size
         self.task_prompt = task_prompt
+        self.action_token = action_token
+        
+        # Configure processor image size if specified
+        if image_size is not None and processor is not None:
+            if isinstance(image_size, (list, tuple)):
+                h, w = image_size[0], image_size[1] if len(image_size) > 1 else image_size[0]
+            else:
+                h = w = image_size
+            
+            if hasattr(processor, 'image_processor'):
+                processor.image_processor.size = {'height': h, 'width': w}
+                processor.image_processor.crop_size = {'height': h, 'width': w}
+                logger.info(f"Set Florence2 image processor size to {h}x{w}")
 
     def _preprocess_image(self, image_tensor) -> Image.Image:
         """Convert tensor to PIL Image."""
@@ -68,9 +82,11 @@ class Florence2OFTDataProcessor:
         else:
             raise ValueError(f"Unsupported image type: {type(image_tensor)}")
 
-    def _build_prompt(self, instruction: str) -> str:
-        """Build prompt with task prefix."""
-        return f"{self.task_prompt} {instruction}"
+    def _build_prompt_with_action_tokens(self, instruction: str) -> str:
+        """Build prompt with action prediction tokens."""
+        # Append action tokens at the end (same as qwen_oft and llava_oft)
+        action_tokens = self.action_token * self.chunk_size
+        return f"{self.task_prompt} {instruction} {action_tokens}"
 
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -102,7 +118,7 @@ class Florence2OFTDataProcessor:
         
         # Get instruction
         instruction = sample.get('raw_lang', '')
-        prompt = self._build_prompt(instruction)
+        prompt = self._build_prompt_with_action_tokens(instruction)
         
         # Process with Florence2 processor
         model_inputs = self.processor(

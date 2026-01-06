@@ -100,6 +100,7 @@ def load_model(args):
         model.data_processor = LlavaOFTDataProcessor(
             processor=processor,
             chunk_size=config.chunk_size,
+            action_token=config.action_token,
         )
         model.data_collator = LlavaOFTDataCollator(
             processor=processor,
@@ -118,7 +119,7 @@ def load_model(args):
             action_dim=args.action_dim,
             state_dim=args.state_dim,
             chunk_size=args.chunk_size,
-            use_last_token=getattr(args, 'use_last_token', True),
+            action_token=getattr(args, 'action_token', '🔍'),
         )
         model = LlavaOFTForPolicy(config=config)
         
@@ -195,6 +196,7 @@ def get_data_processor(args, model_components):
     return LlavaOFTDataProcessor(
         processor=model_components['processor'],
         chunk_size=args.chunk_size,
+        action_token=getattr(args, 'action_token', '🔍'),
     )
 
 
