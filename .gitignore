@@ -5,6 +5,7 @@ hub/
 assets/robot/
 policy/*gc*
 data/
+\.gradio
 core\.*
 data
 __pycache__/
