@@ -21,6 +21,7 @@ import sys
 import time
 import argparse
 import traceback
+import warnings
 from pathlib import Path
 from datetime import datetime
 
@@ -29,6 +30,72 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
+from huggingface_hub import snapshot_download
+from huggingface_hub.utils import disable_progress_bars
+
+
+def download_with_verification(
+    repo_id: str,
+    repo_type: str = "dataset",
+    revision: str = None,
+    local_dir: str = None,
+    allow_patterns: list = None,
+) -> bool:
+    """
+    Download from HuggingFace with verification that download actually succeeded.
+    
+    snapshot_download may return local cache path on network errors without raising.
+    This function forces a fresh download attempt and verifies success.
+    
+    Returns:
+        True if download succeeded, raises exception otherwise.
+    """
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+    
+    # First, verify we can access the remote repository
+    # This will raise an exception if there's a network/rate limit issue
+    api = HfApi()
+    
+    try:
+        # Try to get repo info - this will fail fast on rate limit
+        repo_info = api.repo_info(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision,
+        )
+        logger.debug(f"Successfully accessed repo info for {repo_id}")
+    except Exception as e:
+        error_str = str(e)
+        if "429" in error_str or "rate limit" in error_str.lower() or "too many requests" in error_str.lower():
+            raise RuntimeError(f"Rate limit error when accessing {repo_id}: {e}")
+        elif "404" in error_str:
+            raise RuntimeError(f"Repository not found: {repo_id}")
+        else:
+            raise RuntimeError(f"Cannot access repository {repo_id}: {e}")
+    
+    # Now do the actual download
+    # Use force_download=False but local_files_only=False to ensure we check remote
+    try:
+        result_path = snapshot_download(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision,
+            local_dir=local_dir,
+            allow_patterns=allow_patterns,
+            local_files_only=False,  # Force check remote
+        )
+        logger.debug(f"snapshot_download returned: {result_path}")
+        return True
+    except Exception as e:
+        error_str = str(e)
+        # Check if it's a "returning existing local_dir" warning message
+        if "returning existing local_dir" in error_str.lower():
+            raise RuntimeError(
+                f"Download failed - HuggingFace returned cached directory due to network error. "
+                f"Original error: {e}"
+            )
+        raise
 
 
 def parse_args():
@@ -157,26 +224,48 @@ def download_single_dataset(ds_type: str, ds_args: dict, max_retries: int,
     attempt = 0
     last_error = None
     
+    # Extract repo info from ds_args
+    dataset_path_list = ds_args.get("dataset_path_list", [])
+    
     while attempt < max_retries:
         attempt += 1
         logger.info(f"\n[Attempt {attempt}/{max_retries}] Starting download...")
         logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         try:
-            # Dynamically import and create dataset
+            # Step 1: First verify we can access all repositories
+            # This catches rate limit errors early before creating dataset
+            for repo_id in dataset_path_list:
+                logger.info(f"Verifying access to repository: {repo_id}")
+                download_with_verification(
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    allow_patterns=["meta/*"],  # Just download metadata to verify access
+                )
+            
+            # Step 2: Now create dataset instance (this triggers full download)
             module_path, class_name = ds_type.rsplit(".", 1)
             module = __import__(module_path, fromlist=[class_name])
             dataset_class = getattr(module, class_name)
             
-            # Create dataset instance (this triggers download)
             logger.info(f"Creating dataset instance...")
             dataset = dataset_class(**ds_args)
+            
+            # Step 3: Verify dataset is properly loaded
+            total_episodes = getattr(dataset, 'total_episodes', 0)
+            total_frames = getattr(dataset, 'total_frames', 0)
+            
+            if total_episodes == 0 or total_frames == 0:
+                raise RuntimeError(
+                    f"Dataset loaded but appears empty: "
+                    f"episodes={total_episodes}, frames={total_frames}"
+                )
             
             # Success!
             logger.success(f"\n{'='*60}")
             logger.success(f"Download completed successfully!")
-            logger.success(f"Total episodes: {getattr(dataset, 'total_episodes', 'N/A')}")
-            logger.success(f"Total frames: {getattr(dataset, 'total_frames', 'N/A')}")
+            logger.success(f"Total episodes: {total_episodes}")
+            logger.success(f"Total frames: {total_frames}")
             logger.success(f"{'='*60}")
             return True
             
@@ -184,15 +273,17 @@ def download_single_dataset(ds_type: str, ds_args: dict, max_retries: int,
             last_error = e
             error_str = str(e)
             
-            # Check if it's a rate limit error
+            # Check if it's a rate limit error or network error
             is_rate_limit = any(x in error_str.lower() for x in [
-                "rate limit", "429", "too many requests", "quota"
+                "rate limit", "429", "too many requests", "quota",
+                "returning existing local_dir", "connection aborted",
+                "remote end closed", "remotedisconnected"
             ])
             
             if is_rate_limit:
                 delay = retry_delay_on_rate_limit
-                logger.warning(f"\n[Rate Limit Error] Hit API rate limit!")
-                logger.warning(f"Error: {error_str[:200]}...")
+                logger.warning(f"\n[Rate Limit / Network Error] Cannot access remote repository!")
+                logger.warning(f"Error: {error_str[:300]}...")
                 logger.warning(f"Waiting {delay} seconds before retry...")
             else:
                 delay = retry_delay
