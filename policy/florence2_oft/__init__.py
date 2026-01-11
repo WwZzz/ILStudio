@@ -315,13 +315,13 @@ try:
             loss = outputs["loss"]
             
             # Log metrics
-            logging_steps = self.args.logging_steps
-            if (self.state.global_step % logging_steps == 0) and (self.state.global_step != 0):
-                log_dict = {}
-                if "action_loss" in outputs:
-                    log_dict["action_loss"] = outputs["action_loss"].detach().cpu().item()
-                if log_dict:
-                    self.log(log_dict)
+            # logging_steps = self.args.logging_steps
+            # if (self.state.global_step % logging_steps == 0) and (self.state.global_step != 0):
+            #     log_dict = {}
+            #     if "action_loss" in outputs:
+            #         log_dict["action_loss"] = outputs["action_loss"].detach().cpu().item()
+            #     if log_dict:
+            #         self.log(log_dict)
             
             return (loss, outputs) if return_outputs else loss
         

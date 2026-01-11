@@ -215,6 +215,9 @@ class Florence2OFTForPolicy(PreTrainedModel):
         # Register action_head as float32 module (won't be converted by model.to())
         self._action_head_dtype = torch.float32
         
+        # Cache VLM dtype to avoid next() in forward (which fails with DataParallel)
+        self._vlm_dtype = torch_dtype
+        
         logger.info(f"Florence2OFT initialized with hidden_size={vlm_hidden_size}")
 
     def set_processor(self, processor):
@@ -348,8 +351,8 @@ class Florence2OFTForPolicy(PreTrainedModel):
         Returns:
             last_hidden_state: (B, L, H)
         """
-        param_dtype = next(self.vlm.parameters()).dtype
-        pixel_values = pixel_values.to(self.vlm.device, dtype=param_dtype)
+        # Use cached dtype to avoid next() which fails with DataParallel
+        pixel_values = pixel_values.to(dtype=self._vlm_dtype)
         
         # Get image features
         valid_feats = self.vlm._encode_image(pixel_values)  # [B, N, D]
