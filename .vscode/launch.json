@@ -17,11 +17,11 @@
                 // "HF_ENDPOINT": "https://hf-mirror.com",
                 // "HF_DATASETS_CACHE": "/inspire/hdd/project/robot-action/public/data",
                 // "ILSTD_CACHE": "/mnt/model/ilstd/data",
-                "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
+                // "HF_HOME": "/inspire/hdd/project/robot-action/public/models",
                 // "TRANSFORMERS_CACHE": "/inspire/hdd/project/robot-action/public/models",
             },
             "args": [
-                "-p", "act", "-t", "example_vqa", "-c", "act", "-o", "ckpt/test_vqa"
+                "-p", "act", "-t", "sort_lego", "-c", "act", "-o", "ckpt/act_sort_lego"
             ],
             // "args": [
             //     "-e", "aloha_transfer", "-o", "results/pi05_5k_aloha", "--use_spawn"
