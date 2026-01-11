@@ -17,6 +17,9 @@ try:
 except ImportError:
     WrappedLerobotDataset = None
 from .rlbench_dataset import RLBenchDataset
+# LeRobot standalone wrappers (no lerobot dependency)
+from .lerobotv20_wrapper import WrappedLerobotV20Dataset
+from .lerobotv21_wrapper import WrappedLerobotV21Dataset
 
 __all__ = [
     'EpisodicDataset',
@@ -28,4 +31,7 @@ __all__ = [
     'D4RLDataset',
     "WrappedLerobotDataset",
     "RLBenchDataset",
+    # LeRobot standalone wrappers
+    "WrappedLerobotV20Dataset",
+    "WrappedLerobotV21Dataset",
 ]

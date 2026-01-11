@@ -284,7 +284,7 @@ class LlavaOFTForPolicy(PreTrainedModel):
             action_queries: (B, chunk_size, H)
         """
         B, L, H = last_hidden.shape
-        
+
         if attention_mask is not None:
             # Find the last valid position for each sample
             # Then take chunk_size positions ending at that position
@@ -300,7 +300,7 @@ class LlavaOFTForPolicy(PreTrainedModel):
                 
                 # Get embeddings for this sample
                 sample_embeddings = last_hidden[i, start_pos:end_pos, :]  # (actual_len, H)
-                
+
                 # Pad if needed (shouldn't happen normally)
                 actual_len = sample_embeddings.shape[0]
                 if actual_len < self.chunk_size:

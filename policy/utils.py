@@ -239,7 +239,7 @@ def load_policy(args):
         logger.info("🤖 Local Policy Evaluation")
         logger.info("="*60)
         # Load normalizers and model as before
-        from data_utils.utils import load_normalizers
+        from data_utils.normalize import load_normalizers
         from benchmark.base import MetaPolicy
         
         normalizers, ctrl_space, ctrl_type = load_normalizers(args)
