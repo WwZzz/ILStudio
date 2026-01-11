@@ -822,6 +822,7 @@ def load_data(args, task_config, save_norm=True):
             for dataset_config in datasets_config:
                 dataset = _create_dataset_from_config(dataset_config, args)
                 datasets.append(dataset)
+        d = datasets[0][4000]
         # Normalize datasets
         datasets = _normalize_datasets(datasets, args, task_config, save_norm)
 

@@ -887,8 +887,21 @@ class EpisodeManager:
         indices = []
         found_episode = False
         
+        # Estimate average episode length for scan limit
+        # Use a larger limit to handle datasets with long episodes
+        num_episodes = getattr(self.current_dataset, 'total_episodes', 
+                              getattr(self.current_dataset, 'num_episodes', 10))
+        if num_episodes > 0:
+            avg_ep_len = ds_len // num_episodes
+        else:
+            avg_ep_len = 500
+        
+        # Scan limit: enough to cover target episode + some buffer
+        # For early episodes (eid <= 10), scan up to (eid + 2) * avg_ep_len
+        scan_limit = min(ds_len, max(5000, (eid + 2) * avg_ep_len))
+        
         # Scan from beginning - stop when we've found and finished the episode
-        for i in range(min(ds_len, 1000)):  # Limit scan to first 1000 samples
+        for i in range(scan_limit):
             try:
                 s = self.current_dataset[i]
                 s_eid = s.get('episode_id', -1)
