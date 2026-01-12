@@ -56,6 +56,8 @@ class Config:
     cache_expire_seconds: int = 600  # Expire cache after 10 minutes of no access
     cleanup_interval_seconds: int = 120  # Run cleanup every 2 minutes
     max_dropdown_episodes: int = 200  # Max episodes to show in dropdown
+    max_episode_samples: int = 500  # Max samples to load per episode (subsample if longer)
+    long_episode_threshold: int = 300  # Episodes longer than this will be subsampled
 
 
 CFG = Config()
@@ -218,14 +220,18 @@ class EpisodeManager:
                 'expire_seconds': CFG.cache_expire_seconds,
             }
     
-    def load_task(self, task_name: str) -> Tuple[bool, str, Dict]:
+    def load_task(self, task_name: str, force_reload: bool = False) -> Tuple[bool, str, Dict]:
         """Load task config and datasets. Skip if already loaded.
         
         OPTIMIZED: Skip normalization during load - use cached stats or load lazily.
         This makes initial load MUCH faster.
+        
+        Args:
+            task_name: Task configuration name
+            force_reload: If True, force reload even if already loaded
         """
         # CRITICAL: Check if already loaded to avoid re-initialization
-        if task_name == self.current_task_name and self.task_config and self.datasets:
+        if not force_reload and task_name == self.current_task_name and self.task_config and self.datasets:
             # Already loaded, return success WITHOUT re-selecting dataset
             print(f"✅ Task '{task_name}' already loaded, skipping re-initialization")
             return True, f"Using already loaded task: {task_name}", self.task_config.get('meta', {})
@@ -813,13 +819,54 @@ class EpisodeManager:
             with self.lock:
                 self.loading.discard(eid)
     
-    def _load_samples_parallel(self, indices: List[int]) -> List[Dict]:
+    def _subsample_indices(self, indices: List[int], max_samples: int) -> List[int]:
+        """Subsample indices to max_samples while keeping first, last, and evenly spaced samples.
+        
+        This ensures we capture the full trajectory shape even with subsampling.
+        """
+        n = len(indices)
+        if n <= max_samples:
+            return indices
+        
+        # Always include first and last
+        # Evenly space the rest
+        step = (n - 1) / (max_samples - 1)
+        sampled_indices = []
+        for i in range(max_samples):
+            idx = int(round(i * step))
+            idx = min(idx, n - 1)  # Clamp to valid range
+            sampled_indices.append(indices[idx])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        result = []
+        for idx in sampled_indices:
+            if idx not in seen:
+                seen.add(idx)
+                result.append(idx)
+        
+        return result
+    
+    def _load_samples_parallel(self, indices: List[int], max_samples: Optional[int] = None) -> List[Dict]:
         """Load samples using DataLoader for parallel I/O.
         
         Uses PyTorch DataLoader with multiple workers for faster loading.
+        For long episodes, subsamples to max_samples for performance.
+        
+        Args:
+            indices: List of sample indices to load
+            max_samples: Max samples to load (None = use CFG.max_episode_samples)
         """
         if not indices or not is_map_data(self.current_dataset):
             return []
+        
+        # Subsample long episodes for performance
+        original_len = len(indices)
+        max_samples = max_samples or CFG.max_episode_samples
+        
+        if original_len > CFG.long_episode_threshold:
+            indices = self._subsample_indices(indices, max_samples)
+            print(f"⚡ Subsampled episode: {original_len} → {len(indices)} samples")
         
         # For small episodes, use sequential loading (overhead not worth it)
         if len(indices) < 20:
@@ -1349,10 +1396,27 @@ MGR = EpisodeManager()
 # Video Generation - Real MP4 Video
 # ============================================================================
 
-def create_episode_video(samples: List[Dict], fps: int = 30) -> Optional[str]:
-    """Create MP4 video efficiently with maximum speed optimization."""
+def create_episode_video(samples: List[Dict], fps: int = 30, max_frames: int = None) -> Optional[str]:
+    """Create MP4 video efficiently with maximum speed optimization.
+    
+    Args:
+        samples: List of sample dictionaries with 'image' key
+        fps: Target video FPS
+        max_frames: Max frames to include (None = use CFG.max_episode_samples)
+    """
     if not samples:
         return None
+    
+    max_frames = max_frames or CFG.max_episode_samples
+    
+    # Subsample frames if too many
+    if len(samples) > max_frames:
+        step = len(samples) / max_frames
+        indices = [int(i * step) for i in range(max_frames)]
+        indices = list(set(indices))  # Remove duplicates
+        indices.sort()
+        samples = [samples[i] for i in indices if i < len(samples)]
+        print(f"⚡ Video: subsampled to {len(samples)} frames")
     
     # Fast path: process images quickly
     frames = []
@@ -1368,7 +1432,9 @@ def create_episode_video(samples: List[Dict], fps: int = 30) -> Optional[str]:
     temp_path = temp_file.name
     temp_file.close()
     
-    video_fps = 30
+    # Adjust FPS based on frame count for reasonable video duration
+    # Target: 5-15 seconds video
+    video_fps = max(10, min(30, len(frames) // 10))
     
     try:
         import imageio
@@ -1851,6 +1917,7 @@ def make_data_table(samples: List[Dict], key: str) -> pd.DataFrame:
 import time as _time
 _LOAD_TIMESTAMP = 0
 _LOAD_EPISODE = None
+_LOAD_CALL_COUNT = 0  # Track number of calls for debugging
 
 def load_dataset_cb(task_name: str):
     """Load dataset with lazy indexing and return pre-warmed visuals if available.
@@ -1858,12 +1925,41 @@ def load_dataset_cb(task_name: str):
     OPTIMIZED: If data is already cached (e.g., after theme switch refresh),
     returns cached data immediately without reloading.
     """
-    global _LOAD_TIMESTAMP, _LOAD_EPISODE
+    global _LOAD_TIMESTAMP, _LOAD_EPISODE, _LOAD_CALL_COUNT
+    
+    _LOAD_CALL_COUNT += 1
+    call_id = _LOAD_CALL_COUNT
     
     if not task_name or not task_name.strip():
         return ("❌ Please enter a task name", gr.update(), gr.update(), 0, 0, None, None, "", None, None, None, None, None, gr.update(), gr.update(), None, None)
     
     task_name = task_name.strip()
+    
+    # Debounce: Skip if called too recently (within 3 seconds) for same task
+    time_since_last = _time.time() - _LOAD_TIMESTAMP
+    if task_name == MGR.current_task_name and time_since_last < 3.0 and _LOAD_EPISODE is not None:
+        print(f"⏭️ [Call #{call_id}] Skipping duplicate load_dataset_cb (last call {time_since_last:.2f}s ago)")
+        # Return current state without reloading
+        ep_ids = MGR.get_episode_ids()
+        first_ep = _LOAD_EPISODE
+        estimated = MGR.get_estimated_total_episodes()
+        ep_info = f"{len(ep_ids)}/{estimated}" if estimated else str(len(ep_ids))
+        ds_names = [d['name'] for d in MGR.datasets]
+        norm_types = MGR.get_available_norm_types()
+        
+        return (
+            f"✅ Loaded: {task_name}\n📊 Episodes: {ep_info}",
+            gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
+            gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
+            gr.update(), gr.update(),  # Keep slider values
+            gr.update(), gr.update(), gr.update(),  # Keep video, image, lang
+            gr.update(), gr.update(), gr.update(),  # Keep plots
+            gr.update(), gr.update(),  # Keep tables
+            gr.update(), gr.update(),  # Keep checkboxes
+            gr.update(), gr.update()   # Keep stats plots
+        )
+    
+    print(f"🔄 [Call #{call_id}] load_dataset_cb: task={task_name}")
     
     # Check if data is already loaded and cached (e.g., after theme switch)
     # This prevents reloading on page refresh caused by theme changes
@@ -2752,6 +2848,7 @@ def main():
     parser.add_argument('-t', '--task', type=str, default='')
     parser.add_argument('--port', type=int, default=7860)
     parser.add_argument('--share', action='store_true')
+    parser.add_argument('-r', '--root_path', type=str, default='')
     parser.add_argument('--lang', type=str, default='en', choices=['en', 'zh', 'ja', 'ko', 'es', 'fr', 'de'],
                        help='Default language (en, zh, ja, ko, es, fr, de)')
     parser.add_argument('--theme', type=str, default='system', choices=['system', 'light', 'dark'],
@@ -2789,7 +2886,7 @@ def main():
     # Pass task and settings to create_app
     app = create_app(default_task=task_name, default_lang=args.lang, default_theme=args.theme)
     
-    app.launch(server_port=args.port, share=args.share, show_error=True)
+    app.launch(server_port=args.port, share=args.share, show_error=True, root_path=args.root_path)
 
 
 if __name__ == "__main__":

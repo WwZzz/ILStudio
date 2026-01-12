@@ -38,7 +38,7 @@ import torch
 import torch.utils.data as tud
 import pyarrow.parquet as pq
 from PIL import Image
-from huggingface_hub import snapshot_download, HfApi
+from huggingface_hub import snapshot_download
 from loguru import logger
 
 from benchmark.utils import resize_with_pad
@@ -49,14 +49,31 @@ from data_utils.utils import ensure_uint8_image
 # Constants
 # =============================================================================
 
-DEFAULT_LEROBOT_HOME = Path.home() / ".cache" / "huggingface" / "lerobot"
+def _get_lerobot_home() -> Path:
+    """Get LeRobot home directory with priority:
+    1. HF_LEROBOT_HOME environment variable
+    2. HF_HOME/lerobot (if HF_HOME is set)
+    3. Default: ~/.cache/huggingface/lerobot
+    """
+    # Priority 1: HF_LEROBOT_HOME
+    lerobot_home = os.environ.get("HF_LEROBOT_HOME")
+    if lerobot_home:
+        return Path(lerobot_home)
+    
+    # Priority 2: HF_HOME/lerobot
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "lerobot"
+    
+    # Priority 3: Default
+    return Path.home() / ".cache" / "huggingface" / "lerobot"
+
+DEFAULT_LEROBOT_HOME = _get_lerobot_home()
 INFO_PATH = "meta/info.json"
 EPISODES_PATH = "meta/episodes.jsonl"
 STATS_PATH = "meta/stats.json"
 EPISODES_STATS_PATH = "meta/episodes_stats.jsonl"
 TASKS_PATH = "meta/tasks.jsonl"
-MISSING_FILES_CACHE = ".missing_files_cache.json"  # Cache for files known to not exist remotely
-
 CODEBASE_VERSION = "v2.1"
 
 
@@ -834,168 +851,63 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         
         return valid_episodes
     
-    def _load_missing_files_cache(self, meta: LeRobotV21Metadata) -> Dict[str, set]:
-        """Load cache of files known to not exist remotely."""
-        cache_path = meta.root / MISSING_FILES_CACHE
-        if cache_path.exists():
-            try:
-                with open(cache_path, 'r') as f:
-                    cache = json.load(f)
-                    # Convert lists back to sets
-                    return {
-                        'parquet': set(cache.get('parquet', [])),
-                        'videos': set(cache.get('videos', []))
-                    }
-            except Exception as e:
-                logger.warning(f"Failed to load missing files cache: {e}")
-        return {'parquet': set(), 'videos': set()}
-    
-    def _save_missing_files_cache(self, meta: LeRobotV21Metadata, cache: Dict[str, set]):
-        """Save cache of files known to not exist remotely."""
-        cache_path = meta.root / MISSING_FILES_CACHE
-        try:
-            # Convert sets to lists for JSON serialization
-            cache_dict = {
-                'parquet': sorted(list(cache['parquet'])),
-                'videos': sorted(list(cache['videos']))
-            }
-            with open(cache_path, 'w') as f:
-                json.dump(cache_dict, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Failed to save missing files cache: {e}")
-    
-    def _check_file_exists_remote(
-        self,
-        api: HfApi,
-        repo_id: str,
-        file_path: str,
-        revision: Optional[str] = None,
-    ) -> bool:
-        """Check if a file exists in the remote HuggingFace repository."""
-        try:
-            exists = api.file_exists(
-                repo_id=repo_id,
-                filename=file_path,  # Note: parameter name is 'filename', not 'path'
-                repo_type="dataset",
-                revision=revision,
-            )
-            return exists
-        except Exception as e:
-            logger.warning(f"Failed to check if file exists remotely {file_path}: {e}")
-            # If we can't check, assume it exists to be safe
-            return True
-    
-    def _ensure_data_downloaded(self, meta: LeRobotV21Metadata, episodes: List[int]):
-        """Ensure parquet and video files are downloaded.
-        
-        First checks remote repository to see which files actually exist.
-        Only downloads files that exist remotely. Files that don't exist
-        remotely are cached and won't be checked again.
+    def _is_download_complete(self, meta: LeRobotV21Metadata, episodes: List[int]) -> bool:
         """
-        # Load cache of files known to not exist remotely
-        missing_cache = self._load_missing_files_cache(meta)
+        Quick check if all required files for the given episodes are already downloaded.
         
-        # Step 1: Check which files are missing locally
-        locally_missing_parquet = []
-        locally_missing_videos = []
-        
+        This is a fast local-only check that doesn't contact the remote server.
+        Returns True if all parquet files (and video files if download_videos=True) exist locally.
+        """
         for ep_idx in episodes:
             # Check parquet file
             parquet_path = meta.root / meta.get_data_file_path(ep_idx)
             if not parquet_path.exists():
-                cache_key = f"{ep_idx}"
-                if cache_key not in missing_cache['parquet']:
-                    locally_missing_parquet.append(ep_idx)
+                return False
             
             # Check video files (only if download_videos is True)
             if self.download_videos:
                 for vid_key in meta.video_keys:
                     video_path = meta.root / meta.get_video_file_path(ep_idx, vid_key)
                     if not video_path.exists():
-                        cache_key = f"{ep_idx}:{vid_key}"
-                        if cache_key not in missing_cache['videos']:
-                            locally_missing_videos.append((ep_idx, vid_key))
+                        return False
         
-        # If no files are missing locally or all missing files are in cache, skip download
-        if not locally_missing_parquet and not locally_missing_videos:
-            logger.debug(f"All files already exist or known to not exist remotely for {meta.repo_id}")
+        return True
+    
+    def _ensure_data_downloaded(self, meta: LeRobotV21Metadata, episodes: List[int]):
+        """
+        Ensure parquet and video files are downloaded.
+        
+        Uses a simple and efficient approach:
+        1. Quick local check if all files exist
+        2. If not complete, download everything needed in one batch
+        3. No per-file remote checking - just download and let HF handle caching
+        
+        This is much faster than checking each file individually against the remote server.
+        """
+        # Step 1: Quick local check - if all files exist, we're done
+        if self._is_download_complete(meta, episodes):
+            logger.debug(f"All files already downloaded for {meta.repo_id}")
             return
         
-        # Step 2: Check remote repository to see which files actually exist
-        # This avoids downloading files that don't exist remotely
-        total_to_check = len(locally_missing_parquet) + len(locally_missing_videos)
-        if total_to_check > 0:
-            logger.info(
-                f"Checking remote repository for {meta.repo_id}: "
-                f"{len(locally_missing_parquet)} parquet, {len(locally_missing_videos)} videos..."
-            )
-            api = HfApi()  # Reuse API instance
-        else:
-            api = None
-        
-        files_to_download_parquet = []
-        files_to_download_videos = []
-        newly_known_missing_parquet = []
-        newly_known_missing_videos = []
-        
-        # Check parquet files
-        for ep_idx in tqdm(locally_missing_parquet, desc="Checking parquet files", leave=False):
-            file_path = str(meta.get_data_file_path(ep_idx))
-            if self._check_file_exists_remote(api, meta.repo_id, file_path, meta.revision):
-                files_to_download_parquet.append(ep_idx)
-            else:
-                # File doesn't exist remotely, add to cache
-                cache_key = f"{ep_idx}"
-                missing_cache['parquet'].add(cache_key)
-                newly_known_missing_parquet.append(ep_idx)
-        
-        # Check video files
-        for ep_idx, vid_key in tqdm(locally_missing_videos, desc="Checking video files", leave=False):
-            file_path = str(meta.get_video_file_path(ep_idx, vid_key))
-            if self._check_file_exists_remote(api, meta.repo_id, file_path, meta.revision):
-                files_to_download_videos.append((ep_idx, vid_key))
-            else:
-                # File doesn't exist remotely, add to cache
-                cache_key = f"{ep_idx}:{vid_key}"
-                missing_cache['videos'].add(cache_key)
-                newly_known_missing_videos.append((ep_idx, vid_key))
-        
-        # Update cache with newly discovered missing files
-        if newly_known_missing_parquet or newly_known_missing_videos:
-            self._save_missing_files_cache(meta, missing_cache)
-            logger.info(
-                f"Found {len(newly_known_missing_parquet)} parquet and "
-                f"{len(newly_known_missing_videos)} video files that don't exist remotely. "
-                f"Cached to avoid future checks."
-            )
-        
-        # Step 3: Download only files that exist remotely
-        if not files_to_download_parquet and not files_to_download_videos:
-            logger.info(f"No files need downloading for {meta.repo_id} (all missing files don't exist remotely)")
-            return
-        
-        # Log what will be downloaded
-        if files_to_download_parquet:
-            logger.info(f"Downloading {len(files_to_download_parquet)} parquet files for {meta.repo_id}")
-        if files_to_download_videos:
-            logger.info(f"Downloading {len(files_to_download_videos)} video files for {meta.repo_id}")
-        
-        # Build chunk-based patterns for more efficient downloading
-        # Group by chunk to reduce number of patterns
+        # Step 2: Files are missing - download them
+        # Group episodes by chunk for efficient downloading
         chunks_needed = set()
-        for ep_idx in files_to_download_parquet:
-            chunks_needed.add(meta.get_episode_chunk(ep_idx))
-        for ep_idx, _ in files_to_download_videos:
+        for ep_idx in episodes:
             chunks_needed.add(meta.get_episode_chunk(ep_idx))
         
-        # If we need most chunks, just download everything
-        # Otherwise, use chunk-based patterns
         total_chunks = meta.info.get("total_chunks", 1)
         
+        # Decide download strategy based on how many chunks we need
         if len(chunks_needed) > total_chunks * 0.5:
-            # Download all data and videos
-            logger.info(f"Downloading dataset {meta.repo_id} (need {len(chunks_needed)}/{total_chunks} chunks)...")
-            allow_patterns = ["data/**", "videos/**"] if self.download_videos else ["data/**"]
+            # Need most chunks - download everything
+            logger.info(
+                f"Downloading dataset {meta.repo_id} "
+                f"(need {len(chunks_needed)}/{total_chunks} chunks)..."
+            )
+            allow_patterns = ["data/**"]
+            if self.download_videos:
+                allow_patterns.append("videos/**")
+            
             snapshot_download(
                 meta.repo_id,
                 repo_type="dataset",
@@ -1004,15 +916,16 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                 allow_patterns=allow_patterns,
             )
         else:
-            # Download specific chunks
+            # Need only some chunks - download selectively
             allow_patterns = []
             for chunk_idx in sorted(chunks_needed):
                 allow_patterns.append(f"data/chunk-{chunk_idx:03d}/*")
                 if self.download_videos:
-                    # Include all subdirectories for videos in this chunk
                     allow_patterns.append(f"videos/chunk-{chunk_idx:03d}/**")
             
-            logger.info(f"Downloading {len(chunks_needed)} chunk(s) for {meta.repo_id}...")
+            logger.info(
+                f"Downloading {len(chunks_needed)} chunk(s) for {meta.repo_id}..."
+            )
             snapshot_download(
                 meta.repo_id,
                 repo_type="dataset",
@@ -1021,32 +934,16 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                 allow_patterns=allow_patterns,
             )
         
-        # Step 4: Verify downloaded files (should all exist now since we checked remote)
-        # This is just for verification - if files still don't exist, something went wrong
-        still_missing_parquet = []
-        still_missing_videos = []
-        
-        for ep_idx in files_to_download_parquet:
-            parquet_path = meta.root / meta.get_data_file_path(ep_idx)
+        # Step 3: Verify critical files after download
+        # Just check a sample to make sure download worked
+        sample_ep = episodes[0] if episodes else None
+        if sample_ep is not None:
+            parquet_path = meta.root / meta.get_data_file_path(sample_ep)
             if not parquet_path.exists():
-                still_missing_parquet.append(ep_idx)
-        
-        for ep_idx, vid_key in files_to_download_videos:
-            video_path = meta.root / meta.get_video_file_path(ep_idx, vid_key)
-            if not video_path.exists():
-                still_missing_videos.append((ep_idx, vid_key))
-        
-        # Log any files that still don't exist after download (shouldn't happen)
-        if still_missing_parquet:
-            logger.warning(
-                f"{len(still_missing_parquet)} parquet files still missing after download "
-                f"for {meta.repo_id}. This may indicate a download issue."
-            )
-        if still_missing_videos:
-            logger.warning(
-                f"{len(still_missing_videos)} video files still missing after download "
-                f"for {meta.repo_id}. These will use placeholders."
-            )
+                logger.warning(
+                    f"Sample parquet file still missing after download: {parquet_path}. "
+                    f"Some files may not exist in the remote repository."
+                )
     
     def _build_index_mapping(self):
         """Build index mapping for fast sample lookup."""
