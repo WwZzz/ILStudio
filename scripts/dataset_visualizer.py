@@ -220,6 +220,47 @@ class EpisodeManager:
                 'expire_seconds': CFG.cache_expire_seconds,
             }
     
+    def clear_all_caches(self):
+        """Clear all caches when switching to a different task."""
+        with self.lock:
+            # Clear episode cache
+            self.episode_cache.clear()
+            self.cache_access_time.clear()
+            self.cache_order.clear()
+            self.episode_map.clear()
+            self.episode_range.clear()
+            
+            # Clear video cache and delete temp files
+            for video_path in self.video_cache.values():
+                if video_path and os.path.exists(video_path):
+                    try:
+                        os.remove(video_path)
+                    except:
+                        pass
+            self.video_cache.clear()
+            self.video_access_time.clear()
+            self.video_cache_order.clear()
+            
+            # Clear priority visuals
+            self.priority_visuals.clear()
+            
+            # Clear stats cache
+            self._stats_cache.clear()
+            
+            # Reset indexing state
+            self._index_complete = False
+            self._indexed_up_to = 0
+            self._discovered_episodes = []
+            self._estimated_total_episodes = None
+            self._bg_indexing = False
+            
+            # Reset current tracking
+            self._current_episode = None
+            self.loading.clear()
+            self.video_generating.clear()
+        
+        print("🧹 All caches cleared")
+    
     def load_task(self, task_name: str, force_reload: bool = False) -> Tuple[bool, str, Dict]:
         """Load task config and datasets. Skip if already loaded.
         
@@ -235,6 +276,11 @@ class EpisodeManager:
             # Already loaded, return success WITHOUT re-selecting dataset
             print(f"✅ Task '{task_name}' already loaded, skipping re-initialization")
             return True, f"Using already loaded task: {task_name}", self.task_config.get('meta', {})
+        
+        # Different task - clear all caches before loading new one
+        if task_name != self.current_task_name and self.current_task_name:
+            print(f"🔄 Switching from '{self.current_task_name}' to '{task_name}' - clearing caches...")
+            self.clear_all_caches()
             
         try:
             class Args:
@@ -320,51 +366,125 @@ class EpisodeManager:
         # Run estimation in background
         threading.Thread(target=_estimate_episodes_bg, daemon=True).start()
         
-        # FAST: Scan to find complete episode 0 (scan until we see a different episode)
-        print("⚡ Scanning for complete episode 0...")
-        found_ep0 = False
-        current_ep_start = 0
-        prev_eid = None
+        # FAST: Use binary search to find episode 0 boundary
+        print("⚡ Finding episode 0 boundary using binary search...")
+        ep0_end = self._find_episode_boundary_fast(0, ds_len)
         
-        for i in range(min(ds_len, 2000)):  # Scan up to 2000 samples to find complete episode
-            try:
-                s = self.current_dataset[i]
-                s_eid = s.get('episode_id', 0)
-                if isinstance(s_eid, (torch.Tensor, np.ndarray)):
-                    s_eid = int(s_eid.item() if hasattr(s_eid, 'item') else s_eid)
-                
-                # Track episode boundaries for range index
-                if prev_eid is not None and s_eid != prev_eid:
-                    # Previous episode ended, record its range
-                    self.episode_range[prev_eid] = (current_ep_start, i - 1)
-                    current_ep_start = i
-                
-                if s_eid not in self.episode_map:
-                    self.episode_map[s_eid] = []
-                    self._discovered_episodes.append(s_eid)
-                self.episode_map[s_eid].append(i)
-                
-                prev_eid = s_eid
-                
-                if s_eid == 0:
-                    found_ep0 = True
-                elif found_ep0:
-                    # We've passed episode 0, record range and stop scanning
-                    # The current episode's start was recorded when we switched
+        if ep0_end > 0:
+            # Record episode 0 range
+            self.episode_range[0] = (0, ep0_end - 1)
+            self.episode_map[0] = list(range(ep0_end))
+            self._discovered_episodes.append(0)
+            print(f"✅ Episode 0: {ep0_end} samples (indices 0-{ep0_end - 1})")
+            
+            # Also record episode 1 start if we found it
+            if ep0_end < ds_len:
+                try:
+                    s = self.current_dataset[ep0_end]
+                    s_eid = s.get('episode_id', 0)
+                    if isinstance(s_eid, (torch.Tensor, np.ndarray)):
+                        s_eid = int(s_eid.item() if hasattr(s_eid, 'item') else s_eid)
+                    if s_eid == 1:
+                        self._discovered_episodes.append(1)
+                        print(f"   Episode 1 starts at index {ep0_end}")
+                except:
+                    pass
+        else:
+            print(f"⚠️ Could not find episode 0 boundary")
+    
+    def _get_episode_id_at(self, idx: int) -> Optional[int]:
+        """Get episode ID at a given index. Returns None on error."""
+        try:
+            s = self.current_dataset[idx]
+            eid = s.get('episode_id', 0)
+            if isinstance(eid, (torch.Tensor, np.ndarray)):
+                eid = int(eid.item() if hasattr(eid, 'item') else eid)
+            return eid
+        except:
+            return None
+    
+    def _find_episode_boundary_fast(self, target_eid: int, ds_len: int) -> int:
+        """Find the end index (exclusive) of target episode using binary search.
+        
+        Strategy:
+        1. Start with initial guess (200 for episode 0)
+        2. Double if still in target episode, halve if past it
+        3. Once we have bounds, use binary search to find exact boundary
+        
+        Returns:
+            End index (exclusive) of the target episode, or 0 if not found
+        """
+        if ds_len == 0:
+            return 0
+        
+        # Verify episode 0 exists at index 0
+        first_eid = self._get_episode_id_at(0)
+        if first_eid is None or first_eid != target_eid:
+            return 0
+        
+        # Phase 1: Find upper bound using exponential search
+        # Start with 200, double if still in episode, halve if past
+        initial_guess = 200
+        probe = min(initial_guess, ds_len - 1)
+        
+        # First, find a position that's past the target episode
+        upper_bound = None
+        lower_bound = 0
+        
+        while probe < ds_len:
+            probe_eid = self._get_episode_id_at(probe)
+            
+            if probe_eid is None:
+                # Error reading, try smaller
+                probe = probe // 2
+                if probe <= lower_bound:
                     break
-            except:
                 continue
+            
+            if probe_eid == target_eid:
+                # Still in target episode, this is our new lower bound
+                lower_bound = probe
+                # Double the probe distance
+                probe = min(probe * 2, ds_len - 1)
+                if probe == lower_bound:
+                    # We're at the end of dataset
+                    break
+            else:
+                # Past target episode, this is our upper bound
+                upper_bound = probe
+                break
         
-        # Record the last scanned episode's range (if we have one)
-        if prev_eid is not None and prev_eid not in self.episode_range:
-            indices = self.episode_map.get(prev_eid, [])
-            if indices:
-                self.episode_range[prev_eid] = (indices[0], indices[-1])
+        # If we never found an upper bound, the episode extends to the end
+        if upper_bound is None:
+            # Check the last sample
+            last_eid = self._get_episode_id_at(ds_len - 1)
+            if last_eid == target_eid:
+                return ds_len
+            else:
+                upper_bound = ds_len - 1
         
-        if self._discovered_episodes:
-            ep0_len = len(self.episode_map.get(0, []))
-            print(f"✅ Found episodes: {sorted(self._discovered_episodes)[:5]}... (ep0 has {ep0_len} samples)")
-            print(f"   Episode ranges indexed: {len(self.episode_range)}")
+        # Phase 2: Binary search between lower_bound and upper_bound
+        # Find the first index where episode_id != target_eid
+        left = lower_bound
+        right = upper_bound
+        
+        while left < right:
+            mid = (left + right) // 2
+            mid_eid = self._get_episode_id_at(mid)
+            
+            if mid_eid is None:
+                # Error, try to recover
+                right = mid
+                continue
+            
+            if mid_eid == target_eid:
+                # Still in target episode, boundary is to the right
+                left = mid + 1
+            else:
+                # Past target episode, boundary is at or before mid
+                right = mid
+        
+        return left
     
     def _lazy_index_batch(self, min_episodes: int = 5, max_samples: int = 500):
         """Lazily index a batch of samples to discover more episodes."""
@@ -495,6 +615,24 @@ class EpisodeManager:
     def get_estimated_total_episodes(self) -> Optional[int]:
         """Get estimated total episode count (from last sample's episode_id)."""
         return getattr(self, '_estimated_total_episodes', None)
+    
+    def get_dataset_size_info(self) -> Dict[str, any]:
+        """Get dataset size information (frames and episodes).
+        
+        Returns:
+            Dict with 'total_frames', 'total_episodes', 'indexed_episodes', 'indexing_complete'
+        """
+        ds_len = len(self.current_dataset) if self.current_dataset else 0
+        estimated_eps = getattr(self, '_estimated_total_episodes', None)
+        indexed_eps = len(self._discovered_episodes) if hasattr(self, '_discovered_episodes') else 0
+        index_complete = getattr(self, '_index_complete', False)
+        
+        return {
+            'total_frames': ds_len,
+            'total_episodes': estimated_eps,
+            'indexed_episodes': indexed_eps,
+            'indexing_complete': index_complete,
+        }
     
     def get_stats_info(self) -> str:
         """Get formatted statistics information for display."""
@@ -922,8 +1060,137 @@ class EpisodeManager:
                     print(f"Error loading sample {idx}: {e2}")
             return samples
     
+    def _get_average_episode_length(self) -> int:
+        """Get average episode length from known episode ranges."""
+        if not self.episode_range:
+            # Fallback: estimate from dataset metadata
+            ds_len = len(self.current_dataset) if self.current_dataset else 0
+            num_episodes = getattr(self.current_dataset, 'total_episodes', 
+                                  getattr(self.current_dataset, 'num_episodes', 10))
+            if num_episodes > 0 and ds_len > 0:
+                return ds_len // num_episodes
+            return 500  # Default
+        
+        # Calculate from known ranges
+        total_len = 0
+        for start, end in self.episode_range.values():
+            total_len += (end - start + 1)
+        return total_len // len(self.episode_range)
+    
+    def _find_episode_start_binary(self, target_eid: int, ds_len: int) -> int:
+        """Find the start index of target episode using binary search.
+        
+        Returns:
+            Start index of the episode, or -1 if not found
+        """
+        # First, find any sample with target_eid
+        est_start, est_end = self._estimate_episode_range(target_eid)
+        mid_guess = (est_start + est_end) // 2
+        
+        found_idx = self._binary_search_episode(target_eid, mid_guess)
+        if found_idx < 0:
+            return -1
+        
+        # Now binary search backward to find the start
+        left = 0
+        right = found_idx
+        
+        while left < right:
+            mid = (left + right) // 2
+            mid_eid = self._get_episode_id_at(mid)
+            
+            if mid_eid is None:
+                left = mid + 1
+                continue
+            
+            if mid_eid < target_eid:
+                # Target episode starts after mid
+                left = mid + 1
+            else:
+                # mid_eid >= target_eid, start is at or before mid
+                right = mid
+        
+        # Verify we found the right episode
+        verify_eid = self._get_episode_id_at(left)
+        if verify_eid == target_eid:
+            return left
+        return -1
+    
+    def _find_episode_end_binary(self, target_eid: int, start_idx: int, ds_len: int) -> int:
+        """Find the end index (inclusive) of target episode using binary search.
+        
+        Args:
+            target_eid: Target episode ID
+            start_idx: Known start index of the episode
+            ds_len: Dataset length
+            
+        Returns:
+            End index (inclusive) of the episode
+        """
+        # Estimate upper bound based on average episode length
+        avg_len = self._get_average_episode_length()
+        # Use 2x average as initial upper bound estimate
+        initial_upper = min(start_idx + avg_len * 2, ds_len - 1)
+        
+        # Exponential search to find upper bound
+        probe = initial_upper
+        lower_bound = start_idx
+        upper_bound = None
+        
+        while probe < ds_len:
+            probe_eid = self._get_episode_id_at(probe)
+            
+            if probe_eid is None:
+                probe = (probe + lower_bound) // 2
+                if probe <= lower_bound:
+                    break
+                continue
+            
+            if probe_eid == target_eid:
+                # Still in target episode
+                lower_bound = probe
+                # Expand by average episode length (not double, more conservative)
+                probe = min(probe + avg_len, ds_len - 1)
+                if probe == lower_bound:
+                    break
+            else:
+                # Past target episode
+                upper_bound = probe
+                break
+        
+        if upper_bound is None:
+            # Check if episode extends to the end
+            last_eid = self._get_episode_id_at(ds_len - 1)
+            if last_eid == target_eid:
+                return ds_len - 1
+            upper_bound = ds_len - 1
+        
+        # Binary search between lower_bound and upper_bound
+        left = lower_bound
+        right = upper_bound
+        
+        while left < right:
+            mid = (left + right + 1) // 2  # Round up to find last valid index
+            mid_eid = self._get_episode_id_at(mid)
+            
+            if mid_eid is None:
+                right = mid - 1
+                continue
+            
+            if mid_eid == target_eid:
+                # Still in target episode
+                left = mid
+            else:
+                # Past target episode
+                right = mid - 1
+        
+        return left
+    
     def _scan_episode_from_start(self, eid: int) -> List[int]:
-        """Scan from dataset start to find episode. Best for episode 0 or early episodes."""
+        """Find episode using binary search. Works for any episode.
+        
+        OPTIMIZED: Uses binary search instead of sequential scan.
+        """
         if not is_map_data(self.current_dataset):
             return []
         
@@ -931,38 +1198,23 @@ class EpisodeManager:
         if ds_len == 0:
             return []
         
-        indices = []
-        found_episode = False
-        
-        # Estimate average episode length for scan limit
-        # Use a larger limit to handle datasets with long episodes
-        num_episodes = getattr(self.current_dataset, 'total_episodes', 
-                              getattr(self.current_dataset, 'num_episodes', 10))
-        if num_episodes > 0:
-            avg_ep_len = ds_len // num_episodes
+        # For episode 0, we know it starts at index 0
+        if eid == 0:
+            first_eid = self._get_episode_id_at(0)
+            if first_eid != 0:
+                return []
+            
+            # Find end using binary search
+            end_idx = self._find_episode_end_binary(0, 0, ds_len)
+            indices = list(range(0, end_idx + 1))
         else:
-            avg_ep_len = 500
-        
-        # Scan limit: enough to cover target episode + some buffer
-        # For early episodes (eid <= 10), scan up to (eid + 2) * avg_ep_len
-        scan_limit = min(ds_len, max(5000, (eid + 2) * avg_ep_len))
-        
-        # Scan from beginning - stop when we've found and finished the episode
-        for i in range(scan_limit):
-            try:
-                s = self.current_dataset[i]
-                s_eid = s.get('episode_id', -1)
-                if isinstance(s_eid, (torch.Tensor, np.ndarray)):
-                    s_eid = int(s_eid.item() if hasattr(s_eid, 'item') else s_eid)
-                
-                if s_eid == eid:
-                    indices.append(i)
-                    found_episode = True
-                elif found_episode:
-                    # We've passed the episode, stop scanning
-                    break
-            except:
-                continue
+            # For other episodes, find start and end using binary search
+            start_idx = self._find_episode_start_binary(eid, ds_len)
+            if start_idx < 0:
+                return []
+            
+            end_idx = self._find_episode_end_binary(eid, start_idx, ds_len)
+            indices = list(range(start_idx, end_idx + 1))
         
         # Update episode_map and episode_range for future use
         if indices:
@@ -1045,9 +1297,10 @@ class EpisodeManager:
         return (max(0, start), min(ds_len - 1, start + avg_len - 1))
     
     def _scan_episode_directly(self, eid: int) -> List[int]:
-        """Directly scan dataset to find all samples for a given episode_id.
+        """Find episode using binary search.
         
-        FAST: Uses episode_range index for known episodes, or estimates for unknown ones.
+        OPTIMIZED: Uses binary search for both finding start and end of episode.
+        Falls back to _scan_episode_from_start which now also uses binary search.
         """
         if not is_map_data(self.current_dataset):
             return []
@@ -1067,45 +1320,16 @@ class EpisodeManager:
                     self._discovered_episodes.append(eid)
             return indices
         
-        # Estimate start position using episode_range or fallback estimation
-        est_start, est_end = self._estimate_episode_range(eid)
-        start_guess = (est_start + est_end) // 2
-        
-        # Binary search to find a sample with this episode_id
-        found_idx = self._binary_search_episode(eid, start_guess)
-        if found_idx < 0:
+        # Use binary search to find the episode
+        # First, find the start of the episode
+        start_idx = self._find_episode_start_binary(eid, ds_len)
+        if start_idx < 0:
             return []
         
-        # Expand from found position to get all samples in this episode
-        indices = [found_idx]
+        # Then find the end using binary search with average length estimation
+        end_idx = self._find_episode_end_binary(eid, start_idx, ds_len)
         
-        # Scan backward
-        for i in range(found_idx - 1, max(0, found_idx - 500) - 1, -1):
-            try:
-                s = self.current_dataset[i]
-                s_eid = s.get('episode_id', -1)
-                if isinstance(s_eid, (torch.Tensor, np.ndarray)):
-                    s_eid = int(s_eid.item() if hasattr(s_eid, 'item') else s_eid)
-                if s_eid == eid:
-                    indices.insert(0, i)
-                else:
-                    break
-            except:
-                break
-        
-        # Scan forward
-        for i in range(found_idx + 1, min(ds_len, found_idx + 500)):
-            try:
-                s = self.current_dataset[i]
-                s_eid = s.get('episode_id', -1)
-                if isinstance(s_eid, (torch.Tensor, np.ndarray)):
-                    s_eid = int(s_eid.item() if hasattr(s_eid, 'item') else s_eid)
-                if s_eid == eid:
-                    indices.append(i)
-                else:
-                    break
-            except:
-                break
+        indices = list(range(start_idx, end_idx + 1))
         
         # Update episode_map and episode_range for future use
         if indices:
@@ -1919,6 +2143,34 @@ _LOAD_TIMESTAMP = 0
 _LOAD_EPISODE = None
 _LOAD_CALL_COUNT = 0  # Track number of calls for debugging
 
+def _format_dataset_info(size_info: Dict) -> str:
+    """Format dataset size info for display."""
+    frames = size_info.get('total_frames', 0)
+    total_eps = size_info.get('total_episodes')
+    indexed_eps = size_info.get('indexed_episodes', 0)
+    complete = size_info.get('indexing_complete', False)
+    
+    # Format frames with K/M suffix
+    if frames >= 1_000_000:
+        frames_str = f"{frames / 1_000_000:.2f}M"
+    elif frames >= 1_000:
+        frames_str = f"{frames / 1_000:.1f}K"
+    else:
+        frames_str = str(frames)
+    
+    # Format episodes
+    if total_eps:
+        if complete:
+            eps_str = f"{total_eps}"
+        else:
+            eps_str = f"{indexed_eps}/{total_eps}"
+    else:
+        eps_str = f"{indexed_eps}+" if not complete else str(indexed_eps)
+    
+    status = "✅" if complete else "⏳"
+    return f"📊 Frames: {frames_str} | Episodes: {eps_str} {status}"
+
+
 def load_dataset_cb(task_name: str):
     """Load dataset with lazy indexing and return pre-warmed visuals if available.
     
@@ -1931,7 +2183,7 @@ def load_dataset_cb(task_name: str):
     call_id = _LOAD_CALL_COUNT
     
     if not task_name or not task_name.strip():
-        return ("❌ Please enter a task name", gr.update(), gr.update(), 0, 0, None, None, "", None, None, None, None, None, gr.update(), gr.update(), None, None)
+        return ("❌ Please enter a task name", "", gr.update(), gr.update(), 0, 0, None, None, "", None, None, None, None, None, gr.update(), gr.update(), None, None)
     
     task_name = task_name.strip()
     
@@ -1942,13 +2194,13 @@ def load_dataset_cb(task_name: str):
         # Return current state without reloading
         ep_ids = MGR.get_episode_ids()
         first_ep = _LOAD_EPISODE
-        estimated = MGR.get_estimated_total_episodes()
-        ep_info = f"{len(ep_ids)}/{estimated}" if estimated else str(len(ep_ids))
+        size_info = MGR.get_dataset_size_info()
         ds_names = [d['name'] for d in MGR.datasets]
         norm_types = MGR.get_available_norm_types()
         
         return (
-            f"✅ Loaded: {task_name}\n📊 Episodes: {ep_info}",
+            f"✅ Loaded: {task_name}",
+            _format_dataset_info(size_info),
             gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
             gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
             gr.update(), gr.update(),  # Keep slider values
@@ -1974,19 +2226,19 @@ def load_dataset_cb(task_name: str):
     
     success, msg, meta = MGR.load_task(task_name)
     if not success:
-        return (f"❌ {msg}", gr.update(), gr.update(), 0, 0, None, None, "", None, None, None, None, None, gr.update(), gr.update(), None, None)
+        return (f"❌ {msg}", "", gr.update(), gr.update(), 0, 0, None, None, "", None, None, None, None, None, gr.update(), gr.update(), None, None)
     
     ds_names = [d['name'] for d in MGR.datasets]
     ep_ids = MGR.get_episode_ids()  # Use discovered episodes only (prevents dropdown freeze)
     first_ep = ep_ids[0] if ep_ids else 0
-    estimated = MGR.get_estimated_total_episodes()
     
     # Mark this episode as just loaded with timestamp to prevent duplicate processing
     _LOAD_TIMESTAMP = _time.time()
     _LOAD_EPISODE = first_ep
     
-    # Build status with stats info
-    ep_info = f"{len(ep_ids)}/{estimated}" if estimated else str(len(ep_ids))
+    # Get dataset size info
+    size_info = MGR.get_dataset_size_info()
+    size_str = _format_dataset_info(size_info)
     norm_types = MGR.get_available_norm_types()
     
     # Create stats plots (matplotlib for robust rendering)
@@ -2006,7 +2258,8 @@ def load_dataset_cb(task_name: str):
         
         # Use ALL cached visuals - no regeneration needed
         return (
-            f"✅ Loaded: {task_name} (cached)\n📊 Episodes: {ep_info}",
+            f"✅ Loaded: {task_name} (cached)",
+            size_str,
             gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
             gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
             max(0, ep_len - 1), 0, 
@@ -2037,7 +2290,8 @@ def load_dataset_cb(task_name: str):
             ctrl_space = MGR.get_ctrl_space()
             
             return (
-                f"✅ Loaded: {task_name} (cached)\n📊 Episodes: {ep_info}",
+                f"✅ Loaded: {task_name} (cached)",
+                size_str,
                 gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
                 gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
                 max(0, ep_len - 1), 0, 
@@ -2080,7 +2334,8 @@ def load_dataset_cb(task_name: str):
         threading.Thread(target=_start_background_tasks, daemon=True).start()
         
         return (
-            f"✅ {msg}\n📊 Episodes: {ep_info} (indexing...)",
+            f"✅ {msg}",
+            size_str,
             gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
             gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
             max(0, len(samples) - 1), 0, video_path, first_img, f"📝 {lang}",
@@ -2096,7 +2351,8 @@ def load_dataset_cb(task_name: str):
         )
     
     return (
-        f"✅ {msg}\n📊 Episodes: {ep_info} (indexing...)",
+        f"✅ {msg}",
+        size_str,
         gr.update(choices=ds_names, value=ds_names[0] if ds_names else None),
         gr.update(choices=[str(e) for e in ep_ids], value=str(first_ep) if ep_ids else None),
         0, 0, None, None, "", None, None, None, None, None,
@@ -2108,19 +2364,12 @@ def load_dataset_cb(task_name: str):
 
 
 def refresh_episode_list_cb():
-    """Refresh episode dropdown with newly indexed episodes."""
+    """Refresh episode dropdown with newly indexed episodes and dataset info."""
     ep_ids = MGR.get_episode_ids()  # Use discovered episodes only
-    count, complete = MGR.get_current_episode_count()
-    estimated = MGR.get_estimated_total_episodes()
+    size_info = MGR.get_dataset_size_info()
+    size_str = _format_dataset_info(size_info)
     
-    if complete:
-        status = f"Indexed {count} episodes (complete)"
-    elif estimated:
-        status = f"Indexed {count}/{estimated} episodes (indexing...)"
-    else:
-        status = f"Indexed {count} episodes (indexing...)"
-    
-    return gr.update(choices=[str(e) for e in ep_ids]), status
+    return gr.update(choices=[str(e) for e in ep_ids]), size_str
 
 
 def prev_episode_cb(ep_str: str):
@@ -2647,7 +2896,8 @@ def create_app(default_task: str = 'sim_transfer_cube_scripted',
                 with gr.Row():
                     task_input = gr.Textbox(label="Task Config", value=default_task, scale=4)
                     load_btn = gr.Button("🔄 Load", variant="primary", scale=1)
-                status = gr.Textbox(label="Status", lines=2, interactive=False)
+                status = gr.Textbox(label="Status", lines=1, interactive=False)
+                dataset_info = gr.Textbox(label="Dataset Info", lines=1, interactive=False)
                 dataset_dd = gr.Dropdown(label="📊 Dataset", choices=[])
             
             # Right column: Episode navigation
@@ -2712,7 +2962,7 @@ def create_app(default_task: str = 'sim_transfer_cube_scripted',
         load_btn.click(
             fn=load_dataset_cb,
             inputs=[task_input],
-            outputs=[status, dataset_dd, episode_dd, slider_max_state, frame_slider,
+            outputs=[status, dataset_info, dataset_dd, episode_dd, slider_max_state, frame_slider,
                     video_player, frame_img, lang_box, traj_plot, action_plot, state_plot, action_table, state_table,
                     show_raw, norm_type_dd, action_stats_plot, state_stats_plot]
         ).then(
@@ -2736,11 +2986,11 @@ def create_app(default_task: str = 'sim_transfer_cube_scripted',
             outputs=[frame_slider]
         )
         
-        # Refresh episode list (for background-indexed episodes)
+        # Refresh episode list and dataset info (for background-indexed episodes)
         refresh_ep_btn.click(
             fn=refresh_episode_list_cb,
             inputs=[],
-            outputs=[episode_dd, status]
+            outputs=[episode_dd, dataset_info]
         )
         
         # Prev/Next episode navigation
@@ -2822,7 +3072,7 @@ def create_app(default_task: str = 'sim_transfer_cube_scripted',
         app.load(
             fn=load_dataset_cb,
             inputs=[task_input],
-            outputs=[status, dataset_dd, episode_dd, slider_max_state, frame_slider,
+            outputs=[status, dataset_info, dataset_dd, episode_dd, slider_max_state, frame_slider,
                     video_player, frame_img, lang_box, traj_plot, action_plot, state_plot, action_table, state_table,
                     show_raw, norm_type_dd, action_stats_plot, state_stats_plot]
         ).then(

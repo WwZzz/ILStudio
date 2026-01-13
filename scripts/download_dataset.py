@@ -83,7 +83,7 @@ def download_with_verification(
             revision=revision,
             local_dir=local_dir,
             allow_patterns=allow_patterns,
-            local_files_only=True,  # Force check remote
+            local_files_only=False,  # Force check remote
         )
         logger.debug(f"snapshot_download returned: {result_path}")
         return True

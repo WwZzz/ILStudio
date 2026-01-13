@@ -9,8 +9,8 @@ datasets:
     chunk_size: 50
     ctrl_space: joint
     ctrl_type: abs
-    episode_filter:
-      invalid_episode_index: [8056, 9085, 11907, 14419, 17536, 18325, 55276, 59341, 64837, 64871]
+    # episode_filter:
+    #   invalid_episode_index: [8056, 9085, 11907, 14419, 17536, 18325, 55276, 59341, 64837, 64871]
 meta:
   action_dim: 8
   state_dim: 8
