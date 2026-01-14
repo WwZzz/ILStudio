@@ -451,20 +451,28 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         
         persistent_workers = getattr(args, 'dataloader_persistent_workers', False) if args.dataloader_num_workers>0 else False
         prefetch_factor = getattr(args, 'dataloader_prefetch_factor', 2) if args.dataloader_num_workers>0 else None
-        loader = DataLoader(
-            wrapped_data,
-            batch_size=args.per_device_train_batch_size,
-            shuffle=(sampler is None),  
-            sampler=sampler,
-            num_workers=args.dataloader_num_workers,
-            collate_fn=collator,
-            drop_last=is_training,
-            pin_memory=args.dataloader_pin_memory,
-            persistent_workers=persistent_workers,
-            prefetch_factor=prefetch_factor,
-            generator=generator, 
-            worker_init_fn=worker_init_fn if is_training and args.dataloader_num_workers > 0 else None, 
-        )
+        
+        # Build DataLoader kwargs
+        dataloader_kwargs = {
+            'dataset': wrapped_data,
+            'batch_size': args.per_device_train_batch_size,
+            'shuffle': (sampler is None),
+            'sampler': sampler,
+            'num_workers': args.dataloader_num_workers,
+            'collate_fn': collator,
+            'drop_last': is_training,
+            'pin_memory': args.dataloader_pin_memory,
+            'generator': generator,
+        }
+        
+        # Only add multiprocessing-specific parameters when num_workers > 0
+        if args.dataloader_num_workers > 0:
+            dataloader_kwargs['persistent_workers'] = persistent_workers
+            dataloader_kwargs['prefetch_factor'] = prefetch_factor
+            if is_training:
+                dataloader_kwargs['worker_init_fn'] = worker_init_fn
+        
+        loader = DataLoader(**dataloader_kwargs)
         if getattr(args, 'background_prefetch', False):
             loader = BackgroundPrefetcher(loader, getattr(args, 'dataloader_prefetch_factor', 2))
     elif is_iter_data(dataset):
