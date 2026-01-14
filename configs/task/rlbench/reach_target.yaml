@@ -11,6 +11,8 @@ datasets:
     camera_names: 
       - observation.images.overhead
       - observation.images.wrist
+    state_key: observation.state.ee
+    action_key: action.ee
 meta:
   action_dim: 8
   state_dim: 8
