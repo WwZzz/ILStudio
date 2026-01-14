@@ -121,7 +121,7 @@ class ConfigLoader:
 
     def load_yaml_config(self, category: str, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         path = self._resolve(category, name_or_path)
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             cfg = yaml.safe_load(f) or {}
         
         # Convert string types in YAML (e.g., '1e-8' -> 1e-08)
