@@ -558,6 +558,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         download_videos: bool = True,
         filter_invalid_videos: bool = False,
         video_backend: Optional[str] = None,
+        no_ensure_download: bool = False,
         *args,
         **kwargs,
     ):
@@ -602,7 +603,8 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                 continue
             
             # Download data files if needed
-            self._ensure_data_downloaded(meta, episodes)
+            if not no_ensure_download:
+                self._ensure_data_downloaded(meta, episodes)
             
             # Filter out episodes with missing/corrupted videos (only if enabled)
             if self.filter_invalid_videos:
@@ -856,20 +858,58 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         Quick check if all required files for the given episodes are already downloaded.
         
         This is a fast local-only check that doesn't contact the remote server.
-        Returns True if all parquet files (and video files if download_videos=True) exist locally.
+        Uses chunk-level directory checking for efficiency with large datasets.
+        
+        Strategy:
+        1. For datasets with many episodes, check only a sample of chunks
+        2. Use directory existence checks (faster than file listing)
+        3. Skip video checks if download_videos=False
+        
+        Returns True if all required chunk directories exist and appear valid.
         """
+        # For large datasets, check at chunk level instead of per-episode
+        # This is much faster for datasets with many episodes
+        chunks_needed = set()
         for ep_idx in episodes:
-            # Check parquet file
-            parquet_path = meta.root / meta.get_data_file_path(ep_idx)
-            if not parquet_path.exists():
+            chunks_needed.add(meta.get_episode_chunk(ep_idx))
+        
+        # Optimization: For very large datasets with many chunks, sample check
+        # If we need almost all chunks, just verify the directories exist
+        chunks_to_check = list(chunks_needed)
+        if len(chunks_to_check) > 10:
+            # Sample first, middle, and last chunks for quick verification
+            sample_indices = [0, len(chunks_to_check) // 2, -1]
+            chunks_to_check = [chunks_to_check[i] for i in sample_indices]
+        
+        # Check if data chunks exist
+        for chunk_idx in chunks_to_check:
+            chunk_dir = meta.root / "data" / f"chunk-{chunk_idx:03d}"
+            if not chunk_dir.exists():
                 return False
-            
-            # Check video files (only if download_videos is True)
-            if self.download_videos:
-                for vid_key in meta.video_keys:
-                    video_path = meta.root / meta.get_video_file_path(ep_idx, vid_key)
-                    if not video_path.exists():
+            # Quick check: directory should have at least one parquet file
+            # Use iterdir() with early exit instead of glob for speed
+            try:
+                has_parquet = any(f.suffix == '.parquet' for f in chunk_dir.iterdir())
+                if not has_parquet:
+                    return False
+            except (OSError, PermissionError):
+                return False
+        
+        # Check video chunks if needed (only for sampled chunks)
+        if self.download_videos and meta.video_keys:
+            # Only check the first video key to save time
+            vid_key = meta.video_keys[0]
+            for chunk_idx in chunks_to_check:
+                video_chunk_dir = meta.root / "videos" / f"chunk-{chunk_idx:03d}" / vid_key.replace(".", "/")
+                if not video_chunk_dir.exists():
+                    return False
+                # Quick check: directory should have video files
+                try:
+                    has_video = any(f.suffix == '.mp4' for f in video_chunk_dir.iterdir())
+                    if not has_video:
                         return False
+                except (OSError, PermissionError):
+                    return False
         
         return True
     
@@ -877,19 +917,23 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         """
         Ensure parquet and video files are downloaded.
         
-        Uses a simple and efficient approach:
-        1. Quick local check if all files exist
-        2. If not complete, download everything needed in one batch
-        3. No per-file remote checking - just download and let HF handle caching
+        Follows a multi-stage approach similar to lerobot_dataset.py:
+        1. Quick local check using metadata - no network access
+        2. If metadata suggests data is complete, verify with a fast chunk-level check
+        3. Only download if local checks indicate missing data
         
-        This is much faster than checking each file individually against the remote server.
+        This avoids unnecessary network access when data is already present.
         """
-        # Step 1: Quick local check - if all files exist, we're done
-        if self._is_download_complete(meta, episodes):
-            logger.debug(f"All files already downloaded for {meta.repo_id}")
-            return
+        # Stage 1: Check if we should skip download based on metadata
+        # If meta.total_episodes > 0 and episodes exist, assume metadata was loaded successfully
+        # which means at least the meta files are present
+        if meta.episodes is not None and len(meta.episodes) > 0:
+            # Stage 2: Quick chunk-level local check - no network access
+            if self._is_download_complete(meta, episodes):
+                logger.debug(f"All required data already present locally for {meta.repo_id}")
+                return
         
-        # Step 2: Files are missing - download them
+        # Stage 3: Data is missing - need to download
         # Group episodes by chunk for efficient downloading
         chunks_needed = set()
         for ep_idx in episodes:

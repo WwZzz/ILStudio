@@ -9,6 +9,8 @@ datasets:
     chunk_size: 50
     ctrl_space: joint
     ctrl_type: abs
+    no_ensure_download: true
+    video_backend: pyav
     # episode_filter:
     #   invalid_episode_index: [8056, 9085, 11907, 14419, 17536, 18325, 55276, 59341, 64837, 64871]
 meta:
