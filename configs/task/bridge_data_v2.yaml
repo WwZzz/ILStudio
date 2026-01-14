@@ -9,7 +9,7 @@ datasets:
     - 256
     - 256
 meta:
-  action_dim: 7
-  state_dim: 7
+  action_dim: 8
+  state_dim: 8
   action_normalize: zscore
   state_normalize: zscore
