@@ -7,11 +7,13 @@
 # 3. Generating datasets for each task
 #
 # Usage:
-#   bash benchmark/rlbench/generate_all_datasets.sh [--num_demos N] [--base_dir DIR]
+#   bash benchmark/rlbench/generate_all_datasets.sh [--num_demos N] [--base_dir DIR] [--lerobot|--hdf5]
 #
 # Options:
 #   --num_demos N    Number of demos to collect per task (default: 50)
 #   --base_dir DIR   Base directory for output (default: data/rlbench)
+#   --lerobot        Generate LeRobot datasets (default)
+#   --hdf5           Generate HDF5 datasets
 #   --headless       Run in headless mode (default: true)
 #   --variation V    Task variation index (default: 0)
 #   --skip-existing  Automatically skip tasks with existing datasets (default: true)
@@ -30,6 +32,7 @@ SKIP_EXISTING=true
 FORCE=false
 NO_CONFIRM=false
 MAX_ATTEMPTS=300
+FORMAT="lerobot"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -41,6 +44,14 @@ while [[ $# -gt 0 ]]; do
         --base_dir)
             BASE_DIR="$2"
             shift 2
+            ;;
+        --lerobot)
+            FORMAT="lerobot"
+            shift
+            ;;
+        --hdf5)
+            FORMAT="hdf5"
+            shift
             ;;
         --headless)
             HEADLESS="--headless"
@@ -73,7 +84,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--num_demos N] [--base_dir DIR] [--headless] [--variation V] [--skip-existing] [--force] [--no-confirm]"
+            echo "Usage: $0 [--num_demos N] [--base_dir DIR] [--lerobot|--hdf5] [--headless] [--variation V] [--skip-existing] [--force] [--no-confirm]"
             exit 1
             ;;
     esac
@@ -84,9 +95,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Find all RLBench config files (excluding _ee.yaml versions)
+# Find all RLBench config files.
+# Current layout is `configs/env/rlbench/*.yaml` plus optional `configs/env/rlbench/ee/*.yaml`.
+# (Older layout `configs/env/rlbench_*.yaml` is also supported.)
 CONFIG_DIR="configs/env"
-CONFIG_FILES=$(find "$CONFIG_DIR" -name "rlbench_*.yaml" ! -name "*_ee.yaml" | sort)
+CONFIG_FILES=$(find "$CONFIG_DIR" \
+    \( -path "*/rlbench/*" -o -name "rlbench_*.yaml" \) \
+    -name "*.yaml" \
+    ! -path "*/rlbench/ee/*" \
+    ! -name "*_ee.yaml" \
+    | sort)
 
 if [ -z "$CONFIG_FILES" ]; then
     echo "Error: No RLBench config files found in $CONFIG_DIR"
@@ -101,6 +119,7 @@ echo "=========================================="
 echo "Total tasks to process: $TOTAL_TASKS"
 echo "Demos per task: $NUM_DEMOS"
 echo "Base output directory: $BASE_DIR"
+echo "Dataset format: $FORMAT"
 echo "Headless mode: $([ -n "$HEADLESS" ] && echo "enabled" || echo "disabled")"
 echo "Variation index: $VARIATION"
 echo "Skip existing datasets: $SKIP_EXISTING"
@@ -125,8 +144,11 @@ FAILED_TASKS=()
 
 for CONFIG_FILE in $CONFIG_FILES; do
     # Extract task name from config file path
-    # e.g., configs/env/rlbench_pick_and_lift.yaml -> pick_and_lift
-    TASK_NAME=$(basename "$CONFIG_FILE" .yaml | sed 's/^rlbench_//')
+    # e.g.,
+    # - configs/env/rlbench/pick_and_lift.yaml -> pick_and_lift
+    # - configs/env/rlbench_pick_and_lift.yaml -> pick_and_lift
+    BASE_NAME=$(basename "$CONFIG_FILE" .yaml)
+    TASK_NAME=$(echo "$BASE_NAME" | sed 's/^rlbench_//')
     
     # Create output directory name (use task name)
     OUTPUT_DIR="$BASE_DIR/$TASK_NAME"
@@ -139,20 +161,38 @@ for CONFIG_FILE in $CONFIG_FILES; do
     echo "=========================================="
     
     # Check if dataset already exists
-    if [ "$SKIP_EXISTING" = true ] && [ -d "$OUTPUT_DIR" ] && [ "$(ls -A $OUTPUT_DIR/*.hdf5 2>/dev/null | wc -l)" -gt 0 ]; then
-        echo "⚠️  Dataset already exists at $OUTPUT_DIR - skipping..."
-        ((SUCCESS_COUNT++))
-        continue
+    if [ "$SKIP_EXISTING" = true ] && [ -d "$OUTPUT_DIR" ]; then
+        if [ "$FORMAT" = "hdf5" ]; then
+            if [ "$(ls -A $OUTPUT_DIR/*.hdf5 2>/dev/null | wc -l)" -gt 0 ]; then
+                echo "⚠️  HDF5 dataset already exists at $OUTPUT_DIR - skipping..."
+                ((SUCCESS_COUNT++))
+                continue
+            fi
+        else
+            if [ -f "$OUTPUT_DIR/meta/info.json" ]; then
+                echo "⚠️  LeRobot dataset already exists at $OUTPUT_DIR - skipping..."
+                ((SUCCESS_COUNT++))
+                continue
+            fi
+        fi
     fi
     
     # Generate dataset
-    if python benchmark/rlbench/generate_dataset.py \
+    PYTHON_BIN=".venv/bin/python"
+    if [ "$FORMAT" = "hdf5" ]; then
+        CMD=("$PYTHON_BIN" benchmark/rlbench/generate_dataset.py)
+    else
+        CMD=("$PYTHON_BIN" benchmark/rlbench/generate_dataset_lerobot.py)
+    fi
+
+    if "${CMD[@]}" \
         --env_config "$CONFIG_FILE" \
         --output_dir "$OUTPUT_DIR" \
         --num_demos "$NUM_DEMOS" \
         --variation "$VARIATION" \
         --max_attempts "$MAX_ATTEMPTS" \
-        $HEADLESS; then
+        $HEADLESS \
+        $([ "$FORCE" = true ] && echo "--force"); then
         echo "✅ Successfully generated dataset for $TASK_NAME"
         ((SUCCESS_COUNT++))
     else

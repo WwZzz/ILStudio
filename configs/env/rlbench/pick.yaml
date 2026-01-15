@@ -19,6 +19,6 @@ args:
     - front
     - wrist
     - overhead
-  image_size: [128, 128]
+  image_size: [256, 256]
   headless: true
 
