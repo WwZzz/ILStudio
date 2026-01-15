@@ -30,14 +30,21 @@ class AlohaSimDataset(EpisodicDataset):
         if num_episodes >= 50:
             return self.dataset_dir
         task_name = self.dataset_dir
+        num_cameras = len(self.camera_names)
         # Determine which HuggingFace repo to download from based on task name
         repo_id = None
         if 'transfer' in task_name.lower() and 'scripted' in task_name.lower():
-            repo_id = "cadene/aloha_sim_transfer_cube_scripted_raw"
+            if num_cameras==1:
+                repo_id = "cadene/aloha_sim_transfer_cube_scripted_raw"
+            else:
+                repo_id = "WWZzz/sim_transfer_cube_scripted"
         elif 'transfer' in task_name.lower() and 'human' in task_name.lower():
             repo_id = "cadene/aloha_sim_transfer_cube_human_raw"
         elif 'insertion' in task_name.lower() and 'scripted' in task_name.lower():
-            repo_id = "cadene/aloha_sim_insertion_scripted_raw"
+            if num_cameras==1:
+                repo_id = "cadene/aloha_sim_insertion_scripted_raw"
+            else:
+                repo_id = "WWZzz/sim_insertion_scripted"
         elif 'insertion' in task_name.lower() and 'human' in task_name.lower():
             repo_id = "cadene/aloha_sim_insertion_human_raw"
         else:
