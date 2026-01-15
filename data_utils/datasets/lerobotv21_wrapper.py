@@ -367,17 +367,24 @@ class LeRobotV21Metadata:
         root: Optional[str] = None,
         revision: str = CODEBASE_VERSION,
         force_download: bool = False,
+        local_only: bool = False,
     ):
         self.repo_id = repo_id
         self.revision = revision
+        self.local_only = local_only
         self.root = Path(root) if root else DEFAULT_LEROBOT_HOME / repo_id
         
-        # Try to load metadata, download if needed
+        # Try to load metadata, download if needed (unless local_only)
         try:
-            if force_download:
+            if force_download and not local_only:
                 raise FileNotFoundError
             self._load_metadata()
         except (FileNotFoundError, NotADirectoryError):
+            if local_only:
+                raise FileNotFoundError(
+                    f"Local dataset not found at {self.root}. "
+                    f"Cannot download because local_only=True."
+                )
             self._download_metadata()
             self._load_metadata()
     
@@ -559,6 +566,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         filter_invalid_videos: bool = False,
         video_backend: Optional[str] = None,
         no_ensure_download: bool = False,
+        local_only: bool = False,
         *args,
         **kwargs,
     ):
@@ -576,6 +584,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         self.image_size = image_size
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
+        self.local_only = local_only
         # Auto-detect best video backend if not specified
         self.video_backend = video_backend if video_backend else get_video_backend()
         logger.info(f"Using video backend: {self.video_backend}")
@@ -588,10 +597,42 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         self.per_dataset_num_episodes: List[int] = []
         self.per_dataset_num_frames: List[int] = []
         
-        for repo_id in dataset_path_list:
+        for dataset_path in dataset_path_list:
+            # Check if it's a local path (absolute or relative)
+            potential_local_path = Path(dataset_path)
+            is_local_path = (
+                potential_local_path.is_absolute() and potential_local_path.exists()
+            ) or (
+                (self.root / dataset_path).exists() and 
+                (self.root / dataset_path / INFO_PATH).exists()
+            ) or (
+                potential_local_path.exists() and 
+                (potential_local_path / INFO_PATH).exists()
+            )
+            
+            if is_local_path:
+                # Use local path directly
+                if potential_local_path.is_absolute() and potential_local_path.exists():
+                    ds_root = potential_local_path
+                elif (self.root / dataset_path).exists():
+                    ds_root = self.root / dataset_path
+                else:
+                    ds_root = potential_local_path.resolve()
+                repo_id = ds_root.name  # Use directory name as repo_id
+                meta_local_only = True
+                logger.info(f"Using local dataset at: {ds_root}")
+            else:
+                # Treat as HuggingFace repo_id
+                repo_id = dataset_path
+                ds_root = self.root / repo_id
+                meta_local_only = self.local_only
+            
             # Load metadata
-            ds_root = self.root / repo_id
-            meta = LeRobotV21Metadata(repo_id, root=str(ds_root))
+            meta = LeRobotV21Metadata(
+                repo_id, 
+                root=str(ds_root),
+                local_only=meta_local_only
+            )
             
             # Filter episodes
             episodes = self._filter_episodes(meta, episode_filter)
@@ -602,8 +643,8 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                 warnings.warn(f"No episodes found for {repo_id} with filter {episode_filter}")
                 continue
             
-            # Download data files if needed
-            if not no_ensure_download:
+            # Download data files if needed (skip if local_only or already local)
+            if not no_ensure_download and not meta_local_only:
                 self._ensure_data_downloaded(meta, episodes)
             
             # Filter out episodes with missing/corrupted videos (only if enabled)

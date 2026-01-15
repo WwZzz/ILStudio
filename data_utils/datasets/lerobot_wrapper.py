@@ -14,6 +14,7 @@ import warnings
 from benchmark.utils import resize_with_pad
 from data_utils.utils import ensure_uint8_image
 from loguru import logger
+from tqdm import tqdm
 
 class WrappedLerobotDataset(tud.Dataset):
     def __init__(self, 
@@ -402,26 +403,24 @@ class WrappedLerobotDataset(tud.Dataset):
     def get_episode_len(self):
         """
         Get the length of each episode in the filtered dataset.
-        Must use the filtered dataset, not the original metadata.
+        Always use metadata for speed - never iterate through hf_dataset.
         """
         episode_lens = []
         for dataset in self.datasets:
-            # If dataset has episodes attribute (filtered list), use metadata for those episodes
-            # This is much faster than iterating through hf_dataset
+            ds_meta = dataset.meta
+            
+            # Determine which episodes to use
             if hasattr(dataset, 'episodes') and dataset.episodes is not None:
-                ds_meta = dataset.meta
-                for ep_idx in dataset.episodes:
-                    episode_lens.append(ds_meta.episodes[ep_idx]['length'])
-            elif dataset.hf_dataset is not None:
-                # Fallback: use numpy for efficient counting
-                # Convert to numpy array for fast operations
-                episode_indices_array = np.array(dataset.hf_dataset['episode_index'])
-                unique_episodes = np.unique(episode_indices_array)
-                
-                # Use numpy for efficient counting
-                for ep_idx in unique_episodes:
-                    ep_length = np.sum(episode_indices_array == ep_idx)
-                    episode_lens.append(int(ep_length))
+                # Filtered dataset - use specified episodes
+                ep_indices = dataset.episodes
+            else:
+                # No filtering - use all episodes from metadata
+                ep_indices = range(len(ds_meta.episodes))
+            
+            # Get length from metadata (fast, no I/O)
+            for ep_idx in tqdm(ep_indices):
+                episode_lens.append(ds_meta.episodes[ep_idx]['length'])
+        
         return episode_lens
     
     def __len__(self):
