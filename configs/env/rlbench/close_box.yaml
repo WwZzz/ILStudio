@@ -18,6 +18,6 @@ args:
   camera_names:
     - front
     - wrist
-  image_size: [128, 128]
+  image_size: [256, 256]
   headless: true
 

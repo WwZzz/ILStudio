@@ -78,6 +78,10 @@ def get_task_class(task_name):
     return task_class
 
 
+# All RLBench camera names (native names used in observation attributes)
+RLBENCH_ALL_CAMERAS = ['front', 'wrist', 'left_shoulder', 'right_shoulder', 'overhead']
+
+
 def create_rlbench_env(config, headless=True, image_size=None):
     """Create RLBench environment from config."""
     args = config.get('args', config)
@@ -263,7 +267,8 @@ def main():
     
     # Get task info
     task_name = config_args.get('task', 'ReachTarget')
-    camera_names = config_args.get('camera_names', ['front', 'wrist'])
+    # Always save all RLBench cameras (ignore config camera_names)
+    camera_names = RLBENCH_ALL_CAMERAS
     
     print(f"Task: {task_name}")
     print(f"Camera names: {camera_names}")
