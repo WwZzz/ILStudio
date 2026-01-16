@@ -75,6 +75,23 @@ class LiberoEnv(MetaEnv):
         state = init_states[state_index]
         logger.info(f"Setting initial state {state_index} for task {self.task_name}")
         env.set_init_state(state)
+        
+        # Get action bounds from action_space
+        # LIBERO uses robosuite environments with Box action space
+        if hasattr(env, 'action_spec'):
+            action_spec = env.action_spec
+            self.min_action = action_spec[0]  # low
+            self.max_action = action_spec[1]  # high
+        elif hasattr(env, 'action_space') and hasattr(env.action_space, 'low'):
+            self.min_action = env.action_space.low
+            self.max_action = env.action_space.high
+        else:
+            # Fallback: LIBERO typically uses delta control with small bounds
+            # [dx, dy, dz, droll, dpitch, dyaw, gripper]
+            self.min_action = np.array([-1.0] * 7, dtype=np.float32)
+            self.max_action = np.array([1.0] * 7, dtype=np.float32)
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):
