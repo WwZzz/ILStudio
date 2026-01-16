@@ -162,6 +162,26 @@ class RLBenchEnv(MetaEnv):
         )
         env.launch()
         
+        # Get action bounds from action mode
+        # RLBench action bounds depend on the action mode
+        if self.ctrl_space == 'joint' or self.ctrl_space == 'joint_vel':
+            # Joint space: 7 joints + 1 gripper (discrete 0/1)
+            # Joint positions typically range from joint limits
+            # For Panda robot in RLBench, typical joint limits are around [-2.8973, 2.8973] rad
+            self.min_action = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973, 0.0], dtype=np.float32)
+            self.max_action = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973, 1.0], dtype=np.float32)
+        elif self.ctrl_space == 'ee' or self.ctrl_space == 'ee_ik':
+            # End-effector space: [x, y, z, qx, qy, qz, qw] + gripper (discrete 0/1)
+            # Position bounds (in meters, typical workspace)
+            # Rotation quaternion bounds [-1, 1], gripper [0, 1]
+            self.min_action = np.array([-1.0, -1.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.0], dtype=np.float32)
+            self.max_action = np.array([1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32)
+        else:
+            self.min_action = None
+            self.max_action = None
+        
+        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
+        
         return env
     
     def _get_task_class(self, task_name):
