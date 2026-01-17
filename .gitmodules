@@ -19,3 +19,6 @@
 [submodule "policy/openvla_oft/openvla-oft"]
 	path = policy/openvla_oft/openvla-oft
 	url = https://github.com/WwZzz/openvla-oft.git
+[submodule "benchmark/bigym/bigym"]
+	path = benchmark/bigym/bigym
+	url = https://github.com/NeuracoreAI/bigym
