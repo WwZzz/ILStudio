@@ -54,21 +54,28 @@ class ILReplayBuffer:
     Replay buffer for ILStudio RL training using MetaObs/MetaAction format.
     
     Key Features:
-    1. Stores observations in MetaObs format (compatible with ILStudio)
-    2. Stores actions in MetaAction format with chunk support
-    3. Integrates action_normalizer and state_normalizer for standardization
-    4. Supports importing from offline datasets
-    5. Supports adding online interaction data
+    1. Stores RAW observations in MetaObs format (compatible with ILStudio)
+    2. Stores RAW actions in MetaAction format with chunk support
+    3. Integrates action_normalizer and state_normalizer for on-demand standardization
+    4. Supports transforms pipeline for on-demand data augmentation
+    5. Supports importing from offline datasets (stores raw data)
+    6. Supports adding online interaction data
+    
+    Data Flow:
+    - Storage: Raw data (from original dataset, bypassing normalizers/transforms)
+    - Sampling: Raw data → Normalization → Transforms → Processor → Collator
     
     Args:
         capacity: Maximum number of transitions to store
         chunk_size: Action chunk size (for chunked action prediction)
-        action_normalizer: Normalizer for actions (from data_utils)
-        state_normalizer: Normalizer for states (from data_utils)
+        action_normalizer: Normalizer for actions (applied on sampling)
+        state_normalizer: Normalizer for states (applied on sampling)
+        transforms: Transform pipeline to apply on sampling (from data_utils.transform)
         ctrl_space: Control space ('ee' or 'joint')
         ctrl_type: Control type ('delta' or 'abs')
         device: Device for sampled tensors
         storage_device: Device for storing data (use 'cpu' to save GPU memory)
+        store_raw: If True, stores raw data; if False, stores normalized data (legacy)
     """
     
     def __init__(
@@ -77,10 +84,12 @@ class ILReplayBuffer:
         chunk_size: int = 1,
         action_normalizer=None,
         state_normalizer=None,
+        transforms=None,
         ctrl_space: str = 'ee',
         ctrl_type: str = 'delta',
         device: str = "cuda:0",
         storage_device: str = "cpu",
+        store_raw: bool = True,
     ):
         if capacity <= 0:
             raise ValueError("Capacity must be greater than 0.")
@@ -89,10 +98,12 @@ class ILReplayBuffer:
         self.chunk_size = chunk_size
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
+        self.transforms = transforms  # Transform pipeline for data augmentation
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
         self.device = device
         self.storage_device = storage_device
+        self.store_raw = store_raw  # Whether buffer stores raw (True) or normalized (False) data
         
         self.position = 0
         self.size = 0
@@ -496,6 +507,7 @@ class ILReplayBuffer:
         chunk_size: int = 1,
         action_normalizer=None,
         state_normalizer=None,
+        transforms=None,
         ctrl_space: str = 'ee',
         ctrl_type: str = 'delta',
         device: str = "cuda:0",
@@ -505,12 +517,20 @@ class ILReplayBuffer:
         show_progress: bool = True,
         batch_size: int = 1000,
         gc_interval: int = 5000,
+        store_raw: bool = True,
     ) -> "ILReplayBuffer":
         """
         Create a replay buffer from an ILStudio dataset.
         
-        IMPORTANT: The dataset from load_data() is already normalized and transformed.
-        Data is stored directly without additional normalization.
+        NEW BEHAVIOR (store_raw=True, default):
+        - Extracts and stores RAW data from the underlying dataset
+        - Bypasses NormalizedMapDataset and MapTransformPipeline wrappers
+        - Normalizers and transforms are stored for on-demand application during sampling
+        - This provides flexibility for runtime data augmentation and normalization changes
+        
+        LEGACY BEHAVIOR (store_raw=False):
+        - Stores data from the wrapped dataset (already normalized/transformed)
+        - Normalizers are only used for add_from_env_step()
         
         Optimized for large datasets (100k+) with:
         - Pre-allocated memory to avoid dynamic resizing
@@ -519,11 +539,12 @@ class ILReplayBuffer:
         - Direct array writes (bypasses add() overhead)
         
         Args:
-            dataset: ILStudio dataset (from load_data, already normalized/transformed)
+            raw_dataset: ILStudio dataset (from load_data, may be wrapped)
             capacity: Buffer capacity. If None, uses dataset length
             chunk_size: Action chunk size
-            action_normalizer: Normalizer for actions (stored for add_from_env_step)
-            state_normalizer: Normalizer for states (stored for add_from_env_step)
+            action_normalizer: Normalizer for actions (applied on sampling if store_raw=True)
+            state_normalizer: Normalizer for states (applied on sampling if store_raw=True)
+            transforms: Transform pipeline (applied on sampling if store_raw=True)
             ctrl_space: Control space ('ee' or 'joint')
             ctrl_type: Control type ('delta' or 'abs')
             device: Device for sampling tensors
@@ -533,22 +554,61 @@ class ILReplayBuffer:
             show_progress: Show progress bar during loading
             batch_size: Process this many samples before clearing temps (for memory)
             gc_interval: Run garbage collection every N samples
+            store_raw: If True, store raw data and apply normalization/transforms on sampling
             
         Returns:
-            ILReplayBuffer with dataset transitions (already normalized)
+            ILReplayBuffer with dataset transitions
         """
-        # Unwrap dataset wrappers to get the underlying raw dataset
-        # Handles: MapTransformPipeline, NormalizedMapDataset, WrappedDataset, etc.
-        dataset_for_data = raw_dataset
-        underlying_dataset = raw_dataset
-        wrapper_chain = [type(underlying_dataset).__name__]
-        while hasattr(underlying_dataset, 'dataset'):
-            underlying_dataset = underlying_dataset.dataset
-            wrapper_chain.append(type(underlying_dataset).__name__)
+        # =====================================================================
+        # Step 1: Unwrap dataset and extract normalizers/transforms
+        # =====================================================================
+        current = raw_dataset
+        wrapper_chain = [type(current).__name__]
+        
+        # Track extracted components
+        extracted_action_normalizer = action_normalizer
+        extracted_state_normalizer = state_normalizer
+        extracted_transforms = transforms
+        
+        # Unwrap and extract normalizers/transforms from wrapper layers
+        while hasattr(current, 'dataset'):
+            # Extract from NormalizedMapDataset
+            if type(current).__name__ == 'NormalizedMapDataset':
+                if extracted_action_normalizer is None and hasattr(current, 'action_normalizer'):
+                    extracted_action_normalizer = current.action_normalizer
+                if extracted_state_normalizer is None and hasattr(current, 'state_normalizer'):
+                    extracted_state_normalizer = current.state_normalizer
+            
+            # Extract from MapTransformPipeline
+            if type(current).__name__ == 'MapTransformPipeline':
+                if extracted_transforms is None and hasattr(current, 'transforms'):
+                    extracted_transforms = current.transforms
+            
+            current = current.dataset
+            wrapper_chain.append(type(current).__name__)
+        
+        underlying_dataset = current  # The innermost dataset (e.g., EpisodicDataset)
         
         logger.info(f"Dataset wrapper chain: {' -> '.join(wrapper_chain)}")
+        logger.info(f"  Underlying dataset: {type(underlying_dataset).__name__}")
+        logger.info(f"  Store raw data: {store_raw}")
+        logger.info(f"  Extracted action_normalizer: {extracted_action_normalizer is not None}")
+        logger.info(f"  Extracted state_normalizer: {extracted_state_normalizer is not None}")
+        logger.info(f"  Extracted transforms: {extracted_transforms is not None}")
         
-        # Try to get ctrl_space/ctrl_type from the underlying dataset if not provided
+        # =====================================================================
+        # Step 2: Choose data source based on store_raw flag
+        # =====================================================================
+        if store_raw:
+            # Use underlying raw dataset (bypasses normalization/transforms)
+            dataset_for_data = underlying_dataset
+            logger.info("  Loading RAW data from underlying dataset")
+        else:
+            # Use wrapped dataset (includes normalization/transforms)
+            dataset_for_data = raw_dataset
+            logger.info("  Loading PROCESSED data from wrapped dataset")
+        
+        # Try to get ctrl_space/ctrl_type from the underlying dataset
         if ctrl_space == 'ee' and hasattr(underlying_dataset, 'ctrl_space'):
             ctrl_space = underlying_dataset.ctrl_space
             logger.info(f"  Using ctrl_space from underlying dataset: {ctrl_space}")
@@ -556,7 +616,6 @@ class ILReplayBuffer:
             ctrl_type = underlying_dataset.ctrl_type
             logger.info(f"  Using ctrl_type from underlying dataset: {ctrl_type}")
         
-        # Use the wrapped dataset for data access (preserves transforms/normalization)
         dataset_len = len(dataset_for_data)
         if capacity is None:
             capacity = dataset_len
@@ -570,12 +629,13 @@ class ILReplayBuffer:
         num_to_load = min(capacity, dataset_len)
         
         logger.info(f"Loading ILStudio dataset ({dataset_len} samples) into replay buffer...")
-        logger.info(f"  Underlying dataset: {type(underlying_dataset).__name__}")
         logger.info(f"  ctrl_space: {ctrl_space}, ctrl_type: {ctrl_type}")
         logger.info(f"  Capacity: {capacity}, Loading: {num_to_load}")
         logger.info(f"  Batch size: {batch_size}, GC interval: {gc_interval}")
         
-        # Step 1: Read first sample to determine shapes
+        # =====================================================================
+        # Step 3: Read first sample to determine shapes
+        # =====================================================================
         first_sample = dataset_for_data[0]
         first_obs = cls._sample_to_metaobs(first_sample, ctrl_space)
         
@@ -603,16 +663,20 @@ class ILReplayBuffer:
         logger.info(f"  Detected shapes: obs={obs_shapes}, action={action_shape}")
         logger.info(f"  Has raw_lang: {has_raw_lang}")
         
-        # Step 2: Create buffer and pre-allocate storage
+        # =====================================================================
+        # Step 4: Create buffer and pre-allocate storage
+        # =====================================================================
         replay_buffer = cls(
             capacity=capacity,
             chunk_size=chunk_size,
-            action_normalizer=action_normalizer,
-            state_normalizer=state_normalizer,
+            action_normalizer=extracted_action_normalizer,
+            state_normalizer=extracted_state_normalizer,
+            transforms=extracted_transforms,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
             device=device,
             storage_device=storage_device,
+            store_raw=store_raw,
         )
         
         replay_buffer._preallocate_storage(
@@ -624,8 +688,9 @@ class ILReplayBuffer:
         
         logger.info("  Storage pre-allocated, starting data loading...")
         
-        # Step 3: Load data directly into pre-allocated arrays
-        # Cache episode_id for boundary detection
+        # =====================================================================
+        # Step 5: Load data directly into pre-allocated arrays
+        # =====================================================================
         prev_ep_id = None
         
         pbar = tqdm(range(num_to_load), desc="Loading dataset", disable=not show_progress)
@@ -660,6 +725,16 @@ class ILReplayBuffer:
                 action_data = action_data[0]
             replay_buffer.actions[i] = action_data.astype(np.float32)
             
+            # is_pad (store for raw data)
+            is_pad = sample.get('is_pad')
+            if is_pad is not None:
+                if isinstance(is_pad, torch.Tensor):
+                    is_pad = is_pad.numpy()
+                # Store is_pad if we have the storage
+                if not hasattr(replay_buffer, 'is_pads') or replay_buffer.is_pads is None:
+                    replay_buffer.is_pads = np.zeros((capacity, *is_pad.shape), dtype=bool)
+                replay_buffer.is_pads[i] = is_pad
+            
             # Reward
             reward = sample.get(reward_key, 0.0)
             if isinstance(reward, torch.Tensor):
@@ -690,6 +765,18 @@ class ILReplayBuffer:
             replay_buffer.ctrl_spaces[i] = ctrl_space
             replay_buffer.ctrl_types[i] = ctrl_type
             
+            # Store episode_id and timestamp for reference
+            if not hasattr(replay_buffer, 'episode_ids') or replay_buffer.episode_ids is None:
+                replay_buffer.episode_ids = np.zeros(capacity, dtype=np.int64)
+            replay_buffer.episode_ids[i] = int(current_ep) if isinstance(current_ep, (int, np.integer)) else i
+            
+            if not hasattr(replay_buffer, 'timestamps') or replay_buffer.timestamps is None:
+                replay_buffer.timestamps = np.zeros(capacity, dtype=np.int64)
+            ts = sample.get('timestamp', i)
+            if isinstance(ts, torch.Tensor):
+                ts = ts.item()
+            replay_buffer.timestamps[i] = int(ts)
+            
             prev_ep_id = current_ep
             
             # Periodic garbage collection
@@ -697,8 +784,9 @@ class ILReplayBuffer:
                 gc.collect()
                 pbar.set_postfix({'gc': i + 1})
         
-        # Step 4: Fill next_obs storage
-        # For efficiency, we copy obs_storage and shift
+        # =====================================================================
+        # Step 6: Fill next_obs storage
+        # =====================================================================
         logger.info("  Filling next_obs storage...")
         
         for key in obs_shapes:
@@ -914,13 +1002,22 @@ class ILReplayBuffer:
 # Utility Functions for Replay Buffer
 # ============================================================================
 
-def transition_to_sample(transition: RLTransition, ctrl_space: str = 'ee') -> dict:
+def transition_to_sample(
+    transition: RLTransition, 
+    ctrl_space: str = 'ee',
+    is_pad: Optional[np.ndarray] = None,
+    episode_id: int = 0,
+    timestamp: int = 0,
+) -> dict:
     """
     Convert a single RLTransition to dataset sample format.
     
     Args:
         transition: RLTransition dict from replay buffer
         ctrl_space: Control space for state key
+        is_pad: Optional padding mask for action
+        episode_id: Episode ID for this transition
+        timestamp: Timestamp for this transition
         
     Returns:
         Sample dict in dataset format: {image, state, action, is_pad, raw_lang, ...}
@@ -946,8 +1043,10 @@ def transition_to_sample(transition: RLTransition, ctrl_space: str = 'ee') -> di
     if action.action is not None:
         sample['action'] = torch.from_numpy(action.action)
     
-    # is_pad
-    if 'action' in sample:
+    # is_pad - use provided value or create default
+    if is_pad is not None:
+        sample['is_pad'] = torch.from_numpy(is_pad) if isinstance(is_pad, np.ndarray) else is_pad
+    elif 'action' in sample:
         action_t = sample['action']
         if action_t.dim() == 2:
             sample['is_pad'] = torch.zeros(action_t.shape[0], dtype=torch.bool)
@@ -955,10 +1054,76 @@ def transition_to_sample(transition: RLTransition, ctrl_space: str = 'ee') -> di
             sample['is_pad'] = torch.tensor(False)
     
     sample['raw_lang'] = obs.raw_lang if obs.raw_lang else ''
-    sample['reasoning'] = {}
-    sample['timestamp'] = obs.timestep if obs.timestep is not None else 0
-    sample['episode_id'] = 0
+    sample['reasoning'] = ''
+    sample['timestamp'] = obs.timestep if obs.timestep is not None else timestamp
+    sample['episode_id'] = episode_id
     
+    return sample
+
+
+def apply_normalization_to_sample(
+    sample: Dict[str, Any],
+    action_normalizer=None,
+    state_normalizer=None,
+) -> Dict[str, Any]:
+    """
+    Apply normalization to a sample dict.
+    
+    This matches the behavior of NormalizedMapDataset.__getitem__ which calls:
+    - action_normalizer.normalize(sample['action'], datatype='action')
+    - state_normalizer.normalize(sample['state'], datatype='state')
+    
+    The normalize method preserves the original data type, so we don't force float32.
+    
+    Args:
+        sample: Sample dict with 'state' and 'action' keys
+        action_normalizer: Normalizer for actions
+        state_normalizer: Normalizer for states
+        
+    Returns:
+        Sample dict with normalized state and action
+    """
+    if state_normalizer is not None and 'state' in sample:
+        state = sample['state']
+        # normalize() accepts both torch.Tensor and np.ndarray, and preserves the type
+        # IMPORTANT: Must pass datatype='state' to use correct statistics
+        normalized_state = state_normalizer.normalize(state, datatype='state')
+        # Convert to torch.Tensor if original was torch.Tensor, preserve numpy if original was numpy
+        if isinstance(state, torch.Tensor) and not isinstance(normalized_state, torch.Tensor):
+            sample['state'] = torch.from_numpy(normalized_state)
+        else:
+            sample['state'] = normalized_state
+    
+    if action_normalizer is not None and 'action' in sample:
+        action = sample['action']
+        # normalize() accepts both torch.Tensor and np.ndarray, and preserves the type
+        # IMPORTANT: Must pass datatype='action' to use correct statistics
+        normalized_action = action_normalizer.normalize(action, datatype='action')
+        # Convert to torch.Tensor if original was torch.Tensor, preserve numpy if original was numpy
+        if isinstance(action, torch.Tensor) and not isinstance(normalized_action, torch.Tensor):
+            sample['action'] = torch.from_numpy(normalized_action)
+        else:
+            sample['action'] = normalized_action
+    
+    return sample
+
+
+def apply_transforms_to_sample(
+    sample: Dict[str, Any],
+    transforms: List[Callable],
+) -> Dict[str, Any]:
+    """
+    Apply a list of transforms to a sample dict.
+    
+    Args:
+        sample: Sample dict
+        transforms: List of transform functions to apply in order
+        
+    Returns:
+        Transformed sample dict
+    """
+    for transform in transforms:
+        sample = transform(sample)
     return sample
 
 
@@ -966,42 +1131,101 @@ def sample_processed(
     replay_buffer: ILReplayBuffer, 
     batch_size: int, 
     data_processor=None, 
-    device: str = 'cuda:0'
+    device: str = 'cuda:0',
+    apply_normalization: bool = True,
+    apply_transforms: bool = True,
 ) -> List[Dict[str, Any]]:
     """
-    Sample from replay buffer and apply processor.
+    Sample from replay buffer and apply normalization, transforms, and processor.
     
     This is the main function for getting training-ready samples from replay buffer.
     
+    Data flow (if store_raw=True):
+    1. Sample raw transitions from buffer
+    2. Convert to sample dict format
+    3. Apply normalization (if apply_normalization=True and normalizers exist)
+    4. Apply transforms (if apply_transforms=True and transforms exist)
+    5. Apply data_processor (if provided)
+    
     Args:
-        replay_buffer: The replay buffer (stores normalized data)
+        replay_buffer: The replay buffer
         batch_size: Number of samples
         data_processor: Processor to apply to each sample
         device: Device to put tensors on
+        apply_normalization: Whether to apply normalizers (if buffer stores raw data)
+        apply_transforms: Whether to apply transforms (if buffer stores raw data)
         
     Returns:
         List of processed samples (each sample is a dict)
     """
-    # Sample transitions
-    transitions = replay_buffer.sample_as_metaobs(batch_size)
+    # Sample transitions and indices
+    indices = np.random.randint(0, replay_buffer.size, size=batch_size)
+    transitions = [replay_buffer._get_transition_at_index(idx) for idx in indices]
     
-    # Convert to dataset sample format
-    samples = [transition_to_sample(t, replay_buffer.ctrl_space) for t in transitions]
+    # Get extra metadata if available
+    is_pads = getattr(replay_buffer, 'is_pads', None)
+    episode_ids = getattr(replay_buffer, 'episode_ids', None)
+    timestamps = getattr(replay_buffer, 'timestamps', None)
+    
+    # Convert to dataset sample format with metadata
+    samples = []
+    for i, (idx, t) in enumerate(zip(indices, transitions)):
+        is_pad = is_pads[idx] if is_pads is not None else None
+        episode_id = int(episode_ids[idx]) if episode_ids is not None else 0
+        timestamp = int(timestamps[idx]) if timestamps is not None else 0
+        
+        sample = transition_to_sample(
+            t, 
+            ctrl_space=replay_buffer.ctrl_space,
+            is_pad=is_pad,
+            episode_id=episode_id,
+            timestamp=timestamp,
+        )
+        samples.append(sample)
+    
+    # Clear transitions early to free memory (no longer needed after conversion)
+    del transitions
+    
+    # Apply normalization if buffer stores raw data
+    if replay_buffer.store_raw and apply_normalization:
+        for i, sample in enumerate(samples):
+            # In-place update to avoid creating extra list
+            samples[i] = apply_normalization_to_sample(
+                sample,
+                action_normalizer=replay_buffer.action_normalizer,
+                state_normalizer=replay_buffer.state_normalizer,
+            )
+    
+    # Apply transforms if buffer stores raw data
+    if replay_buffer.store_raw and apply_transforms and replay_buffer.transforms is not None:
+        transforms = replay_buffer.transforms
+        if not isinstance(transforms, (list, tuple)):
+            transforms = [transforms]
+        for i, sample in enumerate(samples):
+            # In-place update to avoid creating extra list
+            samples[i] = apply_transforms_to_sample(sample, transforms)
     
     # Apply processor
     if data_processor is not None:
         samples = [data_processor(s) for s in samples]
     
-    # Move tensors to device
+    # Move tensors to device (optimized: process in-place where possible)
     processed = []
     for s in samples:
         s_device = {}
         for k, v in s.items():
             if isinstance(v, torch.Tensor):
-                s_device[k] = v.to(device)
+                # Only move to device if not already there (use non_blocking for async transfer)
+                if v.device.type != device.split(':')[0] or (device.startswith('cuda:') and hasattr(v.device, 'index') and v.device.index != int(device.split(':')[1])):
+                    s_device[k] = v.to(device, non_blocking=True)
+                else:
+                    s_device[k] = v
             else:
                 s_device[k] = v
         processed.append(s_device)
+    
+    # Clear samples list to free memory before returning
+    del samples
     
     return processed
 
@@ -1066,7 +1290,7 @@ def verify_data_consistency(
         
         logger.info(f"\n--- Comparing sample at index {idx} ---")
         
-        # Get sample from dataset (through processor if available)
+        # Get sample from dataset (already normalized/transformed by wrappers)
         ds_sample = dataset[idx]
         if data_processor is not None:
             ds_sample_processed = data_processor(ds_sample)
@@ -1075,7 +1299,42 @@ def verify_data_consistency(
         
         # Get sample from replay buffer at same index
         rb_transition = replay_buffer._get_transition_at_index(idx)
-        rb_sample = transition_to_sample(rb_transition, replay_buffer.ctrl_space)
+        
+        # Get metadata for transition_to_sample
+        is_pads = getattr(replay_buffer, 'is_pads', None)
+        episode_ids = getattr(replay_buffer, 'episode_ids', None)
+        timestamps = getattr(replay_buffer, 'timestamps', None)
+        
+        is_pad = is_pads[idx] if is_pads is not None else None
+        episode_id = int(episode_ids[idx]) if episode_ids is not None else 0
+        timestamp = int(timestamps[idx]) if timestamps is not None else 0
+        
+        rb_sample = transition_to_sample(
+            rb_transition, 
+            ctrl_space=replay_buffer.ctrl_space,
+            is_pad=is_pad,
+            episode_id=episode_id,
+            timestamp=timestamp,
+        )
+        
+        # If replay buffer stores raw data, apply normalization and transforms
+        # to match the normalized/transformed data from train_data
+        if replay_buffer.store_raw:
+            # Apply normalization (same as in sample_processed)
+            rb_sample = apply_normalization_to_sample(
+                rb_sample,
+                action_normalizer=replay_buffer.action_normalizer,
+                state_normalizer=replay_buffer.state_normalizer,
+            )
+            
+            # Apply transforms (same as in sample_processed)
+            if replay_buffer.transforms is not None:
+                transforms = replay_buffer.transforms
+                if not isinstance(transforms, (list, tuple)):
+                    transforms = [transforms]
+                rb_sample = apply_transforms_to_sample(rb_sample, transforms)
+        
+        # Apply processor
         if data_processor is not None:
             rb_sample_processed = data_processor(rb_sample)
         else:
@@ -1151,13 +1410,20 @@ def verify_data_consistency(
 
 class ReplayBufferDataLoader:
     """
-    Simple DataLoader-like wrapper for replay buffer.
+    DataLoader-like wrapper for replay buffer with on-demand normalization and transforms.
     
-    Workflow:
-    1. Sample transitions from replay buffer (already normalized)
+    Workflow (when buffer stores raw data):
+    1. Sample raw transitions from replay buffer
     2. Convert to dataset sample format
-    3. Apply data_processor to each sample
-    4. Collate using data_collator
+    3. Apply normalization (state/action normalizers)
+    4. Apply transforms (data augmentation, etc.)
+    5. Apply data_processor (policy-specific processing)
+    6. Collate using data_collator
+    
+    This provides maximum flexibility for:
+    - Runtime data augmentation (can change transforms without reloading data)
+    - Experimenting with different normalization strategies
+    - A/B testing different preprocessing pipelines
     
     Memory Management:
     - Periodically runs gc.collect() to avoid memory buildup
@@ -1172,8 +1438,22 @@ class ReplayBufferDataLoader:
         data_processor=None,
         data_collator=None,
         device: str = "cuda:0",
-        gc_interval: int = 100,
+        gc_interval: int = 20,  # Reduced from 100 to 20 for better memory management
+        apply_normalization: bool = True,
+        apply_transforms: bool = True,
     ):
+        """
+        Args:
+            replay_buffer: ILReplayBuffer instance
+            batch_size: Number of samples per batch
+            num_batches_per_epoch: Number of batches to generate per epoch
+            data_processor: Policy-specific processor function
+            data_collator: Collator function for batching
+            device: Target device for batches
+            gc_interval: Garbage collection frequency (0 to disable)
+            apply_normalization: Whether to apply normalizers during sampling
+            apply_transforms: Whether to apply transforms during sampling
+        """
         self.replay_buffer = replay_buffer
         self.batch_size = batch_size
         self.num_batches_per_epoch = num_batches_per_epoch
@@ -1181,6 +1461,8 @@ class ReplayBufferDataLoader:
         self.data_collator = data_collator
         self.device = device
         self.gc_interval = gc_interval
+        self.apply_normalization = apply_normalization
+        self.apply_transforms = apply_transforms
         
     def __len__(self):
         return self.num_batches_per_epoch
@@ -1196,13 +1478,18 @@ class ReplayBufferDataLoader:
                     torch.cuda.empty_cache()
     
     def sample_batch(self):
-        """Sample and process a batch."""
-        # Get processed samples
+        """Sample and process a batch with full pipeline.
+        
+        Memory-optimized: Cleans up intermediate objects promptly.
+        """
+        # Get processed samples (raw → normalized → transformed → processed)
         samples = sample_processed(
             self.replay_buffer, 
             self.batch_size, 
             self.data_processor,
-            device='cpu'  # Keep on CPU, collator/move will handle device
+            device='cpu',  # Keep on CPU, collator/move will handle device
+            apply_normalization=self.apply_normalization,
+            apply_transforms=self.apply_transforms,
         )
         
         # Collate
@@ -1211,8 +1498,76 @@ class ReplayBufferDataLoader:
         else:
             batch = self._default_collate(samples)
         
-        # Move to device
+        # Clear samples list immediately after collation (no longer needed)
+        del samples
+        
+        # Move to device and return
+        result = self._to_device(batch, self.device)
+        
+        # Clear batch dict to free memory (tensors are already moved to device)
+        del batch
+        
+        return result
+    
+    def sample_batch_raw(self):
+        """Sample a batch of raw data without any processing."""
+        samples = sample_processed(
+            self.replay_buffer, 
+            self.batch_size, 
+            data_processor=None,
+            device='cpu',
+            apply_normalization=False,
+            apply_transforms=False,
+        )
+        
+        if self.data_collator is not None:
+            batch = self.data_collator(samples)
+        else:
+            batch = self._default_collate(samples)
+        
         return self._to_device(batch, self.device)
+    
+    def sample_batch_normalized_only(self):
+        """Sample a batch with only normalization (no transforms or processor)."""
+        samples = sample_processed(
+            self.replay_buffer, 
+            self.batch_size, 
+            data_processor=None,
+            device='cpu',
+            apply_normalization=True,
+            apply_transforms=False,
+        )
+        
+        if self.data_collator is not None:
+            batch = self.data_collator(samples)
+        else:
+            batch = self._default_collate(samples)
+        
+        return self._to_device(batch, self.device)
+    
+    def set_transforms(self, transforms):
+        """
+        Update transforms at runtime.
+        
+        This allows changing data augmentation without reloading the buffer.
+        
+        Args:
+            transforms: New transform pipeline (list of callables)
+        """
+        self.replay_buffer.transforms = transforms
+    
+    def set_normalizers(self, action_normalizer=None, state_normalizer=None):
+        """
+        Update normalizers at runtime.
+        
+        Args:
+            action_normalizer: New action normalizer
+            state_normalizer: New state normalizer
+        """
+        if action_normalizer is not None:
+            self.replay_buffer.action_normalizer = action_normalizer
+        if state_normalizer is not None:
+            self.replay_buffer.state_normalizer = state_normalizer
     
     def _default_collate(self, samples):
         """Stack tensors, keep lists for non-tensors."""
@@ -1239,6 +1594,23 @@ class ReplayBufferDataLoader:
         elif isinstance(batch, torch.Tensor):
             return batch.to(device)
         return batch
+    
+    def get_data_info(self):
+        """Get information about the data pipeline configuration."""
+        return {
+            'batch_size': self.batch_size,
+            'num_batches_per_epoch': self.num_batches_per_epoch,
+            'buffer_size': self.replay_buffer.size,
+            'buffer_capacity': self.replay_buffer.capacity,
+            'store_raw': self.replay_buffer.store_raw,
+            'apply_normalization': self.apply_normalization,
+            'apply_transforms': self.apply_transforms,
+            'has_action_normalizer': self.replay_buffer.action_normalizer is not None,
+            'has_state_normalizer': self.replay_buffer.state_normalizer is not None,
+            'has_transforms': self.replay_buffer.transforms is not None,
+            'has_processor': self.data_processor is not None,
+            'has_collator': self.data_collator is not None,
+        }
 
 
 # ============================================================================

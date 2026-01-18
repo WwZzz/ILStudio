@@ -76,11 +76,36 @@ def create_replay_buffer_from_dataset(
     storage_device: str = "cpu",
     batch_size: int = 1000,
     gc_interval: int = 5000,
+    store_raw: bool = True,
 ) -> ILReplayBuffer:
     """
     Create and initialize a replay buffer from ILStudio dataset.
     
-    Data from load_data() is already normalized/transformed, stored directly.
+    NEW BEHAVIOR (store_raw=True, default):
+    - Stores RAW data from the underlying dataset (bypasses normalizers/transforms)
+    - Normalizers and transforms are extracted from the wrapped dataset
+    - Processing (normalization, transforms) is applied on-demand during sampling
+    - This provides flexibility for runtime data augmentation changes
+    
+    LEGACY BEHAVIOR (store_raw=False):
+    - Data from load_data() is already normalized/transformed
+    - Stored directly without changes
+    
+    Args:
+        data_dict: Dict with 'train' and/or 'eval' datasets
+        task_config: Task configuration
+        policy_config: Policy configuration
+        capacity: Buffer capacity (None = auto from dataset size)
+        use_train: Include training data
+        use_eval: Include evaluation data
+        device: Device for sampling
+        storage_device: Device for storage
+        batch_size: Batch size for loading
+        gc_interval: GC frequency during loading
+        store_raw: If True, store raw data and apply processing on sampling
+        
+    Returns:
+        ILReplayBuffer instance
     """
     train_data = data_dict.get('train') if use_train else None
     eval_data = data_dict.get('eval') if use_eval else None
@@ -104,31 +129,24 @@ def create_replay_buffer_from_dataset(
     ctrl_space = policy_config.get('ctrl_space', 'ee')
     ctrl_type = policy_config.get('ctrl_type', 'delta')
 
-    # Get normalizers for add_from_env_step
-    action_normalizer = None
-    state_normalizer = None
-    if 'datasets' in task_config and len(task_config['datasets']) > 0:
-        first_ds = task_config['datasets'][0]
-        action_normalizer = first_ds.get('action_normalize')
-        state_normalizer = first_ds.get('state_normalize')
-    if action_normalizer is None:
-        action_normalizer = task_config.get('action_normalize')
-    if state_normalizer is None:
-        state_normalizer = task_config.get('state_normalize')
-
     logger.info("="*60)
     logger.info("Creating Replay Buffer from Dataset")
     logger.info(f"  Capacity: {capacity}, Chunk size: {chunk_size}")
     logger.info(f"  Control: {ctrl_space}/{ctrl_type}, Total size: {total_size}")
+    logger.info(f"  Store raw data: {store_raw}")
     logger.info("="*60)
 
     if train_data is not None:
+        # from_ilstudio_dataset will automatically extract normalizers and transforms
+        # from the wrapped dataset layers (NormalizedMapDataset, MapTransformPipeline)
         replay_buffer = ILReplayBuffer.from_ilstudio_dataset(
             raw_dataset=train_data,
             capacity=capacity,
             chunk_size=chunk_size,
-            action_normalizer=action_normalizer,
-            state_normalizer=state_normalizer,
+            # Normalizers and transforms will be auto-extracted from wrapped dataset
+            action_normalizer=None,
+            state_normalizer=None,
+            transforms=None,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
             device=device,
@@ -136,17 +154,20 @@ def create_replay_buffer_from_dataset(
             show_progress=True,
             batch_size=batch_size,
             gc_interval=gc_interval,
+            store_raw=store_raw,
         )
     else:
         replay_buffer = ILReplayBuffer(
             capacity=capacity,
             chunk_size=chunk_size,
-            action_normalizer=action_normalizer,
-            state_normalizer=state_normalizer,
+            action_normalizer=None,
+            state_normalizer=None,
+            transforms=None,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
             device=device,
             storage_device=storage_device,
+            store_raw=store_raw,
         )
 
     if eval_data is not None and use_eval:
@@ -176,9 +197,13 @@ def create_replay_buffer_from_dataset(
                 reward = sample.get('reward', 0.0)
                 if isinstance(reward, torch.Tensor):
                     reward = reward.item()
-                replay_buffer.add(obs, action, reward, next_obs, done, truncated=False, already_normalized=True)
+                # Note: For raw storage, data from environment is also stored raw
+                replay_buffer.add(obs, action, reward, next_obs, done, truncated=False, already_normalized=not store_raw)
 
     logger.info(f"Replay Buffer created: {replay_buffer.size} transitions")
+    logger.info(f"  Has action_normalizer: {replay_buffer.action_normalizer is not None}")
+    logger.info(f"  Has state_normalizer: {replay_buffer.state_normalizer is not None}")
+    logger.info(f"  Has transforms: {replay_buffer.transforms is not None}")
     return replay_buffer
 
 
@@ -286,8 +311,11 @@ def main(args):
         data_collator=data_collator,
         device='cuda:0',
         gc_interval=50,  # Run GC every 50 batches to prevent memory buildup
+        apply_normalization=True,  # Apply normalization on sampling (for raw data)
+        apply_transforms=True,  # Apply transforms on sampling (for data augmentation)
     )
     logger.info(f"ReplayBufferDataLoader: {len(train_loader)} batches/epoch")
+    logger.info(f"  Data pipeline info: {train_loader.get_data_info()}")
 
     # Test batch
     test_batch = next(iter(train_loader))
