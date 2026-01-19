@@ -639,15 +639,25 @@ class ILReplayBuffer:
         first_sample = dataset_for_data[0]
         first_obs = cls._sample_to_metaobs(first_sample, ctrl_space)
         
-        # Determine action shape
+        # Determine action shape - ALWAYS store single-step action (action_dim,)
+        # Action chunks are built dynamically during sampling
         action_data = first_sample.get('action')
         if action_data is None:
             raise ValueError("Dataset samples must have 'action' key")
         if isinstance(action_data, torch.Tensor):
             action_data = action_data.numpy()
-        if action_data.ndim == 2 and chunk_size == 1:
-            action_data = action_data[0]
-        action_shape = action_data.shape
+        
+        # Extract single-step action dimension
+        if action_data.ndim == 2:
+            # Dataset has chunked actions (chunk_size, action_dim) -> take action_dim
+            action_dim = action_data.shape[-1]
+        else:
+            # Dataset has single-step action (action_dim,)
+            action_dim = action_data.shape[0]
+        
+        # Storage shape is always (action_dim,) - single-step
+        action_shape = (action_dim,)
+        logger.info(f"  Action dim: {action_dim} (storing single-step actions)")
         
         # Determine obs shapes and dtypes
         obs_shapes = {}
@@ -690,8 +700,15 @@ class ILReplayBuffer:
         
         # =====================================================================
         # Step 5: Load data directly into pre-allocated arrays
+        # Memory optimized: Cache sample to avoid re-reading, use episode_ids array
         # =====================================================================
-        prev_ep_id = None
+        
+        # Pre-allocate metadata arrays BEFORE the loop to avoid repeated allocation
+        replay_buffer.episode_ids = np.zeros(capacity, dtype=np.int64)
+        replay_buffer.timestamps = np.zeros(capacity, dtype=np.int64)
+        
+        # We'll determine is_pads shape from first sample if available
+        is_pads_initialized = False
         
         pbar = tqdm(range(num_to_load), desc="Loading dataset", disable=not show_progress)
         
@@ -717,23 +734,20 @@ class ILReplayBuffer:
             if has_raw_lang:
                 replay_buffer.obs_storage['raw_lang'][i] = sample.get('raw_lang', '')
             
-            # Action
+            # Action - ALWAYS store single-step action
+            # If dataset has chunked actions, take only the first action (current timestep)
             action_data = sample.get('action')
             if isinstance(action_data, torch.Tensor):
                 action_data = action_data.numpy()
-            if action_data.ndim == 2 and chunk_size == 1:
+            
+            if action_data.ndim == 2:
+                # Chunked action (chunk_size, action_dim) -> take first action
                 action_data = action_data[0]
+            
             replay_buffer.actions[i] = action_data.astype(np.float32)
             
-            # is_pad (store for raw data)
-            is_pad = sample.get('is_pad')
-            if is_pad is not None:
-                if isinstance(is_pad, torch.Tensor):
-                    is_pad = is_pad.numpy()
-                # Store is_pad if we have the storage
-                if not hasattr(replay_buffer, 'is_pads') or replay_buffer.is_pads is None:
-                    replay_buffer.is_pads = np.zeros((capacity, *is_pad.shape), dtype=bool)
-                replay_buffer.is_pads[i] = is_pad
+            # Note: is_pad is NOT stored - it will be computed dynamically during sampling
+            # based on episode boundaries and requested chunk_size
             
             # Reward
             reward = sample.get(reward_key, 0.0)
@@ -741,48 +755,59 @@ class ILReplayBuffer:
                 reward = reward.item()
             replay_buffer.rewards[i] = float(reward)
             
-            # Episode boundary detection
+            # Store episode_id (episode boundary detection done AFTER loop)
             current_ep = sample.get('episode_id', i)
-            is_last_in_episode = False
-                
-            if i < num_to_load - 1:
-                # Peek at next sample's episode_id
-                next_sample = dataset_for_data[i + 1]
-                next_ep = next_sample.get('episode_id', i + 1)
-                if current_ep != next_ep:
-                    is_last_in_episode = True
-            else:
-                is_last_in_episode = True
-            
-            # Done flag
-            done = is_last_in_episode
-            if done_key in sample:
-                done = bool(sample[done_key])
-            
-            replay_buffer.dones[i] = done
-            replay_buffer.truncateds[i] = False
-            replay_buffer.episode_ends[i] = done
-            replay_buffer.ctrl_spaces[i] = ctrl_space
-            replay_buffer.ctrl_types[i] = ctrl_type
-            
-            # Store episode_id and timestamp for reference
-            if not hasattr(replay_buffer, 'episode_ids') or replay_buffer.episode_ids is None:
-                replay_buffer.episode_ids = np.zeros(capacity, dtype=np.int64)
             replay_buffer.episode_ids[i] = int(current_ep) if isinstance(current_ep, (int, np.integer)) else i
             
-            if not hasattr(replay_buffer, 'timestamps') or replay_buffer.timestamps is None:
-                replay_buffer.timestamps = np.zeros(capacity, dtype=np.int64)
+            # Store timestamp
             ts = sample.get('timestamp', i)
             if isinstance(ts, torch.Tensor):
                 ts = ts.item()
             replay_buffer.timestamps[i] = int(ts)
             
-            prev_ep_id = current_ep
+            # Control info
+            replay_buffer.ctrl_spaces[i] = ctrl_space
+            replay_buffer.ctrl_types[i] = ctrl_type
+            replay_buffer.truncateds[i] = False
+            
+            # Done flag from sample (will be corrected in post-processing)
+            if done_key in sample:
+                replay_buffer.dones[i] = bool(sample[done_key])
+            else:
+                replay_buffer.dones[i] = False
+            
+            # Clear sample reference to allow GC
+            del sample
             
             # Periodic garbage collection
             if gc_interval > 0 and (i + 1) % gc_interval == 0:
                 gc.collect()
                 pbar.set_postfix({'gc': i + 1})
+        
+        # =====================================================================
+        # Step 5.5: Post-process episode boundaries (AFTER loading all data)
+        # This avoids peeking at next sample during the loop
+        # =====================================================================
+        logger.info("  Detecting episode boundaries...")
+        
+        # Episode ends where episode_id changes or at the last sample
+        episode_ids = replay_buffer.episode_ids[:num_to_load]
+        episode_ends = np.zeros(num_to_load, dtype=bool)
+        
+        # Find where episode_id differs from next sample
+        episode_ends[:-1] = episode_ids[:-1] != episode_ids[1:]
+        episode_ends[-1] = True  # Last sample is always episode end
+        
+        # Update dones and episode_ends based on detected boundaries
+        # (use OR to preserve any done flags from the dataset)
+        replay_buffer.dones[:num_to_load] = np.logical_or(
+            replay_buffer.dones[:num_to_load], 
+            episode_ends
+        )
+        replay_buffer.episode_ends[:num_to_load] = episode_ends
+        
+        num_episodes = np.sum(episode_ends)
+        logger.info(f"  Found {num_episodes} episodes in {num_to_load} samples")
         
         # =====================================================================
         # Step 6: Fill next_obs storage
@@ -939,6 +964,154 @@ class ILReplayBuffer:
         
         return stats
     
+    # ============================================================================
+    # Episode Retrieval and Video Export
+    # ============================================================================
+    
+    def get_episode_by_id(self, episode_id: int) -> List[Dict[str, Any]]:
+        """
+        Get all transitions from a specific episode.
+        
+        Note: This method requires episode_ids and timestamps arrays to be set.
+        These are typically set by RolloutReplayBuffer or when loading episodes
+        with explicit episode tracking.
+        
+        Args:
+            episode_id: The episode ID to retrieve
+            
+        Returns:
+            List of transition dicts sorted by timestamp, each containing:
+            - 'obs': observation dict
+            - 'action': action array
+            - 'reward': float
+            - 'next_obs': next observation dict
+            - 'done': bool
+            - 'truncated': bool
+            - 'timestamp': int
+            - 'episode_id': int
+        """
+        # Check if episode tracking is available
+        if not hasattr(self, 'episode_ids') or self.episode_ids is None:
+            logger.warning("Episode IDs not available. Use RolloutReplayBuffer for episode tracking.")
+            return []
+        
+        if not hasattr(self, 'timestamps') or self.timestamps is None:
+            logger.warning("Timestamps not available. Use RolloutReplayBuffer for episode tracking.")
+            return []
+        
+        # Find all indices for this episode
+        mask = self.episode_ids[:self.size] == episode_id
+        indices = np.where(mask)[0]
+        
+        if len(indices) == 0:
+            return []
+        
+        # Sort by timestamp
+        timestamps = self.timestamps[indices]
+        sorted_order = np.argsort(timestamps)
+        indices = indices[sorted_order]
+        
+        # Extract transitions
+        transitions = []
+        for idx in indices:
+            obs = {}
+            next_obs = {}
+            
+            for key in self.obs_storage:
+                if key == 'raw_lang':
+                    obs[key] = self.obs_storage[key][idx]
+                    next_obs[key] = self.next_obs_storage[key][idx]
+                else:
+                    obs[key] = self.obs_storage[key][idx].copy()
+                    next_obs[key] = self.next_obs_storage[key][idx].copy()
+            
+            transition = {
+                'obs': obs,
+                'action': self.actions[idx].copy(),
+                'reward': float(self.rewards[idx]),
+                'next_obs': next_obs,
+                'done': bool(self.dones[idx]),
+                'truncated': bool(self.truncateds[idx]),
+                'timestamp': int(self.timestamps[idx]),
+                'episode_id': int(self.episode_ids[idx]),
+            }
+            transitions.append(transition)
+        
+        return transitions
+    
+    def save_episode_as_video(
+        self,
+        episode_id: int,
+        output_path: str,
+        fps: int = 30,
+        camera_idx: int = 0,
+    ):
+        """
+        Save episode observations as a video.
+        
+        Args:
+            episode_id: The episode ID to save as video
+            output_path: Path to save the video (e.g., 'episode_0.mp4')
+            fps: Video frame rate
+            camera_idx: Which camera to use if multiple cameras
+        """
+        import imageio
+        
+        episode_data = self.get_episode_by_id(episode_id)
+        
+        if len(episode_data) == 0:
+            logger.warning(f"Empty episode data for episode {episode_id}, skipping video save")
+            return
+        
+        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+        
+        # Collect frames
+        frames = []
+        for t, transition in enumerate(episode_data):
+            obs = transition['obs']
+            if 'image' not in obs or obs['image'] is None:
+                logger.warning(f"No image in observation at timestep {t}")
+                continue
+            
+            img = obs['image']
+            
+            # Handle different image shapes
+            # (cameras, C, H, W) or (C, H, W)
+            if img.ndim == 4:
+                # Multiple cameras: select one
+                img = img[camera_idx]  # (C, H, W)
+            
+            if img.ndim == 3:
+                # (C, H, W) -> (H, W, C)
+                if img.shape[0] in [1, 3, 4]:  # Channels first
+                    img = img.transpose(1, 2, 0)
+            
+            # Convert to uint8 if needed
+            if img.dtype != np.uint8:
+                if img.max() <= 1.0:
+                    img = (img * 255).astype(np.uint8)
+                else:
+                    img = img.astype(np.uint8)
+            
+            # Handle grayscale
+            if img.ndim == 2:
+                img = np.stack([img] * 3, axis=-1)
+            elif img.shape[-1] == 1:
+                img = np.repeat(img, 3, axis=-1)
+            
+            frames.append(img)
+        
+        if len(frames) == 0:
+            logger.warning("No frames to save")
+            return
+        
+        # Write video
+        with imageio.get_writer(output_path, fps=fps) as writer:
+            for frame in frames:
+                writer.append_data(frame)
+        
+        logger.info(f"Saved episode {episode_id} video ({len(frames)} frames) to {output_path}")
+    
     def save(self, save_path: str):
         """Save buffer to disk."""
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -1008,9 +1181,17 @@ def transition_to_sample(
     is_pad: Optional[np.ndarray] = None,
     episode_id: int = 0,
     timestamp: int = 0,
+    chunk_size: int = 1,
 ) -> dict:
     """
     Convert a single RLTransition to dataset sample format.
+    
+    NOTE: This function is now mainly used for debugging/utility purposes.
+    The main sampling flow (sample_processed) builds samples directly from
+    storage arrays for efficiency and proper action chunk handling.
+    
+    For single-step actions (chunk_size=1), this function will expand the
+    action to [1, action_dim] format to match dataset conventions.
     
     Args:
         transition: RLTransition dict from replay buffer
@@ -1018,6 +1199,7 @@ def transition_to_sample(
         is_pad: Optional padding mask for action
         episode_id: Episode ID for this transition
         timestamp: Timestamp for this transition
+        chunk_size: Action chunk size (affects action shape format)
         
     Returns:
         Sample dict in dataset format: {image, state, action, is_pad, raw_lang, ...}
@@ -1039,19 +1221,38 @@ def transition_to_sample(
     elif obs.state_joint is not None:
         sample['state'] = torch.from_numpy(obs.state_joint)
     
-    # Action
+    # Action - handle shape conversion for chunk_size=1 case
     if action.action is not None:
-        sample['action'] = torch.from_numpy(action.action)
+        action_tensor = torch.from_numpy(action.action)
+        
+        # When chunk_size=1, dataset returns action as [1, action_dim] (2D)
+        # but replay buffer may store it as [action_dim] (1D) for efficiency
+        # We need to match the dataset format
+        if chunk_size == 1 and action_tensor.dim() == 1:
+            # Expand 1D action to 2D: [action_dim] -> [1, action_dim]
+            action_tensor = action_tensor.unsqueeze(0)
+        
+        sample['action'] = action_tensor
     
-    # is_pad - use provided value or create default
+    # is_pad - use provided value or create default, handle chunk_size=1 shape
     if is_pad is not None:
-        sample['is_pad'] = torch.from_numpy(is_pad) if isinstance(is_pad, np.ndarray) else is_pad
+        is_pad_tensor = torch.from_numpy(is_pad) if isinstance(is_pad, np.ndarray) else is_pad
+        # Handle shape for chunk_size=1: ensure is_pad is 1D array of length 1
+        if chunk_size == 1:
+            if is_pad_tensor.dim() == 0:
+                # Scalar -> [1]
+                is_pad_tensor = is_pad_tensor.unsqueeze(0)
+            elif is_pad_tensor.dim() == 1 and len(is_pad_tensor) > 1:
+                # Multi-element 1D -> take first element and make [1]
+                is_pad_tensor = is_pad_tensor[:1]
+        sample['is_pad'] = is_pad_tensor
     elif 'action' in sample:
         action_t = sample['action']
         if action_t.dim() == 2:
             sample['is_pad'] = torch.zeros(action_t.shape[0], dtype=torch.bool)
         else:
-            sample['is_pad'] = torch.tensor(False)
+            # For 1D action (shouldn't happen after expansion), create [1] for chunk_size=1
+            sample['is_pad'] = torch.zeros(1, dtype=torch.bool) if chunk_size == 1 else torch.tensor(False)
     
     sample['raw_lang'] = obs.raw_lang if obs.raw_lang else ''
     sample['reasoning'] = ''
@@ -1134,62 +1335,146 @@ def sample_processed(
     device: str = 'cuda:0',
     apply_normalization: bool = True,
     apply_transforms: bool = True,
+    chunk_size: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Sample from replay buffer and apply normalization, transforms, and processor.
     
-    This is the main function for getting training-ready samples from replay buffer.
+    NEW SAMPLING STRATEGY:
+    1. Randomly sample episode_id
+    2. Randomly sample start position within episode
+    3. Build action chunk from start position (chunk_size actions)
+    4. If actions don't fill chunk, pad with last valid action and set is_pad
     
     Data flow (if store_raw=True):
-    1. Sample raw transitions from buffer
-    2. Convert to sample dict format
-    3. Apply normalization (if apply_normalization=True and normalizers exist)
-    4. Apply transforms (if apply_transforms=True and transforms exist)
-    5. Apply data_processor (if provided)
+    1. Sample episodes and start positions
+    2. Build action chunks with is_pad
+    3. Convert to sample dict format
+    4. Apply normalization (if apply_normalization=True and normalizers exist)
+    5. Apply transforms (if apply_transforms=True and transforms exist)
+    6. Apply data_processor (if provided)
     
     Args:
-        replay_buffer: The replay buffer
+        replay_buffer: The replay buffer (stores single-step actions)
         batch_size: Number of samples
         data_processor: Processor to apply to each sample
         device: Device to put tensors on
         apply_normalization: Whether to apply normalizers (if buffer stores raw data)
         apply_transforms: Whether to apply transforms (if buffer stores raw data)
+        chunk_size: Action chunk size for output (default: replay_buffer.chunk_size)
         
     Returns:
         List of processed samples (each sample is a dict)
     """
-    # Sample transitions and indices
-    indices = np.random.randint(0, replay_buffer.size, size=batch_size)
-    transitions = [replay_buffer._get_transition_at_index(idx) for idx in indices]
+    if chunk_size is None:
+        chunk_size = replay_buffer.chunk_size
     
-    # Get extra metadata if available
-    is_pads = getattr(replay_buffer, 'is_pads', None)
-    episode_ids = getattr(replay_buffer, 'episode_ids', None)
-    timestamps = getattr(replay_buffer, 'timestamps', None)
+    # Build episode index mapping for efficient sampling
+    # episode_starts[ep_id] = first index of this episode
+    # episode_lengths[ep_id] = length of this episode
+    episode_ids = replay_buffer.episode_ids[:replay_buffer.size]
+    episode_ends = replay_buffer.episode_ends[:replay_buffer.size]
     
-    # Convert to dataset sample format with metadata
+    # Find unique episodes and their boundaries
+    unique_episodes = np.unique(episode_ids)
+    num_episodes = len(unique_episodes)
+    
+    # Pre-compute episode boundaries (end indices where episode_ends=True)
+    end_indices = np.where(episode_ends)[0]
+    
+    # Build episode -> (start_idx, end_idx) mapping
+    # More efficient: compute start from end_indices
+    episode_ranges = {}
+    prev_end = -1
+    for i, end_idx in enumerate(end_indices):
+        start_idx = prev_end + 1
+        ep_id = episode_ids[start_idx]
+        episode_ranges[ep_id] = (start_idx, end_idx)
+        prev_end = end_idx
+    
+    # Storage references
+    obs_storage = replay_buffer.obs_storage
+    actions = replay_buffer.actions
+    timestamps = replay_buffer.timestamps
+    
+    # Action dimension
+    action_dim = actions.shape[-1] if actions is not None else 0
+    
     samples = []
-    for i, (idx, t) in enumerate(zip(indices, transitions)):
-        is_pad = is_pads[idx] if is_pads is not None else None
-        episode_id = int(episode_ids[idx]) if episode_ids is not None else 0
-        timestamp = int(timestamps[idx]) if timestamps is not None else 0
-        
-        sample = transition_to_sample(
-            t, 
-            ctrl_space=replay_buffer.ctrl_space,
-            is_pad=is_pad,
-            episode_id=episode_id,
-            timestamp=timestamp,
-        )
-        samples.append(sample)
     
-    # Clear transitions early to free memory (no longer needed after conversion)
-    del transitions
+    for _ in range(batch_size):
+        # Step 1: Randomly sample an episode
+        ep_id = np.random.choice(list(episode_ranges.keys()))
+        start_idx, end_idx = episode_ranges[ep_id]
+        ep_length = end_idx - start_idx + 1
+        
+        # Step 2: Randomly sample start position within episode
+        frame_offset = np.random.randint(0, ep_length)
+        global_idx = start_idx + frame_offset
+        
+        # Step 3: Build action chunk with padding (like lerobotv21_wrapper.py)
+        # Calculate how many valid actions we can get
+        remaining_in_episode = ep_length - frame_offset
+        valid_count = min(chunk_size, remaining_in_episode)
+        
+        if valid_count > 0:
+            # Get valid actions
+            valid_end = global_idx + valid_count
+            valid_actions = actions[global_idx:valid_end].copy()
+            
+            if valid_count < chunk_size:
+                # Need padding: repeat last valid action
+                pad_count = chunk_size - valid_count
+                last_action = valid_actions[-1:] if len(valid_actions) > 0 else actions[end_idx:end_idx+1]
+                padding = np.repeat(last_action, pad_count, axis=0)
+                action_chunk = np.concatenate([valid_actions, padding], axis=0)
+                is_pad = np.array([False] * valid_count + [True] * pad_count, dtype=bool)
+            else:
+                action_chunk = valid_actions
+                is_pad = np.array([False] * chunk_size, dtype=bool)
+        else:
+            # All padding (shouldn't happen normally)
+            last_action = actions[end_idx:end_idx+1]
+            action_chunk = np.repeat(last_action, chunk_size, axis=0)
+            is_pad = np.array([True] * chunk_size, dtype=bool)
+        
+        # Build sample dict
+        sample = {}
+        
+        # Image
+        if 'image' in obs_storage:
+            sample['image'] = torch.from_numpy(obs_storage['image'][global_idx])
+        
+        # State
+        state_key = None
+        for k in ['state', 'state_ee', 'state_joint']:
+            if k in obs_storage:
+                state_key = k
+                break
+        if state_key is not None:
+            sample['state'] = torch.from_numpy(obs_storage[state_key][global_idx].copy())
+        
+        # Action chunk
+        sample['action'] = torch.from_numpy(action_chunk.astype(np.float32))
+        
+        # is_pad
+        sample['is_pad'] = torch.from_numpy(is_pad)
+        
+        # Metadata
+        if 'raw_lang' in obs_storage:
+            sample['raw_lang'] = obs_storage['raw_lang'][global_idx] or ''
+        else:
+            sample['raw_lang'] = ''
+        
+        sample['reasoning'] = ''
+        sample['episode_id'] = int(ep_id)
+        sample['timestamp'] = int(timestamps[global_idx]) if timestamps is not None else frame_offset
+        
+        samples.append(sample)
     
     # Apply normalization if buffer stores raw data
     if replay_buffer.store_raw and apply_normalization:
         for i, sample in enumerate(samples):
-            # In-place update to avoid creating extra list
             samples[i] = apply_normalization_to_sample(
                 sample,
                 action_normalizer=replay_buffer.action_normalizer,
@@ -1202,20 +1487,18 @@ def sample_processed(
         if not isinstance(transforms, (list, tuple)):
             transforms = [transforms]
         for i, sample in enumerate(samples):
-            # In-place update to avoid creating extra list
             samples[i] = apply_transforms_to_sample(sample, transforms)
     
     # Apply processor
     if data_processor is not None:
         samples = [data_processor(s) for s in samples]
     
-    # Move tensors to device (optimized: process in-place where possible)
+    # Move tensors to device
     processed = []
     for s in samples:
         s_device = {}
         for k, v in s.items():
             if isinstance(v, torch.Tensor):
-                # Only move to device if not already there (use non_blocking for async transfer)
                 if v.device.type != device.split(':')[0] or (device.startswith('cuda:') and hasattr(v.device, 'index') and v.device.index != int(device.split(':')[1])):
                     s_device[k] = v.to(device, non_blocking=True)
                 else:
@@ -1224,9 +1507,7 @@ def sample_processed(
                 s_device[k] = v
         processed.append(s_device)
     
-    # Clear samples list to free memory before returning
     del samples
-    
     return processed
 
 
@@ -1236,13 +1517,17 @@ def verify_data_consistency(
     data_processor=None,
     sample_indices: List[int] = None,
     tolerance: float = 1e-5,
+    chunk_size: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Verify that data from train_data and replay buffer sampling are consistent.
     
+    NEW: Replay buffer stores single-step actions, so we need to build action chunks
+    dynamically for comparison with the dataset.
+    
     This function compares samples at the same indices from:
-    1. train_data (original dataset from load_data)
-    2. replay_buffer (sampled and processed)
+    1. train_data (original dataset from load_data, may have action chunks)
+    2. replay_buffer (single-step actions, chunks built dynamically)
     
     Args:
         train_data: Dataset from load_data (train.py style)
@@ -1250,12 +1535,16 @@ def verify_data_consistency(
         data_processor: Processor to apply to replay samples
         sample_indices: Specific indices to compare. If None, uses [0, 1, 2]
         tolerance: Tolerance for float comparison
+        chunk_size: Chunk size for action chunks (default: replay_buffer.chunk_size)
         
     Returns:
         dict: Verification results with 'passed', 'details', 'mismatches'
     """
     if sample_indices is None:
         sample_indices = [0, 1, 2]
+    
+    if chunk_size is None:
+        chunk_size = replay_buffer.chunk_size
     
     results = {
         'passed': True,
@@ -1265,6 +1554,7 @@ def verify_data_consistency(
     
     logger.info("="*60)
     logger.info("Verifying Data Consistency: train_data vs replay_buffer")
+    logger.info(f"  Chunk size: {chunk_size}")
     logger.info("="*60)
     
     # Prefer the passed-in dataset (keeps transforms/normalization).
@@ -1283,6 +1573,20 @@ def verify_data_consistency(
     dataset_len = len(dataset) if hasattr(dataset, '__len__') else 0
     logger.info(f"Dataset: {type(dataset).__name__}, len={dataset_len}")
     
+    # Build episode ranges for action chunk construction
+    episode_ids = replay_buffer.episode_ids[:replay_buffer.size]
+    episode_ends = replay_buffer.episode_ends[:replay_buffer.size]
+    end_indices = np.where(episode_ends)[0]
+    
+    # Build episode -> (start_idx, end_idx) mapping
+    episode_ranges = {}
+    prev_end = -1
+    for end_idx in end_indices:
+        start_idx = prev_end + 1
+        ep_id = episode_ids[start_idx]
+        episode_ranges[ep_id] = (start_idx, end_idx)
+        prev_end = end_idx
+    
     for idx in sample_indices:
         if idx >= len(dataset) or idx >= replay_buffer.size:
             logger.warning(f"Index {idx} out of range, skipping")
@@ -1297,37 +1601,70 @@ def verify_data_consistency(
         else:
             ds_sample_processed = ds_sample
         
-        # Get sample from replay buffer at same index
-        rb_transition = replay_buffer._get_transition_at_index(idx)
+        # Build sample from replay buffer with action chunk (same logic as sample_processed)
+        ep_id = int(episode_ids[idx])
+        start_idx, end_idx = episode_ranges.get(ep_id, (idx, idx))
+        ep_length = end_idx - start_idx + 1
+        frame_offset = idx - start_idx
         
-        # Get metadata for transition_to_sample
-        is_pads = getattr(replay_buffer, 'is_pads', None)
-        episode_ids = getattr(replay_buffer, 'episode_ids', None)
-        timestamps = getattr(replay_buffer, 'timestamps', None)
+        # Build action chunk
+        remaining_in_episode = ep_length - frame_offset
+        valid_count = min(chunk_size, remaining_in_episode)
         
-        is_pad = is_pads[idx] if is_pads is not None else None
-        episode_id = int(episode_ids[idx]) if episode_ids is not None else 0
-        timestamp = int(timestamps[idx]) if timestamps is not None else 0
+        actions = replay_buffer.actions
+        if valid_count > 0:
+            valid_end = idx + valid_count
+            valid_actions = actions[idx:valid_end].copy()
+            
+            if valid_count < chunk_size:
+                pad_count = chunk_size - valid_count
+                last_action = valid_actions[-1:] if len(valid_actions) > 0 else actions[end_idx:end_idx+1]
+                padding = np.repeat(last_action, pad_count, axis=0)
+                action_chunk = np.concatenate([valid_actions, padding], axis=0)
+                is_pad = np.array([False] * valid_count + [True] * pad_count, dtype=bool)
+            else:
+                action_chunk = valid_actions
+                is_pad = np.array([False] * chunk_size, dtype=bool)
+        else:
+            last_action = actions[end_idx:end_idx+1]
+            action_chunk = np.repeat(last_action, chunk_size, axis=0)
+            is_pad = np.array([True] * chunk_size, dtype=bool)
         
-        rb_sample = transition_to_sample(
-            rb_transition, 
-            ctrl_space=replay_buffer.ctrl_space,
-            is_pad=is_pad,
-            episode_id=episode_id,
-            timestamp=timestamp,
-        )
+        # Build rb_sample
+        obs_storage = replay_buffer.obs_storage
+        rb_sample = {}
         
-        # If replay buffer stores raw data, apply normalization and transforms
-        # to match the normalized/transformed data from train_data
+        # Image
+        if 'image' in obs_storage:
+            rb_sample['image'] = torch.from_numpy(obs_storage['image'][idx])
+        
+        # State
+        state_key = None
+        for k in ['state', 'state_ee', 'state_joint']:
+            if k in obs_storage:
+                state_key = k
+                break
+        if state_key is not None:
+            rb_sample['state'] = torch.from_numpy(obs_storage[state_key][idx].copy())
+        
+        # Action chunk
+        rb_sample['action'] = torch.from_numpy(action_chunk.astype(np.float32))
+        rb_sample['is_pad'] = torch.from_numpy(is_pad)
+        
+        # Metadata
+        rb_sample['raw_lang'] = obs_storage.get('raw_lang', {}).get(idx, '') if isinstance(obs_storage.get('raw_lang'), dict) else (obs_storage['raw_lang'][idx] if 'raw_lang' in obs_storage else '')
+        rb_sample['reasoning'] = ''
+        rb_sample['episode_id'] = ep_id
+        rb_sample['timestamp'] = int(replay_buffer.timestamps[idx]) if replay_buffer.timestamps is not None else frame_offset
+        
+        # Apply normalization if buffer stores raw data
         if replay_buffer.store_raw:
-            # Apply normalization (same as in sample_processed)
             rb_sample = apply_normalization_to_sample(
                 rb_sample,
                 action_normalizer=replay_buffer.action_normalizer,
                 state_normalizer=replay_buffer.state_normalizer,
             )
             
-            # Apply transforms (same as in sample_processed)
             if replay_buffer.transforms is not None:
                 transforms = replay_buffer.transforms
                 if not isinstance(transforms, (list, tuple)):
@@ -1412,9 +1749,14 @@ class ReplayBufferDataLoader:
     """
     DataLoader-like wrapper for replay buffer with on-demand normalization and transforms.
     
+    NEW SAMPLING STRATEGY:
+    - Replay buffer stores single-step actions (no duplication)
+    - Action chunks are built dynamically during sampling
+    - Episode boundaries are respected for padding
+    
     Workflow (when buffer stores raw data):
-    1. Sample raw transitions from replay buffer
-    2. Convert to dataset sample format
+    1. Sample episodes and start positions
+    2. Build action chunks with is_pad based on episode boundaries
     3. Apply normalization (state/action normalizers)
     4. Apply transforms (data augmentation, etc.)
     5. Apply data_processor (policy-specific processing)
@@ -1423,11 +1765,11 @@ class ReplayBufferDataLoader:
     This provides maximum flexibility for:
     - Runtime data augmentation (can change transforms without reloading data)
     - Experimenting with different normalization strategies
-    - A/B testing different preprocessing pipelines
+    - Different chunk sizes at sampling time
     
     Memory Management:
     - Periodically runs gc.collect() to avoid memory buildup
-    - Set gc_interval to control how often GC runs (default: every 100 batches)
+    - Set gc_interval to control how often GC runs
     """
     
     def __init__(
@@ -1438,13 +1780,14 @@ class ReplayBufferDataLoader:
         data_processor=None,
         data_collator=None,
         device: str = "cuda:0",
-        gc_interval: int = 20,  # Reduced from 100 to 20 for better memory management
+        gc_interval: int = 5,
         apply_normalization: bool = True,
         apply_transforms: bool = True,
+        chunk_size: Optional[int] = None,
     ):
         """
         Args:
-            replay_buffer: ILReplayBuffer instance
+            replay_buffer: ILReplayBuffer instance (stores single-step actions)
             batch_size: Number of samples per batch
             num_batches_per_epoch: Number of batches to generate per epoch
             data_processor: Policy-specific processor function
@@ -1453,6 +1796,7 @@ class ReplayBufferDataLoader:
             gc_interval: Garbage collection frequency (0 to disable)
             apply_normalization: Whether to apply normalizers during sampling
             apply_transforms: Whether to apply transforms during sampling
+            chunk_size: Action chunk size (default: replay_buffer.chunk_size)
         """
         self.replay_buffer = replay_buffer
         self.batch_size = batch_size
@@ -1463,6 +1807,7 @@ class ReplayBufferDataLoader:
         self.gc_interval = gc_interval
         self.apply_normalization = apply_normalization
         self.apply_transforms = apply_transforms
+        self.chunk_size = chunk_size if chunk_size is not None else replay_buffer.chunk_size
         
     def __len__(self):
         return self.num_batches_per_epoch
@@ -1480,9 +1825,10 @@ class ReplayBufferDataLoader:
     def sample_batch(self):
         """Sample and process a batch with full pipeline.
         
+        NEW: Samples episodes, builds action chunks dynamically with proper padding.
         Memory-optimized: Cleans up intermediate objects promptly.
         """
-        # Get processed samples (raw → normalized → transformed → processed)
+        # Get processed samples (episode sampling → action chunk building → normalization → transforms → processor)
         samples = sample_processed(
             self.replay_buffer, 
             self.batch_size, 
@@ -1490,6 +1836,7 @@ class ReplayBufferDataLoader:
             device='cpu',  # Keep on CPU, collator/move will handle device
             apply_normalization=self.apply_normalization,
             apply_transforms=self.apply_transforms,
+            chunk_size=self.chunk_size,
         )
         
         # Collate
