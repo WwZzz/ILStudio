@@ -383,6 +383,63 @@ class ILReplayBuffer:
             truncated=batch_truncateds,
         )
 
+    def sample_fast(
+        self,
+        batch_size: int,
+        keys: Optional[Sequence[str]] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ) -> BatchTransition:
+        """
+        Faster sampling with optional key filtering and no defensive copies.
+
+        This is useful for image-only algorithms (e.g., DrQ) to avoid
+        copying unused observation keys and raw_lang.
+
+        Args:
+            batch_size: Number of transitions to sample
+            keys: Observation keys to include (default: all stored keys)
+            device: Target device (default: self.device)
+
+        Returns:
+            BatchTransition with tensors on target device
+        """
+        if not self.initialized:
+            raise RuntimeError("Cannot sample from an empty buffer. Add transitions first.")
+
+        batch_size = min(batch_size, self.size)
+        idx = np.random.randint(0, self.size, size=batch_size)
+        target_device = device or self.device
+
+        # Limit observation keys
+        if keys is None:
+            keys = self._obs_shapes.keys()
+
+        batch_obs = {}
+        batch_next_obs = {}
+
+        for key in keys:
+            if key not in self.obs_storage:
+                continue
+            obs_data = self.obs_storage[key][idx]
+            next_obs_data = self.next_obs_storage[key][idx]
+            batch_obs[key] = torch.from_numpy(obs_data).to(target_device)
+            batch_next_obs[key] = torch.from_numpy(next_obs_data).to(target_device)
+
+        # Actions and scalars
+        batch_actions = torch.from_numpy(self.actions[idx]).float().to(target_device)
+        batch_rewards = torch.from_numpy(self.rewards[idx]).float().to(target_device)
+        batch_dones = torch.from_numpy(self.dones[idx]).float().to(target_device)
+        batch_truncateds = torch.from_numpy(self.truncateds[idx]).float().to(target_device)
+
+        return BatchTransition(
+            obs=batch_obs,
+            action=batch_actions,
+            reward=batch_rewards,
+            next_obs=batch_next_obs,
+            done=batch_dones,
+            truncated=batch_truncateds,
+        )
+
     def sample_as_metaobs(self, batch_size: int) -> List[RLTransition]:
         """
         Sample transitions as a list of RLTransition with MetaObs format.

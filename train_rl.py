@@ -75,7 +75,7 @@ def create_replay_buffer_from_dataset(
     device: str = "cuda:0",
     storage_device: str = "cpu",
     batch_size: int = 1000,
-    gc_interval: int = 5000,
+    gc_interval: int = 2000,
     store_raw: bool = True,
 ) -> ILReplayBuffer:
     """
@@ -270,12 +270,18 @@ def main(args):
     # ===========================================================================
     # Verify data consistency between train_data and replay_buffer
     # ===========================================================================
+    # Get chunk_size from policy config for verification
+    chunk_size = policy_config.get('chunk_size', 1)
+    if chunk_size is None:
+        chunk_size = policy_config.get('model_args', {}).get('chunk_size', 1)
+    
     verify_results = verify_data_consistency(
         train_data=train_data,  # Pass original dataset directly
         replay_buffer=replay_buffer,
         data_processor=data_processor,
         sample_indices=[0, 1, 2, 10, 50],  # Check several indices
         tolerance=1e-5,
+        chunk_size=chunk_size,  # Use policy's chunk_size for verification
     )
     
     if not verify_results['passed']:
@@ -310,11 +316,12 @@ def main(args):
         data_processor=data_processor,
         data_collator=data_collator,
         device='cuda:0',
-        gc_interval=50,  # Run GC every 50 batches to prevent memory buildup
+        gc_interval=10,
         apply_normalization=True,  # Apply normalization on sampling (for raw data)
         apply_transforms=True,  # Apply transforms on sampling (for data augmentation)
+        chunk_size=chunk_size,  # Use policy's chunk_size for action chunk building
     )
-    logger.info(f"ReplayBufferDataLoader: {len(train_loader)} batches/epoch")
+    logger.info(f"ReplayBufferDataLoader: {len(train_loader)} batches/epoch, chunk_size={chunk_size}")
     logger.info(f"  Data pipeline info: {train_loader.get_data_info()}")
 
     # Test batch
@@ -347,6 +354,7 @@ def main(args):
             data_collator=data_collator,
             device='cuda:0',
             gc_interval=50,
+            chunk_size=chunk_size,  # Use policy's chunk_size
         )
         logger.info(f"ReplayBuffer EvalLoader: {len(eval_loader)} batches/epoch")
     else:
@@ -360,7 +368,8 @@ def main(args):
             data_processor=data_processor,
             data_collator=data_collator,
             device='cuda:0',
-            gc_interval=50,
+            gc_interval=10,
+            chunk_size=chunk_size,  # Use policy's chunk_size
         )
 
     # Save example data
