@@ -173,6 +173,10 @@ if __name__=='__main__':
             logger.info(eval_result)
             all_eval_results.append(eval_result)
             policy.reset()
+            
+            # Close video writer to flush the video to disk
+            if video_writer is not None:
+                video_writer.close()
         
         eval_result = {
             'total_success': sum(eri['total_success'] for eri in all_eval_results),

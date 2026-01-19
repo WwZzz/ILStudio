@@ -634,7 +634,14 @@ class WrappedLerobotDataset(tud.Dataset):
         # Get state (supports single key or list of keys to concatenate)
         state = self._get_data_from_sample(sample, self.state_key)
         
-        timestamp = sample['frame_index'].item()
+        # Get timestamp/frame_index with fallback for different dataset versions
+        if 'frame_index' in sample:
+            timestamp = sample['frame_index'].item()
+        elif 'index' in sample:
+            timestamp = sample['index'].item()
+        else:
+            # Fallback to using the index from locate
+            timestamp = start_ts
         
         # Get padding mask
         pad_key = f'{self._primary_action_key}_is_pad'
