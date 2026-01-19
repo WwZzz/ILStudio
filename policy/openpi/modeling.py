@@ -95,9 +95,9 @@ class OpenPiPolicy(PreTrainedModel):
         if actions is not None:
             actions = actions.to(dev)
             losses = self.model(observation, actions)
-            # if is_pad is not None:
-            #     losses = (losses * ~is_pad.unsqueeze(-1))
-            # losses = losses[:,:,:self.config.action_dim]
+            if is_pad is not None:
+                losses = (losses * ~is_pad.unsqueeze(-1))
+            losses = losses[:,:,:self.config.action_dim]
             return {'loss': losses.mean().unsqueeze(0)}
         else:
             action = self.model.sample_actions(dev, observation)

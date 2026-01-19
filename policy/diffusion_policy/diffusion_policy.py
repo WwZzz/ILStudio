@@ -181,8 +181,7 @@ class DiffusionPolicyModel(PreTrainedModel):
 
             # Calculate L2 loss
             all_l2 = nn.functional.mse_loss(noise_pred, noise, reduction='none')
-            # loss = (all_l2 * ~is_pad.unsqueeze(-1)).mean()
-            loss = all_l2.mean()
+            loss = (all_l2 * ~is_pad.unsqueeze(-1)).mean()
 
             return {'loss': loss}
         else:  # Inference mode
