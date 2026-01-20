@@ -127,7 +127,7 @@ class DrQTrainer(RLTrainer):
         
         # Reset environments
         obs = self._reset_env()
-        obs_dict = self._obs_to_dict(obs)
+        obs_dict = self._obs_to_dict(obs, num_envs=num_envs)
         
         # Per-environment tracking
         episode_returns = np.zeros(num_envs)
@@ -193,10 +193,14 @@ class DrQTrainer(RLTrainer):
                 next_obs, reward, done, info = result
             else:
                 next_obs, reward, terminated, truncated, info = result
-                done = terminated or truncated
+                # Handle both single value and array cases
+                if isinstance(terminated, np.ndarray):
+                    done = terminated | truncated  # Element-wise OR for arrays
+                else:
+                    done = terminated or truncated
             time_stats['env_step'].append(time.perf_counter() - env_start)
             
-            next_obs_dict = self._obs_to_dict(next_obs)
+            next_obs_dict = self._obs_to_dict(next_obs, num_envs=num_envs)
             reward = np.atleast_1d(reward)
             done = np.atleast_1d(done)
             
@@ -539,19 +543,19 @@ class DrQTrainer(RLTrainer):
         
         return image
 
-    def _obs_to_dict(self, obs, add_batch_dim: bool = True) -> Dict[str, np.ndarray]:
+    def _obs_to_dict(self, obs, num_envs: int = 1) -> Dict[str, np.ndarray]:
         """
         Convert observation to dict format for buffer storage.
         
         Handles image observations from DMC environments.
-        Adds batch dimension for add_from_parallel_envs compatibility.
+        Ensures correct batch dimension for add_from_parallel_envs.
         
         Args:
             obs: Observation (numpy array, dict, or dataclass)
-            add_batch_dim: If True, add batch dimension for single env case
+            num_envs: Number of parallel environments
             
         Returns:
-            Dict with observation data, potentially with batch dimension added
+            Dict with observation data, with shape (num_envs, ...)
         """
         if isinstance(obs, dict):
             result = obs
@@ -563,10 +567,16 @@ class DrQTrainer(RLTrainer):
         else:
             result = {'obs': obs}
         
-        # Add batch dimension for single env case
-        if add_batch_dim:
-            result = {k: v[np.newaxis, ...] if isinstance(v, np.ndarray) else v 
-                      for k, v in result.items()}
+        # Ensure correct batch dimension
+        for k, v in result.items():
+            if isinstance(v, np.ndarray):
+                if num_envs == 1 and v.ndim == 3:
+                    # Single env: (C, H, W) -> (1, C, H, W)
+                    result[k] = v[np.newaxis, ...]
+                elif num_envs > 1 and v.ndim == 3:
+                    # Vectorized env but missing batch dim (shouldn't happen)
+                    result[k] = v[np.newaxis, ...]
+                # If already (num_envs, C, H, W), keep as is
         
         return result
 

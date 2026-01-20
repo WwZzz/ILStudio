@@ -487,3 +487,168 @@ def list_tasks():
 def get_task_description(task: str) -> str:
     """Get description for a task."""
     return DMC_TASKS.get(task, f"DMC task: {task}")
+
+
+# ============================================================================
+# Vectorized Environment
+# ============================================================================
+
+class VectorDMCEnv:
+    """
+    Simple vectorized DMC environment using multiprocessing.
+    
+    Creates multiple independent DMC environments that run in parallel.
+    
+    Example:
+        >>> vec_env = VectorDMCEnv(
+        ...     env_name='cartpole_swingup',
+        ...     num_envs=4,
+        ...     seed=0,
+        ... )
+        >>> obs = vec_env.reset()  # (4, 9, 84, 84)
+        >>> actions = np.random.randn(4, 1)
+        >>> next_obs, rewards, dones, truncateds, infos = vec_env.step(actions)
+    """
+    
+    def __init__(
+        self,
+        env_name: str,
+        num_envs: int,
+        seed: int = 0,
+        image_size: int = 84,
+        action_repeat: int = 4,
+        frame_stack: int = 3,
+        normalize_actions: bool = True,
+    ):
+        self.num_envs = num_envs
+        self.env_name = env_name
+        
+        # Create environments with different seeds
+        self.envs = []
+        for i in range(num_envs):
+            env = make_dmc_env(
+                env_name=env_name,
+                seed=seed + i,
+                image_size=image_size,
+                action_repeat=action_repeat,
+                frame_stack=frame_stack,
+                normalize_actions=normalize_actions,
+            )
+            self.envs.append(env)
+        
+        # Get spaces from first env
+        self.observation_space = self.envs[0].observation_space
+        self.action_space = self.envs[0].action_space
+        self._max_episode_steps = getattr(self.envs[0], '_max_episode_steps', 1000)
+    
+    def reset(self, **kwargs):
+        """Reset all environments."""
+        obs_list = []
+        info_list = []
+        for env in self.envs:
+            result = env.reset(**kwargs)
+            if isinstance(result, tuple):
+                obs, info = result
+            else:
+                obs, info = result, {}
+            obs_list.append(obs)
+            info_list.append(info)
+        
+        return np.stack(obs_list), info_list
+    
+    def step(self, actions):
+        """
+        Step all environments.
+        
+        Args:
+            actions: (num_envs, action_dim) array
+            
+        Returns:
+            obs: (num_envs, *obs_shape)
+            rewards: (num_envs,)
+            dones: (num_envs,)
+            truncateds: (num_envs,)
+            infos: list of dicts
+        """
+        obs_list = []
+        reward_list = []
+        done_list = []
+        truncated_list = []
+        info_list = []
+        
+        for i, (env, action) in enumerate(zip(self.envs, actions)):
+            result = env.step(action)
+            if len(result) == 4:
+                obs, reward, done, info = result
+                truncated = False
+            else:
+                obs, reward, done, truncated, info = result
+            
+            # Auto-reset on done
+            if done or truncated:
+                reset_result = env.reset()
+                if isinstance(reset_result, tuple):
+                    obs, _ = reset_result
+                else:
+                    obs = reset_result
+            
+            obs_list.append(obs)
+            reward_list.append(reward)
+            done_list.append(done)
+            truncated_list.append(truncated)
+            info_list.append(info)
+        
+        return (
+            np.stack(obs_list),
+            np.array(reward_list),
+            np.array(done_list),
+            np.array(truncated_list),
+            info_list,
+        )
+    
+    def close(self):
+        """Close all environments."""
+        for env in self.envs:
+            if hasattr(env, 'close'):
+                env.close()
+    
+    def seed(self, seed):
+        """Set seeds for all environments."""
+        for i, env in enumerate(self.envs):
+            if hasattr(env, 'seed'):
+                env.seed(seed + i)
+
+
+def make_vector_dmc_env(
+    env_name: str,
+    num_envs: int,
+    seed: int = 0,
+    image_size: int = 84,
+    action_repeat: int = 4,
+    frame_stack: int = 3,
+    normalize_actions: bool = True,
+) -> VectorDMCEnv:
+    """
+    Create a vectorized DMC environment.
+    
+    Args:
+        env_name: DMC task name (e.g., 'cartpole_swingup')
+        num_envs: Number of parallel environments
+        seed: Base random seed
+        image_size: Observation image size
+        action_repeat: Number of times to repeat each action
+        frame_stack: Number of frames to stack
+        normalize_actions: Whether to normalize actions to [-1, 1]
+        
+    Returns:
+        VectorDMCEnv instance
+    """
+    return VectorDMCEnv(
+        env_name=env_name,
+        num_envs=num_envs,
+        seed=seed,
+        image_size=image_size,
+        action_repeat=action_repeat,
+        frame_stack=frame_stack,
+        normalize_actions=normalize_actions,
+    )
