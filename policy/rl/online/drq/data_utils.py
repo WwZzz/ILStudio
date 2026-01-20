@@ -5,7 +5,7 @@ This module provides:
 1. Random shift augmentation (the key to DrQ's performance)
 2. Data processing utilities for DrQ
 
-Note: DrQ uses RolloutReplayBuffer from policy.rl.rollout_buffer for data storage.
+Note: DrQ uses RolloutReplayBuffer from policy.rl.replay_buffer for data storage.
 Augmentation is applied during the update step, not during sampling.
 """
 

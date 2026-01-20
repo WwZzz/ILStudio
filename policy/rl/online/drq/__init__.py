@@ -6,7 +6,7 @@ state-of-the-art performance on DMC (DeepMind Control Suite) by using
 random shift augmentation for data regularization.
 
 This implementation:
-1. Uses RolloutReplayBuffer from policy.rl.rollout_buffer for data storage
+1. Uses RolloutReplayBuffer from policy.rl.replay_buffer for data storage
 2. Inherits from RLTrainer for training loop
 3. Applies augmentation during the update step (not during sampling)
 
@@ -32,7 +32,7 @@ from .data_utils import DrQProcessor, DrQCollator, create_augmentation
 from .trainer import DrQTrainer, Trainer
 
 # Re-export for convenience
-from policy.rl.rollout_buffer import RolloutReplayBuffer
+from policy.rl.replay_buffer import RolloutReplayBuffer
 from policy.rl.base import RLConfig, RLMode, RLTrainer
 
 

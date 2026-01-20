@@ -93,7 +93,14 @@ Directory Structure:
 ====================
 policy/rl/
 ├── __init__.py          # This file - exports and documentation
-├── replay_buffer.py     # ILReplayBuffer implementation (MetaObs/MetaAction)
+├── replay_buffer/       # Replay buffer module (modular structure)
+│   ├── __init__.py      # Exports all public APIs
+│   ├── buffer.py        # ILReplayBuffer core class
+│   ├── loader.py        # ReplayBufferDataLoader
+│   ├── rollout_buffer.py # RolloutReplayBuffer
+│   ├── sampling.py      # Sampling utilities
+│   ├── transitions.py   # Type definitions
+│   └── utils.py         # Utilities (conversion, normalization, transforms)
 ├── base.py              # RLPolicy, RLTrainer, RLConfig base classes
 ├── transitions.py       # Transition conversion utilities
 ├── algorithms/          # RL algorithm implementations (future)

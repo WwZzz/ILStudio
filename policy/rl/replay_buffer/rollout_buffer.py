@@ -10,7 +10,7 @@ import numpy as np
 from typing import Optional, Dict, List, Any
 
 from benchmark.base import MetaAction
-from policy.rl.replay_buffer import ILReplayBuffer
+from .buffer import ILReplayBuffer
 
 
 class RolloutReplayBuffer(ILReplayBuffer):

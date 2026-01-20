@@ -23,6 +23,7 @@ from policy.rl.replay_buffer import (
 )
 import torch
 import numpy as np
+import gc
 try:
     torch.serialization.add_safe_globals([np.ndarray])
     torch.serialization.add_safe_globals([np.core.multiarray._reconstruct])
@@ -248,9 +249,17 @@ def main(args):
 
     # ===========================================================================
     # Create standard train_loader (train.py style) for comparison
+    # Note: This is only for comparison and can be removed if not needed
     # ===========================================================================
     standard_train_loader, _ = get_dataloader(train_data, val_data, data_processor, data_collator, args)
     logger.info(f"Standard train_loader created with {len(standard_train_loader)} batches")
+    
+    # Release standard_train_loader to free memory (we use ReplayBufferDataLoader instead)
+    logger.info("Releasing standard_train_loader to free memory...")
+    del standard_train_loader
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # ===========================================================================
     # Create replay buffer
@@ -266,6 +275,14 @@ def main(args):
         storage_device='cpu',
     )
     logger.info(f"Replay buffer: {replay_buffer.size} transitions")
+    
+    # Release data_dict to free memory (replay buffer already has the data)
+    # Keep train_data and val_data references for verification and eval loader
+    logger.info("Releasing data_dict to free memory...")
+    del data_dict
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # ===========================================================================
     # Verify data consistency between train_data and replay_buffer
@@ -286,6 +303,13 @@ def main(args):
     
     if not verify_results['passed']:
         logger.warning("Data consistency check failed! Review mismatches above.")
+    
+    # Release train_data after verification (replay buffer has all the data)
+    logger.info("Releasing train_data after verification to free memory...")
+    del train_data
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     # ===========================================================================
     # Demo: Sample processed data directly
@@ -357,6 +381,13 @@ def main(args):
             chunk_size=chunk_size,  # Use policy's chunk_size
         )
         logger.info(f"ReplayBuffer EvalLoader: {len(eval_loader)} batches/epoch")
+        
+        # Release val_data after creating eval buffer
+        logger.info("Releasing val_data after creating eval buffer to free memory...")
+        del val_data
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     else:
         # Fallback: use training data for eval loss if no validation set
         logger.warning("No eval dataset found; using training data for eval loss.")
@@ -372,8 +403,9 @@ def main(args):
             chunk_size=chunk_size,  # Use policy's chunk_size
         )
 
-    # Save example data
-    save_example_data(train_data, training_args.output_dir)
+    # Note: save_example_data requires train_data, but we've already released it
+    # Skip this if train_data is not available (already released)
+    # save_example_data(train_data, training_args.output_dir)
 
     # ===========================================================================
     # Train

@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 from loguru import logger
 
 from policy.rl.base import RLTrainer, RLConfig, RLMode, RLPolicy
-from policy.rl.rollout_buffer import RolloutReplayBuffer
+from policy.rl.replay_buffer import RolloutReplayBuffer
 from .modeling import DrQAgent, DrQConfig
 from .data_utils import create_augmentation, apply_drq_augmentation
 

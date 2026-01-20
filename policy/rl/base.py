@@ -25,7 +25,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from .replay_buffer import ILReplayBuffer, BatchTransition
-from .rollout_buffer import RolloutReplayBuffer
+from .replay_buffer import RolloutReplayBuffer
 
 
 class RLMode(Enum):

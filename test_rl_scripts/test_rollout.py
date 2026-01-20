@@ -26,7 +26,7 @@ from tianshou.env import SubprocVectorEnv
 from data_utils.utils import set_seed
 from benchmark.utils import SequentialVectorEnv, organize_obs
 from policy.utils import load_policy
-from policy.rl.rollout_buffer import RolloutReplayBuffer
+from policy.rl.replay_buffer import RolloutReplayBuffer
 
 
 def parse_args():
