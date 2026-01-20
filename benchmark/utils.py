@@ -375,8 +375,25 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
         for t in range(args.max_timesteps):
             if video_writer is not None:
                 frames = obs['image']
-                if len(frames.shape)==5: frames = frames[:, 0]
-                frames = frames.transpose(0, 2, 3, 1)
+                # Handle multiple camera views: concatenate horizontally
+                if len(frames.shape) == 5:
+                    # Shape: (batch, num_cameras, channels, height, width)
+                    # Concatenate cameras horizontally along width dimension
+                    batch_size, num_cameras, channels, height, width = frames.shape
+                    # Convert to (batch, num_cameras, height, width, channels) for concatenation
+                    frames = frames.transpose(0, 1, 3, 4, 2)  # (batch, num_cameras, height, width, channels)
+                    # Concatenate along width dimension for each batch
+                    concatenated_frames = []
+                    for b in range(batch_size):
+                        # frames[b] shape: (num_cameras, height, width, channels)
+                        # Reshape to (height, num_cameras, width, channels) then reshape to concatenate horizontally
+                        batch_frames = frames[b].transpose(1, 0, 2, 3)  # (height, num_cameras, width, channels)
+                        batch_frames = batch_frames.reshape(height, num_cameras * width, channels)  # (height, width*num_cameras, channels)
+                        concatenated_frames.append(batch_frames)
+                    frames = np.stack(concatenated_frames, axis=0)  # (batch, height, total_width, channels)
+                else:
+                    # Shape: (batch, channels, height, width) - single camera or already processed
+                    frames = frames.transpose(0, 2, 3, 1)  # (batch, height, width, channels)
                 for env_i in range(len(env)):
                     if not success[env_i]:
                         video_frames[env_i].append(frames[env_i])
