@@ -95,8 +95,10 @@ class AlohaSimEnv(MetaEnv):
         img_wrist_left = cv2.resize(obs['images']['left_wrist'], self.image_size_wrist)
         img_wrist_right = cv2.resize(obs['images']['right_wrist'], self.image_size_wrist)
         all_imgs = [img_primary]
-        if '1' in self.camera_ids:
-            all_imgs = all_imgs + [img_wrist_left, img_wrist_right]
+        if '1' in self.camera_ids or 1 in self.camera_ids:
+            all_imgs = all_imgs + [img_wrist_left, ]
+        if '2' in self.camera_ids or 2 in self.camera_ids:
+            all_imgs = all_imgs + [img_wrist_right, ]
         image = np.stack(all_imgs)
         image = image.transpose(0, 3, 1, 2)
         return MetaObs(state=state_joint, image=image, raw_lang=self.raw_lang)
