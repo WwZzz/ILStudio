@@ -409,11 +409,17 @@ class ConfigLoader:
         # Dynamically extract all training parameters from training_config
         training_params = {}
         
-        # Add preload_data (special parameter not part of TrainingArguments)
-        training_params['preload_data'] = training_config.preload_data
-        
-        # Add all parameters from the config_dict (these will be passed to TrainingArguments)
-        training_params.update(training_config.config_dict)
+        # Handle training_config being None, dict, or object
+        if training_config is None or isinstance(training_config, dict):
+            # If it's a dict or None, use default values
+            training_params['preload_data'] = training_config.get('preload_data', False) if isinstance(training_config, dict) else False
+            if isinstance(training_config, dict):
+                training_params.update(training_config.get('config_dict', {}))
+        else:
+            # If it's an object (TrainingConfig), access attributes
+            training_params['preload_data'] = getattr(training_config, 'preload_data', False)
+            if hasattr(training_config, 'config_dict'):
+                training_params.update(training_config.config_dict)
 
         cfg_params = policy_config.get('config_params', {}) if isinstance(policy_config, dict) else {}
         

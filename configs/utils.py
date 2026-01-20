@@ -22,6 +22,17 @@ def resolve_yaml(name_or_path: str, base_dir: str) -> str:
         # If it's a path without extension, try adding .yaml
         if candidate.suffix == '' and candidate.with_suffix('.yaml').exists():
             return str(candidate.with_suffix('.yaml'))
+        # If path doesn't exist, try treating it as a subdirectory name under base_dir
+        # Convert slashes to path separators and look under base_dir
+        if any(sep in name_or_path for sep in ['/', '\\']):
+            base = Path(base_dir)
+            # Remove leading slashes if present
+            clean_name = name_or_path.lstrip('/\\')
+            # Convert slashes to os.sep
+            subpath = clean_name.replace('/', os.sep).replace('\\', os.sep)
+            candidate = base / f"{subpath}.yaml"
+            if candidate.exists():
+                return str(candidate)
         raise FileNotFoundError(f"Config not found: {name_or_path}")
 
     # Treat as name under base_dir
