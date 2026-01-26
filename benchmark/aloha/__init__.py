@@ -45,6 +45,7 @@ import numpy as np
 import time
 import cv2
 from multiprocessing import current_process
+from loguru import logger
 
 TASK_PROMPT = {
     'sim_transfer_cube_scripted': 'Transfer the red cube from the right arm to the left arm.',
@@ -80,6 +81,11 @@ class AlohaSimEnv(MetaEnv):
         self.raw_lang = TASK_PROMPT['sim_transfer_cube_scripted'] if 'transfer' in self.task_name else TASK_PROMPT['sim_insertion_scripted']
         # step over the environment
         env = make_sim_env('sim_'+self.task_name)
+        # Get action bounds from action_spec
+        action_spec = env.action_spec()
+        self.min_action = action_spec.minimum
+        self.max_action = action_spec.maximum
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
         return env
         
     def meta2act(self, maction: MetaAction):

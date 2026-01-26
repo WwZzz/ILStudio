@@ -33,6 +33,26 @@ class SimplerEnv(MetaEnv):
     def create_env(self):
         task = self.config.task
         env = simpler_env.make(task)
+        
+        # Get action bounds from action_space
+        # SimplerEnv uses ManiSkill2 which has a gymnasium-style action_space
+        if hasattr(env, 'action_space'):
+            if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
+                self.min_action = env.action_space.low
+                self.max_action = env.action_space.high
+            elif hasattr(env.action_space, 'minimum') and hasattr(env.action_space, 'maximum'):
+                # dm_control style BoundedArray
+                self.min_action = env.action_space.minimum
+                self.max_action = env.action_space.maximum
+            else:
+                self.min_action = None
+                self.max_action = None
+        else:
+            self.min_action = None
+            self.max_action = None
+        
+        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):

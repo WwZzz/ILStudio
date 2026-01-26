@@ -37,6 +37,17 @@ class MetaWorldEnv(MetaEnv):
             env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode, camera_name=self.camera_name)
         else:
             env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode)
+        
+        # Get action bounds from action_space
+        if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
+            self.min_action = env.action_space.low
+            self.max_action = env.action_space.high
+        else:
+            # Fallback
+            self.min_action = None
+            self.max_action = None
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):

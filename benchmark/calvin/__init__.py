@@ -141,6 +141,13 @@ class CalvinEnv(MetaEnv):
         # Suppress OpenGL/EGL/pybullet output messages
         with _suppress_pybullet_output():
             env = get_env(self.task_name, show_gui=self.show_gui)
+        
+        # CALVIN uses delta control with fixed bounds
+        # Action: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        # gripper: 1 = open, -1 = close
+        self.min_action = np.array([-0.02, -0.02, -0.02, -0.05, -0.05, -0.05, -1.0], dtype=np.float32)
+        self.max_action = np.array([0.02, 0.02, 0.02, 0.05, 0.05, 0.05, 1.0], dtype=np.float32)
+        
         super().__init__(env)
         
         # Initialize sequence state
