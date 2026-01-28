@@ -8,6 +8,7 @@ Design Philosophy:
 - Support single algorithm and multiple algorithms training scenarios
 - Support custom reward functions (applied during training, not data collection)
 - Support evaluation during training
+- Support vectorized environments (SequentialVectorEnv, SubprocVectorEnv, etc.)
 """
 
 import numpy as np
@@ -16,7 +17,10 @@ from typing import Dict, Any, Optional, Union, List, Callable
 from abc import ABC, abstractmethod
 
 # Type hints for Meta classes
-from benchmark.base import MetaObs, MetaAction, MetaEnv
+from benchmark.base import MetaObs, MetaAction
+
+# Vector environment protocol
+from rl.envs import VectorEnvProtocol, EnvsType
 
 
 class BaseTrainer(ABC):
@@ -25,13 +29,13 @@ class BaseTrainer(ABC):
     
     This class defines the interface for all trainers in the RL framework.
     Trainers coordinate the training loop by managing:
-    - Environments (meta_envs)
+    - Vectorized environments (envs)
     - Algorithms (with their policies and replay buffers)
     - Collectors (for data collection)
     - Reward functions (applied during training)
     
     Attributes:
-        meta_envs: Environment(s) for training
+        envs: Vectorized environment(s) for training
         algorithm: Algorithm(s) for training
         collector: Data collector(s)
         reward_fn: Optional custom reward function
@@ -39,7 +43,7 @@ class BaseTrainer(ABC):
     
     def __init__(
         self,
-        meta_envs: Union[MetaEnv, List[MetaEnv], Callable, Dict[str, Any]],
+        envs: Union[VectorEnvProtocol, Dict[str, VectorEnvProtocol]],
         algorithm: Union['BaseAlgorithm', List['BaseAlgorithm']],
         collector: Optional[Union['BaseCollector', List['BaseCollector']]] = None,
         reward_fn: Optional[Union['BaseReward', Callable]] = None,
@@ -49,11 +53,11 @@ class BaseTrainer(ABC):
         Initialize the trainer.
         
         Args:
-            meta_envs: Supports multiple formats:
-                      - MetaEnv instance: Single environment
-                      - List[MetaEnv]: Environment list (same type environments)
-                      - Callable: Environment factory function
-                      - Dict[str, Any]: Multi-environment config dict (different env types)
+            envs: Vectorized environment(s), supports:
+                - VectorEnvProtocol: Single vectorized environment
+                  (SequentialVectorEnv, SubprocVectorEnv, DummyVectorEnv, etc.)
+                - Dict[str, VectorEnvProtocol]: Multi-environment dict for different env types
+                  e.g., {'sim': sim_vec_env, 'real': real_vec_env}
             algorithm: BaseAlgorithm instance or list of BaseAlgorithm (required)
                       - Single algorithm: Single agent training
                       - Algorithm list: Multiple algorithms training independently in same env
@@ -68,15 +72,75 @@ class BaseTrainer(ABC):
                       - Note: Replay buffer stores raw rewards, reward function only applied during training
             **kwargs: Trainer-specific parameters
         """
-        self.meta_envs = meta_envs
+        self.envs = envs
         self.algorithm = algorithm
         self.reward_fn = reward_fn
         self._kwargs = kwargs
+        
+        # Normalize environment storage: always use dict internally
+        if isinstance(envs, dict):
+            self._envs_dict: Dict[str, VectorEnvProtocol] = envs
+            self._is_multi_env = True
+        else:
+            self._envs_dict = {'default': envs}
+            self._is_multi_env = False
         
         # Handle collector initialization
         self.collector = collector
         # Note: Actual collector creation should be done in subclasses
         # since it may require specific collector types
+    
+    def get_env(self, env_type: Optional[str] = None) -> VectorEnvProtocol:
+        """
+        Get the vectorized environment by type.
+        
+        Args:
+            env_type: Environment type identifier. If None, returns 'default' env
+                     or the first env if 'default' doesn't exist.
+        
+        Returns:
+            The vectorized environment
+        
+        Raises:
+            KeyError: If specified env_type is not found
+        """
+        if env_type is not None:
+            return self._envs_dict[env_type]
+        
+        # Return 'default' if exists, otherwise return first env
+        if 'default' in self._envs_dict:
+            return self._envs_dict['default']
+        return list(self._envs_dict.values())[0]
+    
+    def get_total_env_num(self) -> int:
+        """
+        Get total number of parallel environments across all types.
+        
+        Returns:
+            Total count of parallel environments
+        """
+        return sum(len(env) for env in self._envs_dict.values())
+    
+    def get_env_types(self) -> List[str]:
+        """
+        Get all environment type identifiers.
+        
+        Returns:
+            List of environment type strings
+        """
+        return list(self._envs_dict.keys())
+    
+    @property
+    def env_num(self) -> int:
+        """
+        Number of environments in the default (or first) environment.
+        
+        Returns:
+            Number of parallel environments
+        """
+        if 'default' in self._envs_dict:
+            return len(self._envs_dict['default'])
+        return len(list(self._envs_dict.values())[0])
     
     @abstractmethod
     def train(self, **kwargs) -> None:
@@ -211,7 +275,8 @@ class BaseTrainer(ABC):
             self.collector.__class__.__name__ if not isinstance(self.collector, list) else f"List[{len(self.collector)}]"
         )
         reward_info = "None" if self.reward_fn is None else self.reward_fn.__class__.__name__
-        return f"{self.__class__.__name__}(algorithm={algo_info}, collector={collector_info}, reward_fn={reward_info})"
+        env_info = f"{self.get_total_env_num()} envs" if self._is_multi_env else f"{self.env_num} envs"
+        return f"{self.__class__.__name__}(envs={env_info}, algorithm={algo_info}, collector={collector_info}, reward_fn={reward_info})"
 
 
 if __name__ == '__main__':
@@ -219,6 +284,7 @@ if __name__ == '__main__':
     Test code for BaseTrainer class.
     
     Since BaseTrainer is abstract, we create a simple concrete implementation for testing.
+    Tests now use vectorized environments (VectorEnvProtocol).
     """
     import sys
     sys.path.insert(0, '/home/zhang/robot/126/ILStudio')
@@ -228,6 +294,7 @@ if __name__ == '__main__':
     from rl.base import BaseAlgorithm
     from rl.rewards.base_reward import BaseReward, IdentityReward, ScaledReward
     from rl.collectors.base_collector import BaseCollector
+    from rl.envs import VectorEnvProtocol
     from dataclasses import asdict
     
     # Simple replay buffer for testing
@@ -313,6 +380,51 @@ if __name__ == '__main__':
             self.prev_obs = self.obs2meta(obs)
             return self.prev_obs, reward, done, info
     
+    # Simple VectorEnv for testing (similar to SequentialVectorEnv)
+    class DummyVectorEnv:
+        """Simple sequential vector environment for testing."""
+        def __init__(self, env_fns):
+            self.envs = [fn() for fn in env_fns]
+            self.env_num = len(self.envs)
+        
+        def reset(self, id=None):
+            if id is None:
+                obs_list = [env.reset() for env in self.envs]
+                return np.array(obs_list, dtype=object)
+            else:
+                if np.isscalar(id):
+                    return self.envs[id].reset()
+                else:
+                    obs_list = [self.envs[i].reset() for i in id]
+                    return np.array(obs_list, dtype=object)
+        
+        def step(self, action, id=None):
+            if id is None:
+                results = [env.step(act) for env, act in zip(self.envs, action)]
+                obs = np.array([r[0] for r in results], dtype=object)
+                rew = np.array([r[1] for r in results])
+                done = np.array([r[2] for r in results])
+                info = [r[3] for r in results]
+                return obs, rew, done, info
+            else:
+                if np.isscalar(id):
+                    return self.envs[id].step(action)
+                else:
+                    results = [self.envs[i].step(act) for i, act in zip(id, action)]
+                    obs = np.array([r[0] for r in results], dtype=object)
+                    rew = np.array([r[1] for r in results])
+                    done = np.array([r[2] for r in results])
+                    info = [r[3] for r in results]
+                    return obs, rew, done, info
+        
+        def close(self):
+            for env in self.envs:
+                if hasattr(env, 'close'):
+                    env.close()
+        
+        def __len__(self):
+            return self.env_num
+    
     # Simple policy for testing
     class DummyPolicy:
         def __init__(self, action_dim=7):
@@ -358,78 +470,83 @@ if __name__ == '__main__':
         def select_action(self, obs, **kwargs):
             return self.meta_policy.select_action(obs, t=self._timestep)
     
-    # Simple collector for testing
+    # Simple collector for testing (works with VectorEnv)
     class DummyCollector(BaseCollector):
-        def __init__(self, meta_envs, algorithm, **kwargs):
-            super().__init__(meta_envs, algorithm, **kwargs)
-            if isinstance(meta_envs, list):
-                self.envs = meta_envs
-            else:
-                self.envs = [meta_envs]
+        def __init__(self, envs, algorithm, **kwargs):
+            super().__init__(envs, algorithm, **kwargs)
+            self.vec_env = envs
             self._last_obs = None
         
         def reset(self, **kwargs):
-            self._last_obs = [env.reset() for env in self.envs]
+            self._last_obs = self.vec_env.reset()
         
         def collect(self, n_steps, env_type=None):
             if self._last_obs is None:
                 self.reset()
             
             stats = {'episode_rewards': [], 'episode_lengths': [], 'total_steps': 0}
-            episode_reward = 0.0
-            episode_length = 0
+            episode_rewards = np.zeros(len(self.vec_env))
+            episode_lengths = np.zeros(len(self.vec_env), dtype=int)
             
             for step in range(n_steps):
-                for i, (env, obs) in enumerate(zip(self.envs, self._last_obs)):
+                # Get actions for all environments
+                actions = []
+                for obs in self._last_obs:
                     action = self.algorithm.select_action(obs)
-                    new_obs, reward, done, info = env.step(action)
-                    
-                    # Record transition
+                    actions.append(action)
+                
+                # Step all environments
+                new_obs, rewards, dones, infos = self.vec_env.step(actions)
+                
+                # Record transitions and update stats
+                for i in range(len(self.vec_env)):
                     kwargs_trans = {'env_type': env_type} if env_type else {}
                     self.algorithm.record_transition(
-                        state=obs, action=action, reward=reward,
-                        next_state=new_obs, done=done, info=info, **kwargs_trans
+                        state=self._last_obs[i], action=actions[i], reward=rewards[i],
+                        next_state=new_obs[i], done=dones[i], info=infos[i], **kwargs_trans
                     )
                     
-                    episode_reward += reward
-                    episode_length += 1
+                    episode_rewards[i] += rewards[i]
+                    episode_lengths[i] += 1
                     stats['total_steps'] += 1
                     
-                    if done:
-                        stats['episode_rewards'].append(episode_reward)
-                        stats['episode_lengths'].append(episode_length)
-                        episode_reward = 0.0
-                        episode_length = 0
-                        new_obs = env.reset()
-                    
-                    self._last_obs[i] = new_obs
+                    if dones[i]:
+                        stats['episode_rewards'].append(episode_rewards[i])
+                        stats['episode_lengths'].append(episode_lengths[i])
+                        episode_rewards[i] = 0.0
+                        episode_lengths[i] = 0
+                        # Reset this env
+                        new_obs[i] = self.vec_env.reset(id=i)
+                
+                self._last_obs = new_obs
             
             return stats
     
     # Simple trainer implementation for testing
     class SimpleTrainer(BaseTrainer):
-        """Simple trainer for testing."""
+        """Simple trainer for testing with vectorized environments."""
         
         def __init__(
             self,
-            meta_envs,
+            envs,
             algorithm,
             collector=None,
             reward_fn=None,
             **kwargs
         ):
-            super().__init__(meta_envs, algorithm, collector, reward_fn, **kwargs)
+            super().__init__(envs, algorithm, collector, reward_fn, **kwargs)
             
             # Create default collector if not provided
             if self.collector is None:
+                default_env = self.get_env()
                 if isinstance(algorithm, list):
                     self.collector = [
-                        DummyCollector(meta_envs=meta_envs, algorithm=alg)
+                        DummyCollector(envs=default_env, algorithm=alg)
                         for alg in algorithm
                     ]
                 else:
                     self.collector = DummyCollector(
-                        meta_envs=meta_envs,
+                        envs=default_env,
                         algorithm=algorithm
                     )
             
@@ -469,28 +586,22 @@ if __name__ == '__main__':
         def evaluate(self, n_episodes=10, render=False, env_type=None, **kwargs):
             print(f"Evaluating for {n_episodes} episodes...")
             
-            # Create eval env
-            if isinstance(self.meta_envs, dict):
-                env = list(self.meta_envs.values())[0] if env_type is None else self.meta_envs[env_type]
-            elif isinstance(self.meta_envs, list):
-                env = self.meta_envs[0]
-            else:
-                env = self.meta_envs
-            
+            # Get eval env
+            vec_env = self.get_env(env_type) if env_type else self.get_env()
             alg = self.algorithm[0] if isinstance(self.algorithm, list) else self.algorithm
             
             episode_rewards = []
             episode_lengths = []
             
             for ep in range(n_episodes):
-                obs = env.reset()
+                obs = vec_env.reset(id=0)  # Reset first env only for single episode eval
                 episode_reward = 0.0
                 episode_length = 0
                 done = False
                 
                 while not done:
                     action = alg.select_action(obs)
-                    obs, reward, done, info = env.step(action)
+                    obs, reward, done, info = vec_env.step(action, id=0)
                     episode_reward += reward
                     episode_length += 1
                 
@@ -515,24 +626,31 @@ if __name__ == '__main__':
     
     # Test the implementation
     print("=" * 60)
-    print("Testing BaseTrainer (SimpleTrainer implementation)")
+    print("Testing BaseTrainer with Vectorized Environments")
     print("=" * 60)
     
     # Create components
     print("\n1. Creating components...")
-    env = DummyMetaEnv(state_dim=10, action_dim=7, max_steps=20)
+    # Create vectorized environment with 4 parallel envs
+    env_fns = [lambda: DummyMetaEnv(state_dim=10, action_dim=7, max_steps=20) for _ in range(4)]
+    vec_env = DummyVectorEnv(env_fns)
+    print(f"   Created DummyVectorEnv with {vec_env.env_num} parallel environments")
+    
     meta_policy = DummyMetaPolicy(action_dim=7)
     replay = SimpleReplay(capacity=10000)
     algorithm = DummyAlgorithm(meta_policy=meta_policy, replay=replay)
     
-    # Test 1: Basic trainer
-    print("\n2. Testing basic trainer...")
+    # Test 1: Basic trainer with vectorized env
+    print("\n2. Testing basic trainer with vectorized env...")
     trainer = SimpleTrainer(
-        meta_envs=env,
+        envs=vec_env,
         algorithm=algorithm,
         reward_fn=None
     )
     print(f"   Trainer: {trainer}")
+    print(f"   env_num: {trainer.env_num}")
+    print(f"   total_env_num: {trainer.get_total_env_num()}")
+    print(f"   env_types: {trainer.get_env_types()}")
     
     # Test compute_reward without reward_fn
     print("\n3. Testing compute_reward without custom reward_fn...")
@@ -553,33 +671,54 @@ if __name__ == '__main__':
     assert abs(computed_reward - expected) < 1e-6
     
     # Test training
-    print("\n5. Testing training...")
-    trainer.train(total_steps=200, log_interval=50, update_interval=20, batch_size=16)
+    print("\n5. Testing training with vectorized env...")
+    trainer.train(total_steps=400, log_interval=100, update_interval=20, batch_size=16)
     print(f"   Replay buffer size: {len(algorithm.replay)}")
     
     # Test evaluation
     print("\n6. Testing evaluation...")
     eval_results = trainer.evaluate(n_episodes=3)
-    print(f"   Evaluation results: {eval_results}")
+    print(f"   Evaluation results: mean_reward={eval_results['mean_reward']:.2f}")
     
     # Test collect_rollout
     print("\n7. Testing collect_rollout...")
     rollout_stats = trainer.collect_rollout(n_steps=50)
-    print(f"   Rollout stats: {rollout_stats}")
+    print(f"   Rollout stats: total_steps={rollout_stats['total_steps']}")
+    
+    # Test with multiple environment types (dict)
+    print("\n8. Testing with multiple environment types (dict)...")
+    sim_env_fns = [lambda: DummyMetaEnv(state_dim=10, action_dim=7, max_steps=20) for _ in range(4)]
+    real_env_fns = [lambda: DummyMetaEnv(state_dim=10, action_dim=7, max_steps=10) for _ in range(2)]
+    
+    multi_envs = {
+        'sim': DummyVectorEnv(sim_env_fns),
+        'real': DummyVectorEnv(real_env_fns),
+    }
+    
+    multi_env_trainer = SimpleTrainer(
+        envs=multi_envs,
+        algorithm=DummyAlgorithm(meta_policy=DummyMetaPolicy(action_dim=7), replay=SimpleReplay(capacity=1000)),
+        reward_fn=IdentityReward()
+    )
+    print(f"   Multi-env trainer: {multi_env_trainer}")
+    print(f"   env_types: {multi_env_trainer.get_env_types()}")
+    print(f"   total_env_num: {multi_env_trainer.get_total_env_num()}")
+    print(f"   sim env_num: {len(multi_env_trainer.get_env('sim'))}")
+    print(f"   real env_num: {len(multi_env_trainer.get_env('real'))}")
     
     # Test with multiple algorithms
-    print("\n8. Testing with multiple algorithms...")
+    print("\n9. Testing with multiple algorithms...")
     algorithms = [
         DummyAlgorithm(meta_policy=DummyMetaPolicy(action_dim=7), replay=SimpleReplay(capacity=1000)),
         DummyAlgorithm(meta_policy=DummyMetaPolicy(action_dim=7), replay=SimpleReplay(capacity=1000))
     ]
-    multi_trainer = SimpleTrainer(
-        meta_envs=env,
+    multi_algo_trainer = SimpleTrainer(
+        envs=vec_env,
         algorithm=algorithms,
         reward_fn=IdentityReward()
     )
-    print(f"   Multi-algorithm trainer: {multi_trainer}")
-    multi_trainer.train(total_steps=100, log_interval=50, update_interval=20, batch_size=8)
+    print(f"   Multi-algorithm trainer: {multi_algo_trainer}")
+    multi_algo_trainer.train(total_steps=100, log_interval=50, update_interval=20, batch_size=8)
     
     print("\n" + "=" * 60)
     print("All tests passed!")
