@@ -20,6 +20,29 @@ from collections import OrderedDict
 from data_utils.datasets.base import EpisodicDataset
 
 # -----------------------------------------------------------------------------
+# Cache Directory Helper
+# -----------------------------------------------------------------------------
+
+def _get_robotwin_cache_dir() -> Path:
+    """Get RoboTwin cache directory with priority:
+    1. HF_LEROBOT_HOME/robotwin (if HF_LEROBOT_HOME is set)
+    2. HF_HOME/lerobot/robotwin (if HF_HOME is set)
+    3. Default: ~/.cache/huggingface/lerobot/robotwin
+    """
+    # Priority 1: HF_LEROBOT_HOME/robotwin
+    lerobot_home = os.environ.get("HF_LEROBOT_HOME")
+    if lerobot_home:
+        return Path(lerobot_home) / "robotwin"
+    
+    # Priority 2: HF_HOME/lerobot/robotwin
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "lerobot" / "robotwin"
+    
+    # Priority 3: Default
+    return Path.home() / ".cache" / "huggingface" / "lerobot" / "robotwin"
+
+# -----------------------------------------------------------------------------
 # RoboTwin Dataset Class
 # -----------------------------------------------------------------------------
 class RoboTwinDataset(EpisodicDataset):
@@ -34,7 +57,7 @@ class RoboTwinDataset(EpisodicDataset):
 
     HF_REPO_ID = "TianxingChen/RoboTwin2.0"
     HF_ENDPOINT = os.getenv("HF_ENDPOINT", "https://huggingface.co")
-    CACHE_DIR = Path.home() / ".cache" / "ilstudio" / "robotwin"
+    CACHE_DIR = _get_robotwin_cache_dir()
 
     def __init__(
         self,
