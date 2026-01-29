@@ -7,10 +7,9 @@ uv venv
 source .venv/bin/activate
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972
+uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972 tyro==1.0.3 loguru
 cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/
 cd ../../..
-source policy/openpi/openpi/.venv/bin/activate
 ```
 
 
@@ -31,7 +30,8 @@ cd policy/openpi/openpi
 # /path/to/jax/checkpoint, e.g., custom/path/pi0_base, /path/to/converted/pytorch/checkpoint=custom/path/pi0_base_pytorch
 python examples/convert_jax_model_to_pytorch.py \
     --checkpoint_dir /path/to/jax/checkpoint \
-    --output_path /path/to/converted/pytorch/checkpoint
+    --output_path /path/to/converted/pytorch/checkpoint \
+    --config-name pi05_droid # replaced by pi0_droid for pi0
 ```
 ### Use pretrained weights
 Set `model_args: pytorch_weight_path: ...` in the .yaml config of `configs/policy/pi0_xx.yaml` like
@@ -64,7 +64,5 @@ trainer_class: Trainer
 
 # Training Example
 ```shell
-python train.py -p pi0_aloha -t sim_transfer_cube_scripted -o ckpt/pi0_aloha_1122 -c openpi_full
-
-python train.py -p pi0_libero_object -t libero_object_rlds -o ckpt/pi0_libero_obj -c default
+python train.py -p pi05 -t sim_transfer_cube_scripted -o ckpt/pi05_aloha -c openpi_lora
 ```

@@ -2,7 +2,7 @@ from pprint import pprint
 import torch.utils.data as tud
 import torch
 from huggingface_hub import HfApi
-from typing import List
+from typing import List, Union, Dict, Any, Optional
 try:
     import lerobot
     from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
@@ -14,6 +14,7 @@ import warnings
 from benchmark.utils import resize_with_pad
 from data_utils.utils import ensure_uint8_image
 from loguru import logger
+from tqdm import tqdm
 
 class WrappedLerobotDataset(tud.Dataset):
     def __init__(self, 
@@ -24,19 +25,24 @@ class WrappedLerobotDataset(tud.Dataset):
             ctrl_space: str = 'ee', 
             ctrl_type: str = 'delta',
             image_size: tuple = None,
-            tolerance_s: float = 1e-4,
-            state_key: str = 'observation.state',
-            action_key: str = 'action',
+            tolerance_s: float = 1e-3,
+            state_key: Union[str, List[str]] = 'observation.state',
+            action_key: Union[str, List[str]] = 'action',
             episode_filter: dict = None,  # Filter episodes by metadata fields, e.g., {"tasks": ["task1"], "episode_index": [0, 1, 2]}
+            video_backend: str = None,
             *args, 
             **kwargs,
             ):
         super().__init__()
         self.chunk_size = chunk_size
         self.root = root
-        self.state_key = state_key
-        self.action_key = action_key
+        self.state_key = state_key  # Can be str or List[str]
+        self.action_key = action_key  # Can be str or List[str]
         self.episode_filter = episode_filter
+        self.video_backend = video_backend
+        
+        # Get primary action key for delta_timestamps (use first key if list)
+        self._primary_action_key = action_key[0] if isinstance(action_key, list) else action_key
         datasets = []
         data_metas = []
         dataset_dirs = []
@@ -54,14 +60,19 @@ class WrappedLerobotDataset(tud.Dataset):
                     warnings.warn(f"No episodes found matching filter {episode_filter} in dataset {data_path}")
                     continue
             
-            delta_timestamps = {self.action_key: [t / ds_meta.fps for t in range(chunk_size)]}
+            delta_timestamps = {self._primary_action_key: [t / ds_meta.fps for t in range(chunk_size)]}
             dataset = LeRobotDataset(
                 data_path, 
                 root=self.root, 
                 delta_timestamps=delta_timestamps, 
                 tolerance_s=tolerance_s,
-                episodes=episodes_to_load
+                episodes=episodes_to_load,
+                video_backend = self.video_backend,
             )
+            
+            # Optimize: Remove unused columns from hf_dataset to reduce I/O
+            # This is critical for performance - only load columns we actually need
+            dataset = self._optimize_dataset_columns(dataset, ds_meta, camera_names)
             
             # Log filtering info and calculate actual frames count
             if episodes_to_load is not None:
@@ -71,7 +82,7 @@ class WrappedLerobotDataset(tud.Dataset):
                 # Calculate actual frame count for filtered episodes
                 # LeRobot doesn't actually reduce hf_dataset size, so we need to calculate manually
                 actual_frames = sum(ds_meta.episodes[ep_idx]['length'] for ep_idx in episodes_to_load)
-                logger.info(f"Actual frames for selected episodes: {actual_frames}")
+                # logger.info(f"Actual frames for selected episodes: {actual_frames}")
             else:
                 actual_frames = dataset.num_frames
             
@@ -103,6 +114,117 @@ class WrappedLerobotDataset(tud.Dataset):
         self.max_workers = 8
         self.initialize()
         
+    def _optimize_dataset_columns(
+        self, 
+        dataset: LeRobotDataset, 
+        ds_meta: LeRobotDatasetMetadata,
+        camera_names: list
+    ) -> LeRobotDataset:
+        """
+        Optimize dataset by removing unused columns and disabling unused video cameras.
+        
+        This is critical for performance - loading unused image/video data
+        causes significant I/O waste even if we don't use them in __getitem__.
+        
+        LeRobot datasets have two types of camera data storage:
+        1. Image type (ds_meta.image_keys): Images stored directly in hf_dataset columns
+           - Optimized by removing unused columns from hf_dataset
+        2. Video type (ds_meta.video_keys): Images stored in .mp4 files, decoded on-the-fly
+           - Optimized by modifying meta.info['features'] to hide unused video cameras
+           - This prevents LeRobotDataset._query_videos from decoding unused videos
+        
+        Args:
+            dataset: LeRobotDataset instance
+            ds_meta: Dataset metadata
+            camera_names: List of camera names to keep (empty/None = keep all cameras)
+            
+        Returns:
+            The same dataset with optimized hf_dataset and meta info
+        """
+        all_camera_keys = set(ds_meta.camera_keys)
+        image_keys = set(ds_meta.image_keys)
+        video_keys = set(ds_meta.video_keys)
+        
+        # Determine which cameras to keep
+        if camera_names is not None and len(camera_names) > 0:
+            cameras_to_keep = set(camera_names) & all_camera_keys
+            if not cameras_to_keep:
+                logger.warning(
+                    f"None of the specified cameras {camera_names} found in dataset. "
+                    f"Available cameras: {all_camera_keys}. Keeping all cameras."
+                )
+                cameras_to_keep = all_camera_keys
+        else:
+            # Keep all cameras
+            cameras_to_keep = all_camera_keys
+        
+        # === Optimize Video Cameras ===
+        # Modify meta.info['features'] to hide unused video cameras
+        # This prevents LeRobotDataset._query_videos from decoding them
+        video_cameras_to_disable = video_keys - cameras_to_keep
+        if video_cameras_to_disable:
+            logger.info(f"Disabling unused video cameras: {video_cameras_to_disable}")
+            for vid_key in video_cameras_to_disable:
+                if vid_key in dataset.meta.info['features']:
+                    # Change dtype from 'video' to 'disabled_video' to exclude from video_keys
+                    dataset.meta.info['features'][vid_key]['dtype'] = 'disabled_video'
+            
+            # Log remaining video cameras
+            remaining_video_keys = [k for k, v in dataset.meta.info['features'].items() 
+                                   if v.get('dtype') == 'video']
+            logger.debug(f"Remaining active video cameras: {remaining_video_keys}")
+        
+        # === Optimize Image Columns in hf_dataset ===
+        if dataset.hf_dataset is None:
+            return dataset
+        
+        current_columns = set(dataset.hf_dataset.column_names)
+        
+        # Essential columns that are always needed
+        essential_columns = {
+            'index', 'episode_index', 'frame_index', 'timestamp', 'task_index',
+        }
+        
+        # Add state keys (supports list)
+        if isinstance(self.state_key, list):
+            essential_columns.update(self.state_key)
+        else:
+            essential_columns.add(self.state_key)
+        
+        # Add action keys (supports list)
+        if isinstance(self.action_key, list):
+            essential_columns.update(self.action_key)
+            # Add padding mask for primary action key
+            essential_columns.add(f'{self._primary_action_key}_is_pad')
+        else:
+            essential_columns.add(self.action_key)
+            essential_columns.add(f'{self.action_key}_is_pad')
+        
+        # Image columns to keep (intersection of cameras_to_keep and actual image columns in hf_dataset)
+        image_cameras_to_keep = cameras_to_keep & image_keys & current_columns
+        
+        # Build the set of columns to keep
+        columns_to_keep = essential_columns | image_cameras_to_keep
+        
+        # Find columns to remove
+        columns_to_remove = [col for col in current_columns - columns_to_keep]
+        
+        if columns_to_remove:
+            logger.info(
+                f"Removing {len(columns_to_remove)} unused hf_dataset columns: "
+                f"{columns_to_remove[:5]}{'...' if len(columns_to_remove) > 5 else ''}"
+            )
+            dataset.hf_dataset = dataset.hf_dataset.remove_columns(columns_to_remove)
+            logger.debug(f"Remaining columns: {dataset.hf_dataset.column_names}")
+        
+        # Log final camera configuration
+        final_image_keys = [k for k in dataset.hf_dataset.column_names if k in image_keys]
+        final_video_keys = [k for k, v in dataset.meta.info['features'].items() 
+                          if v.get('dtype') == 'video']
+        logger.info(f"Active cameras - Image: {final_image_keys}, Video: {final_video_keys}")
+        
+        return dataset
+    
     def _filter_episodes(self, ds_meta: LeRobotDatasetMetadata, episode_filter: dict) -> list:
         """
         Filter episodes based on metadata fields. This is a universal filtering method
@@ -241,7 +363,7 @@ class WrappedLerobotDataset(tud.Dataset):
         
         # Log dataset info
         logger.info(f"Dataset initialized: {self.total_episodes} episodes, {self.total_frames} frames")
-        logger.info(f"Episode lengths: min={min(self.episode_len)}, max={max(self.episode_len)}, mean={np.mean(self.episode_len):.1f}")
+        # logger.info(f"Episode lengths: min={min(self.episode_len)}, max={max(self.episode_len)}, mean={np.mean(self.episode_len):.1f}")
         return
     
     def _build_index_mapping(self):
@@ -268,7 +390,7 @@ class WrappedLerobotDataset(tud.Dataset):
                 for frame_idx in range(total_frames):
                     self.index_to_episode_map.append((dataset_idx, -1, -1, frame_idx))
         
-        logger.info(f"Built index mapping table with {len(self.index_to_episode_map)} entries")
+        # logger.info(f"Built index mapping table with {len(self.index_to_episode_map)} entries")
         
     def _load_file_into_memory(self, *args, **kwargs):
         warnings.warn("Cannot load LerobotDataset into memory")
@@ -281,26 +403,24 @@ class WrappedLerobotDataset(tud.Dataset):
     def get_episode_len(self):
         """
         Get the length of each episode in the filtered dataset.
-        Must use the filtered dataset, not the original metadata.
+        Always use metadata for speed - never iterate through hf_dataset.
         """
         episode_lens = []
         for dataset in self.datasets:
-            # If dataset has episodes attribute (filtered list), use metadata for those episodes
-            # This is much faster than iterating through hf_dataset
+            ds_meta = dataset.meta
+            
+            # Determine which episodes to use
             if hasattr(dataset, 'episodes') and dataset.episodes is not None:
-                ds_meta = dataset.meta
-                for ep_idx in dataset.episodes:
-                    episode_lens.append(ds_meta.episodes[ep_idx]['length'])
-            elif dataset.hf_dataset is not None:
-                # Fallback: use numpy for efficient counting
-                # Convert to numpy array for fast operations
-                episode_indices_array = np.array(dataset.hf_dataset['episode_index'])
-                unique_episodes = np.unique(episode_indices_array)
-                
-                # Use numpy for efficient counting
-                for ep_idx in unique_episodes:
-                    ep_length = np.sum(episode_indices_array == ep_idx)
-                    episode_lens.append(int(ep_length))
+                # Filtered dataset - use specified episodes
+                ep_indices = dataset.episodes
+            else:
+                # No filtering - use all episodes from metadata
+                ep_indices = range(len(ds_meta.episodes))
+            
+            # Get length from metadata (fast, no I/O)
+            for ep_idx in tqdm(ep_indices):
+                episode_lens.append(ds_meta.episodes[ep_idx]['length'])
+        
         return episode_lens
     
     def __len__(self):
@@ -350,19 +470,106 @@ class WrappedLerobotDataset(tud.Dataset):
         episode_id = self.episode_ids[episode_index]
         return episode_id, start_ts
     
+    def _get_data_from_sample(
+        self,
+        sample: Dict[str, Any],
+        keys: Union[str, List[str]],
+    ) -> torch.Tensor:
+        """
+        Get data from sample by key(s). If keys is a list, concatenate the data.
+        
+        Args:
+            sample: Sample dictionary from LeRobotDataset
+            keys: Single key string or list of keys to concatenate
+            
+        Returns:
+            Tensor of data (concatenated along last axis if multiple keys)
+        """
+        if isinstance(keys, str):
+            # Single key - return directly
+            return sample[keys]
+        else:
+            # List of keys - concatenate along last axis
+            data_parts = []
+            for key in keys:
+                if key in sample:
+                    part = sample[key]
+                    if not isinstance(part, torch.Tensor):
+                        part = torch.tensor(part)
+                    data_parts.append(part)
+                else:
+                    logger.warning(f"Key '{key}' not found in sample, skipping")
+            
+            if not data_parts:
+                raise KeyError(f"None of the keys {keys} found in sample")
+            
+            # Concatenate along last axis
+            return torch.cat(data_parts, dim=-1)
+    
+    def _get_stats_by_keys(
+        self,
+        stats: Dict[str, Any],
+        keys: Union[str, List[str]],
+    ) -> Dict[str, np.ndarray]:
+        """
+        Get statistics for key(s). If keys is a list, concatenate the stats.
+        
+        Args:
+            stats: Statistics dictionary from dataset metadata
+            keys: Single key string or list of keys
+            
+        Returns:
+            Dictionary of concatenated statistics
+        """
+        if isinstance(keys, str):
+            # Single key
+            return stats.get(keys, {})
+        else:
+            # List of keys - concatenate stats
+            stat_names = ['mean', 'std', 'min', 'max', 'q01', 'q99']
+            result = {}
+            
+            for stat_name in stat_names:
+                parts = []
+                for key in keys:
+                    key_stats = stats.get(key, {})
+                    if stat_name in key_stats:
+                        parts.append(np.asarray(key_stats[stat_name]))
+                
+                if parts:
+                    result[stat_name] = np.concatenate(parts, axis=-1)
+            
+            return result
+    
     def extract_from_episode(self, episode_idx, keyname=[]):
+        """Extract specific features from an episode. Supports concatenated keys."""
         dataset_idx = np.argmax(self.cumulative_num_episodes > episode_idx)
         inner_episode_idx = episode_idx - self.per_dataset_episode_start[dataset_idx]
         ds_meta = self.dataset_metas[dataset_idx]
         all_features = ds_meta.features
         preserved_keys = []
         ori_k = {}
+        
+        # Handle state keys (supports list)
         if 'state' in keyname:
-            preserved_keys.append(self.state_key)
-            ori_k[self.state_key] = 'state'
+            if isinstance(self.state_key, list):
+                preserved_keys.extend(self.state_key)
+                for k in self.state_key:
+                    ori_k[k] = 'state'
+            else:
+                preserved_keys.append(self.state_key)
+                ori_k[self.state_key] = 'state'
+        
+        # Handle action keys (supports list)
         if 'action' in keyname:
-            preserved_keys.append(self.action_key)
-            ori_k[self.action_key] = 'action'
+            if isinstance(self.action_key, list):
+                preserved_keys.extend(self.action_key)
+                for k in self.action_key:
+                    ori_k[k] = 'action'
+            else:
+                preserved_keys.append(self.action_key)
+                ori_k[self.action_key] = 'action'
+        
         if 'image' in keyname or 'images' in keyname:
             preserved_keys.extend(ds_meta.camera_keys)
             for i,k in enumerate(ds_meta.camera_keys):
@@ -378,11 +585,28 @@ class WrappedLerobotDataset(tud.Dataset):
         if ignore_image:
             for k,v in subdata.meta.features.items():
                 if v['dtype']=='video': subdata.meta.info['features'][k]['dtype'] = 'hidden'
-        extracted_feats = [{k:s[k].numpy() for k in preserved_keys} for s in subdata]
+        extracted_feats = [{k:s[k].numpy() for k in preserved_keys if k in s} for s in subdata]
         if ignore_image:
             for k,v in subdata.meta.features.items():
                 if v['dtype']=='hidden': subdata.meta.info['features'][k]['dtype'] = 'video'
-        res_dict = {ori_k[k]: np.stack([efeat[k] for efeat in  extracted_feats]) if isinstance(extracted_feats[0][k], np.ndarray) else [efeat[k] for efeat in  extracted_feats] for k in preserved_keys}
+        
+        # Build result dict, concatenating keys that map to same output
+        res_dict = {}
+        for output_name in set(ori_k.values()):
+            keys_for_output = [k for k, v in ori_k.items() if v == output_name]
+            if len(keys_for_output) == 1:
+                k = keys_for_output[0]
+                if k in extracted_feats[0]:
+                    res_dict[output_name] = np.stack([efeat[k] for efeat in extracted_feats])
+            else:
+                # Concatenate multiple keys
+                parts = []
+                for k in keys_for_output:
+                    if k in extracted_feats[0]:
+                        parts.append(np.stack([efeat[k] for efeat in extracted_feats]))
+                if parts:
+                    res_dict[output_name] = np.concatenate(parts, axis=-1)
+        
         return res_dict
     
     def __getitem__(self, index):
@@ -403,16 +627,66 @@ class WrappedLerobotDataset(tud.Dataset):
         data_dict = {}
         episode_id = self.per_dataset_episode_start[dataset_idx] + sample['episode_index'].item()
         raw_lang = sample['task']
-        action = sample[self.action_key]
-        state = sample[self.state_key]
-        timestamp = sample['frame_index'].item()
-        is_pad = sample['action_is_pad']
-        # process image
-        cam_keys = self.datasets[dataset_idx].meta.camera_keys if len(self.camera_names)==0 else self.camera_names
-        if self.image_size is not None:
-            images = torch.cat([resize_with_pad(sample[cam_key].unsqueeze(0), height=self.image_size[1], width=self.image_size[0]) for cam_key in cam_keys], dim=0)
+        
+        # Get action (supports single key or list of keys to concatenate)
+        action = self._get_data_from_sample(sample, self.action_key)
+        
+        # Get state (supports single key or list of keys to concatenate)
+        state = self._get_data_from_sample(sample, self.state_key)
+        
+        # Get timestamp/frame_index with fallback for different dataset versions
+        if 'frame_index' in sample:
+            timestamp = sample['frame_index'].item()
+        elif 'index' in sample:
+            timestamp = sample['index'].item()
         else:
-            images = torch.stack([sample[cam_key] for cam_key in cam_keys])
+            # Fallback to using the index from locate
+            timestamp = start_ts
+        
+        # Get padding mask
+        pad_key = f'{self._primary_action_key}_is_pad'
+        if pad_key in sample:
+            is_pad = sample[pad_key]
+        elif 'action_is_pad' in sample:
+            is_pad = sample['action_is_pad']
+        else:
+            is_pad = torch.zeros(action.shape[0], dtype=torch.bool)
+        
+        # Process images
+        # LeRobot datasets have two types of camera storage:
+        # 1. Image type: stored in hf_dataset columns (ds_meta.image_keys)
+        # 2. Video type: stored in .mp4 files, decoded by LeRobotDataset._query_videos (ds_meta.video_keys)
+        # Both types are returned in the sample dict by LeRobotDataset.__getitem__
+        ds_meta = self.datasets[dataset_idx].meta
+        all_camera_keys = ds_meta.camera_keys  # Includes both image and video keys
+        
+        # Determine which cameras to use
+        if len(self.camera_names) > 0:
+            # Use specified cameras (filter to only those available in this dataset)
+            cam_keys = [k for k in self.camera_names if k in all_camera_keys]
+        else:
+            # Use all cameras from this dataset
+            cam_keys = all_camera_keys
+        
+        # Collect images from sample (works for both image and video type cameras)
+        images_list = []
+        for cam_key in cam_keys:
+            if cam_key in sample:
+                cam_img = sample[cam_key]
+                if self.image_size is not None:
+                    cam_img = resize_with_pad(cam_img.unsqueeze(0), height=self.image_size[1], width=self.image_size[0])
+                else:
+                    cam_img = cam_img.unsqueeze(0)
+                images_list.append(cam_img)
+            else:
+                logger.warning(f"Camera key '{cam_key}' not found in sample, skipping")
+        
+        if images_list:
+            images = torch.cat(images_list, dim=0)
+        else:
+            # Fallback: create empty tensor if no images found
+            logger.warning(f"No camera images found for index {index}")
+            images = torch.zeros(1, 3, 224, 224, dtype=torch.uint8)
         
         # Safety check: ensure images are uint8 with values in [0, 255]
         images = ensure_uint8_image(images)
@@ -430,14 +704,23 @@ class WrappedLerobotDataset(tud.Dataset):
         return data_dict
 
     def get_dataset_statistics(self):
-        state_stats = self.dataset_metas[0].stats[self.state_key]
-        action_stats = self.dataset_metas[0].stats[self.action_key]
-        if 'q01' not in state_stats:
-            state_stats['q01'] = state_stats['min']
-            state_stats['q99'] = state_stats['max']
-        if 'q01' not in action_stats:
-            action_stats['q01'] = action_stats['min']
-            action_stats['q99'] = action_stats['max']
+        """Get dataset statistics. Supports concatenated keys."""
+        meta_stats = self.dataset_metas[0].stats
+        
+        # Get state stats (supports list of keys)
+        state_stats = self._get_stats_by_keys(meta_stats, self.state_key)
+        
+        # Get action stats (supports list of keys)
+        action_stats = self._get_stats_by_keys(meta_stats, self.action_key)
+        
+        # Add q01/q99 if not present (use min/max as fallback)
+        if state_stats and 'q01' not in state_stats:
+            state_stats['q01'] = state_stats.get('min', np.zeros(1))
+            state_stats['q99'] = state_stats.get('max', np.ones(1))
+        if action_stats and 'q01' not in action_stats:
+            action_stats['q01'] = action_stats.get('min', np.zeros(1))
+            action_stats['q99'] = action_stats.get('max', np.ones(1))
+        
         stats = {
             'state': state_stats,
             'action': action_stats,

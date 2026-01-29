@@ -7,7 +7,7 @@ from libero.libero import benchmark as libero_bench
 from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 from dataclasses import dataclass, field, fields, asdict
-from data_utils.rotate import quat2axisangle
+from data_utils.pose_utils import quat2axisangle
 import numpy as np
 from torchvision import transforms
 import pickle
@@ -35,8 +35,9 @@ class LiberoEnv(MetaEnv):
         self.ctrl_space = getattr(self.config, 'ctrl_space', 'ee')
         self.ctrl_type = getattr(self.config, 'ctrl_type', 'delta')
         self.camera_ids = getattr(self.config, 'camera_ids', [0,])
-        self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', True)
+        self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', False)
         self.use_wrist = getattr(self.config, 'use_wrist', False)
+        self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         env = self.create_env()
         super().__init__(env)
         
@@ -74,6 +75,23 @@ class LiberoEnv(MetaEnv):
         state = init_states[state_index]
         logger.info(f"Setting initial state {state_index} for task {self.task_name}")
         env.set_init_state(state)
+        
+        # Get action bounds from action_space
+        # LIBERO uses robosuite environments with Box action space
+        if hasattr(env, 'action_spec'):
+            action_spec = env.action_spec
+            self.min_action = action_spec[0]  # low
+            self.max_action = action_spec[1]  # high
+        elif hasattr(env, 'action_space') and hasattr(env.action_space, 'low'):
+            self.min_action = env.action_space.low
+            self.max_action = env.action_space.high
+        else:
+            # Fallback: LIBERO typically uses delta control with small bounds
+            # [dx, dy, dz, droll, dpitch, dyaw, gripper]
+            self.min_action = np.array([-1.0] * 7, dtype=np.float32)
+            self.max_action = np.array([1.0] * 7, dtype=np.float32)
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):
@@ -84,7 +102,11 @@ class LiberoEnv(MetaEnv):
         if self.use_openvla_gripper:
             actions[6] = 1.-2.*actions[6]
         return actions
-        
+    
+    def get_libero_dummy_action(self):
+        """Get dummy/no-op action, used to roll out the simulation while the robot does nothing."""
+        return [0, 0, 0, 0, 0, 0, -1]
+
     def obs2meta(self, obs):
         gripper_state = obs['robot0_gripper_qpos'] # (2,) 
         xyz = obs['robot0_eef_pos'] # (3,)
@@ -104,6 +126,14 @@ class LiberoEnv(MetaEnv):
         # depth_primary = obs["agentview_depth"][::-1, ::-1]
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
-        return MetaObs(state=state_ee, state_ee=state_ee, state_joint=state_joint, image=image, raw_lang=self.raw_lang)
+        return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
+    
+    def reset(self):
+        self.env.reset()
+        for _ in range(self.num_steps_wait):
+            obs, _, _, _ = self.env.step(self.get_libero_dummy_action())
+        self.prev_obs = self.obs2meta(obs)
+        return self.prev_obs
+
     
     

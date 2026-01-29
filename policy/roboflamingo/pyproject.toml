@@ -1,0 +1,69 @@
+[project]
+name = "roboflamingo"
+version = "0.1.0"
+description = "RoboFlamingo policy for ILStudio - Vision-Language Foundation Models as Effective Robot Imitators"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    {name = "RoboFlamingo Team"},
+    {name = "ILStudio Team"}
+]
+keywords = ["robotics", "imitation-learning", "vision-language-model", "flamingo"]
+
+dependencies = [
+    "torch>=1.12.0",
+    "transformers>=4.33.0",
+    "loguru>=0.7.0",
+    "einops>=0.6.1",
+    "einops-exts>=0.0.4",
+    "open-clip-torch>=2.20.0",
+    "pillow>=9.5.0",
+    "numpy>=1.24.0",
+    "h5py>=3.10.0",
+    "huggingface-hub>=0.34.0",
+    "safetensors>=0.4.0",
+    "opencv-python",
+    "tianshou==0.2.0",
+    "numpy==1.26.4",
+    "open-flamingo",
+    "accelerate>=0.26.0",
+    "datasets<=4.4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+]
+train = [
+    "wandb>=0.15.0",
+    "pytorch-lightning>=1.8.0",
+]
+calvin = [
+    # CALVIN benchmark dependencies
+    "pytorch3d>=0.3.0",
+    "pyrender>=0.1.45",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+

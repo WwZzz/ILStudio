@@ -1,23 +1,80 @@
 import numpy as np
-from dataclasses import dataclass, field, fields, asdict
-from torchvision import transforms
-import pickle
+from dataclasses import asdict
 import torch
 from tianshou.env import SubprocVectorEnv
 import time
-import copy
-import json
 import os
-# import tensorflow as tf
-# from transformers.deepspeed import deepspeed_load_checkpoint
 from PIL import Image, ImageDraw, ImageFont
 from typing import List
 from pathlib import Path
-import argparse
 from collections import deque
-import imageio
 import cv2
 from loguru import logger
+
+
+class SequentialVectorEnv:
+    """
+    Simple sequential vector environment wrapper (no multiprocessing).
+    Useful for environments that have issues with daemon processes.
+    """
+    def __init__(self, env_fns):
+        self.env_fns = env_fns
+        self.envs = [fn() for fn in env_fns]
+        self.env_num = len(self.envs)
+    
+    def _stack_obs(self, obs_list):
+        """Stack observations, handling both numpy arrays and MetaObs objects."""
+        if len(obs_list) == 0:
+            return None
+        
+        # Check if first observation is a MetaObs object
+        first_obs = obs_list[0]
+        if hasattr(first_obs, '__dataclass_fields__'):  # MetaObs is a dataclass
+            # Return as a regular numpy array (not object dtype) to be compatible with organize_obs
+            # SubprocVectorEnv returns np.array where each element is a MetaObs
+            return np.array(obs_list)
+        else:
+            # Regular numpy array observations
+            return np.stack(obs_list)
+    
+    def reset(self, id=None):
+        if id is None:
+            obs_list = [env.reset() for env in self.envs]
+            return self._stack_obs(obs_list)
+        else:
+            if np.isscalar(id):
+                return self.envs[id].reset()
+            else:
+                obs_list = [self.envs[i].reset() for i in id]
+                return self._stack_obs(obs_list)
+    
+    def step(self, action, id=None):
+        if id is None:
+            results = [env.step(act) for env, act in zip(self.envs, action)]
+            obs = self._stack_obs([r[0] for r in results])
+            rew = np.array([r[1] for r in results])
+            done = np.array([r[2] for r in results])
+            info = [r[3] for r in results]
+            return obs, rew, done, info
+        else:
+            if np.isscalar(id):
+                return self.envs[id].step(action)
+            else:
+                results = [self.envs[i].step(act) for i, act in zip(id, action)]
+                obs = self._stack_obs([r[0] for r in results])
+                rew = np.array([r[1] for r in results])
+                done = np.array([r[2] for r in results])
+                info = [r[3] for r in results]
+                return obs, rew, done, info
+    
+    def __len__(self):
+        return self.env_num
+    
+    def close(self):
+        """Close all environments."""
+        for env in self.envs:
+            if hasattr(env, 'close'):
+                env.close()
 
 
 def get_images_from_metaobs(mobs): 
@@ -88,8 +145,6 @@ def _save_example_batch(obs, act, save_dir):
             # Convert to numpy if tensor
             if isinstance(image_data, torch.Tensor):
                 image_data = image_data.cpu().numpy()
-            
-            logger.debug(f"Image data shape: {image_data.shape}, dtype: {image_data.dtype}")
             
             # Handle different image shapes - ONLY SAVE FIRST ENVIRONMENT (index 0)
             # Expected formats:
@@ -320,8 +375,25 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
         for t in range(args.max_timesteps):
             if video_writer is not None:
                 frames = obs['image']
-                if len(frames.shape)==5: frames = frames[:, 0]
-                frames = frames.transpose(0, 2, 3, 1)
+                # Handle multiple camera views: concatenate horizontally
+                if len(frames.shape) == 5:
+                    # Shape: (batch, num_cameras, channels, height, width)
+                    # Concatenate cameras horizontally along width dimension
+                    batch_size, num_cameras, channels, height, width = frames.shape
+                    # Convert to (batch, num_cameras, height, width, channels) for concatenation
+                    frames = frames.transpose(0, 1, 3, 4, 2)  # (batch, num_cameras, height, width, channels)
+                    # Concatenate along width dimension for each batch
+                    concatenated_frames = []
+                    for b in range(batch_size):
+                        # frames[b] shape: (num_cameras, height, width, channels)
+                        # Reshape to (height, num_cameras, width, channels) then reshape to concatenate horizontally
+                        batch_frames = frames[b].transpose(1, 0, 2, 3)  # (height, num_cameras, width, channels)
+                        batch_frames = batch_frames.reshape(height, num_cameras * width, channels)  # (height, width*num_cameras, channels)
+                        concatenated_frames.append(batch_frames)
+                    frames = np.stack(concatenated_frames, axis=0)  # (batch, height, total_width, channels)
+                else:
+                    # Shape: (batch, channels, height, width) - single camera or already processed
+                    frames = frames.transpose(0, 2, 3, 1)  # (batch, height, width, channels)
                 for env_i in range(len(env)):
                     if not success[env_i]:
                         video_frames[env_i].append(frames[env_i])

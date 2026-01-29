@@ -4,13 +4,9 @@ Dataset wrappers for applying normalization without modifying the original datas
 This module provides wrapper classes that apply normalization to dataset outputs,
 supporting both map-style and iterable datasets.
 """
-
 import torch
 from torch.utils.data import Dataset, IterableDataset
-from typing import Dict, Optional, Any
-import copy
-
-from data_utils.normalize import ZScoreNormalizer, MinMaxNormalizer, PercentileNormalizer
+from typing import Dict, Optional
 # TensorFlow imports for RLDS dataset handling
 try:
     import tensorflow as tf
@@ -18,6 +14,62 @@ try:
 except ImportError:
     TF_AVAILABLE = False
 
+class MapVQAWrapper(Dataset):
+    def __init__(self, dataset: Dataset, action_dim: int, state_dim: int, chunk_size: int):
+        self.dataset = dataset
+        self.action_dim = action_dim
+        self.state_dim = state_dim
+        self.chunk_size = chunk_size
+        self.is_vqa = True
+        self.dummy_state = torch.zeros(state_dim)
+        self.dummy_action = torch.zeros(chunk_size, action_dim)
+        self.dummy_is_pad = torch.ones(chunk_size, dtype=torch.bool)
+        self.dummy_timestamp = 0
+        self.dummy_episode_id = 0
+    
+    def __getitem__(self, index):
+        item = self.dataset[index]
+        return {
+            "image": item['image'],
+            "raw_lang": item['raw_lang'],
+            "reasoning": item['reasoning'],
+            "state": self.dummy_state,
+            "action": self.dummy_action,
+            "is_pad": self.dummy_is_pad,
+            "timestamp": self.dummy_timestamp,
+            "episode_id": self.dummy_episode_id,
+            "__index__": index,
+        }
+    
+    def __len__(self):
+        return len(self.dataset)
+
+class IterVQAWrapper(IterableDataset):
+    def __init__(self, dataset: IterableDataset, action_dim: int, state_dim: int, chunk_size: int):
+        self.dataset = dataset
+        self.action_dim = action_dim
+        self.state_dim = state_dim
+        self.chunk_size = chunk_size
+        self.is_vqa = True
+        self.dummy_state = torch.zeros(state_dim)
+        self.dummy_action = torch.zeros(chunk_size, action_dim)
+        self.dummy_is_pad = torch.ones(chunk_size, dtype=torch.bool)
+        self.dummy_timestamp = 0
+        self.dummy_episode_id = 0
+    
+    def __iter__(self):
+        for item in self.dataset:
+            yield {
+                "image": item['image'],
+                "raw_lang": item['raw_lang'],
+                "reasoning": item['reasoning'],
+                "state": self.dummy_state,
+                "action": self.dummy_action,
+                "is_pad": self.dummy_is_pad,
+                "timestamp": self.dummy_timestamp,
+                "episode_id": self.dummy_episode_id,
+                "__index__": -1,
+            }
 
 class NormalizedMapDataset(Dataset):
     """

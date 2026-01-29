@@ -45,6 +45,7 @@ class OpenPiPolicyConfig(PretrainedConfig):
         self.action_dim = action_dim
         self.max_action_dim = max_action_dim
         self.action_horizon = chunk_size
+        self.chunk_size = chunk_size
         self.max_token_len = max_token_len
         self.paligemma_variant = paligemma_variant
         self.action_expert_variant = action_expert_variant
@@ -61,6 +62,9 @@ class OpenPiPolicy(PreTrainedModel):
     config_class = OpenPiPolicyConfig
     
     def __init__(self, config: OpenPiPolicyConfig):
+        # expand path if config.pytorch_weight_path if it is not null and is a user home directory
+        if config.pytorch_weight_path is not None and config.pytorch_weight_path.startswith('~'):
+            config.pytorch_weight_path = os.path.expanduser(config.pytorch_weight_path)
         super().__init__(config)
         self.model_cfg = openpi.models.pi0_config.Pi0Config(
             dtype=config.pytorch_training_precision,

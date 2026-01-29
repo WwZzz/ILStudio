@@ -1,0 +1,20 @@
+[project]
+name = "ilstd-simplerenv"
+version = "0.1.0"
+description = "simplerenv"
+readme = "README.md"
+requires-python = ">=3.10.19,<3.11"
+
+dependencies = [
+    "easydict==1.9",
+    "opencv-python==4.6.0.66",
+    "matplotlib==3.5.3",
+    "tianshou==0.2.0",
+    "numpy==1.26.4",
+    "mani_skill2_real2sim @ git+https://github.com/simpler-env/ManiSkill2_real2sim.git@ef7a4d4fdf4b69f2c2154db5b15b9ac8dfe10682",
+    "simpler-env @ git+https://github.com/simpler-env/SimplerEnv.git",
+    "loguru",
+]
+
+[tool.uv]
+default-groups = []

@@ -7,7 +7,7 @@ This module contains the RobomimicDataset class for loading RoboMimic datasets.
 import numpy as np
 import os
 from collections import OrderedDict
-from data_utils.rotate import quat2axisangle
+from data_utils.pose_utils import quat2axisangle
 from data_utils.datasets.base import EpisodicDataset
 from typing import List, Union
 

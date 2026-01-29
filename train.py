@@ -16,10 +16,13 @@ from policy.policy_loader import (
 from policy.trainer import BaseTrainer
 import torch
 import numpy
-torch.serialization.add_safe_globals([numpy.ndarray])
-torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
-torch.serialization.add_safe_globals([numpy.dtype])
-torch.serialization.safe_globals([numpy.dtype])
+try:
+    torch.serialization.add_safe_globals([numpy.ndarray])
+    torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
+    torch.serialization.add_safe_globals([numpy.dtype])
+    torch.serialization.safe_globals([numpy.dtype])
+except:
+    pass
 
 def parse_param():
     """
@@ -39,6 +42,8 @@ def parse_param():
                        help='Training config (name under configs/training or absolute path to yaml)')
     parser.add_argument('-o', '--output_dir', type=str, default='ckpt/training_output',
                        help='Output directory for checkpoints')
+    parser.add_argument('--eval_ratio', type=float, default=0.0,
+                       help='Ratio of training data to use for evaluation. Default to 0.0 (use first dataset as eval if multiple provided)')
     
     # Parse arguments (allow unknown for dotted overrides)
     args, unknown = parser.parse_known_args()
@@ -133,7 +138,7 @@ def main(args):
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
     train_loader, eval_loader = get_dataloader(train_data, val_data, data_processor, data_collator, args) 
-    
+    # assert val_data is not None, "Validation data is required for training"
     # Get Trainer
     train_class = get_policy_trainer_class(config_paths['policy']) or BaseTrainer
     trainer = train_class(

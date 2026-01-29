@@ -11,7 +11,7 @@ from collections import defaultdict
 import json
 import robomimic.utils.obs_utils as ObsUtils
 from benchmark.robomimic.constant import ALL_ENV_CONFIGS, ALL_ENV_LANGUAGES
-from data_utils.rotate import quat2axisangle
+from data_utils.pose_utils import quat2axisangle
 from ..base import *
 from .constant import ALL_ENV_CONFIGS
 from multiprocessing import current_process
@@ -89,6 +89,27 @@ class RobomimicEnv(MetaEnv):
             }
         }
         ObsUtils.initialize_obs_utils_with_obs_specs(modalities)
+        
+        # Get action bounds from action_space
+        # Robomimic uses robosuite environments which have action_spec
+        if hasattr(env, 'action_spec'):
+            action_spec = env.action_spec
+            if isinstance(action_spec, tuple) and len(action_spec) == 2:
+                self.min_action = action_spec[0]  # low
+                self.max_action = action_spec[1]  # high
+            else:
+                self.min_action = None
+                self.max_action = None
+        elif hasattr(env, 'action_space') and hasattr(env.action_space, 'low'):
+            self.min_action = env.action_space.low
+            self.max_action = env.action_space.high
+        else:
+            # Fallback for robosuite delta control (typical range)
+            self.min_action = np.array([-1.0] * 7, dtype=np.float32)  # Typical delta EE control
+            self.max_action = np.array([1.0] * 7, dtype=np.float32)
+        
+        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):

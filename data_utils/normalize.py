@@ -184,24 +184,26 @@ class BaseNormalizer:
         cache_path = os.path.join(self.cache_dir, self.stats_filename)
         if os.path.exists(cache_path):
             return True
+        else:
+            return False
         
-        # Backward compatibility: check in dataset_dir if it exists
-        if self.dataset_dir:
-            old_path = os.path.join(self.dataset_dir, self.stats_filename)
-            old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
-            if os.path.exists(old_path) or os.path.exists(old_path_alt):
-                return True
+        # # Backward compatibility: check in dataset_dir if it exists
+        # if self.dataset_dir:
+        #     old_path = os.path.join(self.dataset_dir, self.stats_filename)
+        #     old_path_alt = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        #     if os.path.exists(old_path) or os.path.exists(old_path_alt):
+        #         return True
         
-        return False
+        # return False
 
     def compute_stats_for_array(self, data_k):
         return {
-            "mean": data_k.mean(0).tolist(),
-            "std": data_k.std(0).tolist(),
-            "max": data_k.max(0).tolist(),
-            "min": data_k.min(0).tolist(),
-            "q01": np.quantile(data_k, 0.01, axis=0).tolist(),
-            "q99": np.quantile(data_k, 0.99, axis=0).tolist(),
+            "mean": data_k.mean(0),
+            "std": data_k.std(0),
+            "max": data_k.max(0),
+            "min": data_k.min(0),
+            "q01": np.quantile(data_k, 0.01, axis=0),
+            "q99": np.quantile(data_k, 0.99, axis=0),
         }
     
     def compute_and_save_stats(self):
@@ -450,9 +452,9 @@ class BaseNormalizer:
         
         return collated if collated else None
     
-    def save_stats(self, all_stats):
+    def save_stats(self, all_stats, save_path=None):
         """Save stats to centralized cache directory"""
-        save_path = os.path.join(self.cache_dir, self.stats_filename)
+        if save_path is None: save_path = os.path.join(self.cache_dir, self.stats_filename)
         with open(save_path, 'wb') as file:
             pickle.dump(all_stats, file)
 
@@ -462,37 +464,24 @@ class BaseNormalizer:
         This saves stats to both the target_dir (for checkpoint) and cache_dir (for future use).
         """
         assert hasattr(self, 'all_stats') and self.all_stats is not None, "No stats found."
-        stats_to_save = self.all_stats
-        # stats_to_save = {
-        #     k: {
-        #         kk:vv.tolist() if isinstance(vv, np.ndarray) else vv for kk,vv in v.items()
-        #     } if isinstance(v, dict) else v for k,v in self.all_stats.items()
-        # }
-        
-        # Save to target_dir (training checkpoint)
         save_path = os.path.join(target_dir, self.stats_filename)
+        # Save to target_dir (training checkpoint)
         if not os.path.exists(save_path):
-            with open(save_path, 'wb') as file:
-                pickle.dump(stats_to_save, file)
+            self.save_stats(self.all_stats, save_path=save_path)
         else:
             warnings.warn(f"Stats file {save_path} already exists in training dir.")
-        
-        # # Also save to cache_dir for future use
-        # cache_path = os.path.join(self.cache_dir, self.stats_filename)
-        # if not os.path.exists(cache_path):
-        #     with open(cache_path, 'wb') as file:
-        #         pickle.dump(stats_to_save, file)
+
 
     def load_stats(self):
         """Load stats from cache directory or dataset directory (backward compat)"""
         # Try cache directory first (new format)
         stats_path = os.path.join(self.cache_dir, self.stats_filename)
         
-        if not os.path.exists(stats_path) and self.dataset_dir:
-            # Backward compatibility: try dataset_dir
-            stats_path = os.path.join(self.dataset_dir, self.stats_filename)
-            if not os.path.exists(stats_path):
-                stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
+        # if not os.path.exists(stats_path) and self.dataset_dir:
+        #     # Backward compatibility: try dataset_dir
+        #     stats_path = os.path.join(self.dataset_dir, self.stats_filename)
+        #     if not os.path.exists(stats_path):
+        #         stats_path = os.path.join(self.dataset_dir, f'dataset_stats_{self.ctrl_space}_{self.ctrl_type}.pkl')
         
         if not os.path.exists(stats_path):
             raise FileNotFoundError(
@@ -503,7 +492,7 @@ class BaseNormalizer:
         
         with open(stats_path, 'rb') as file:
             all_stats = pickle.load(file)
-        # all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
+        all_stats = {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         return all_stats
     
     def get_stat_by_key(self, key='action'):
@@ -861,7 +850,6 @@ def load_normalizer_from_meta(norm_meta, src_dir='', dataset_id=None):
     
     return {'state': state_normalizer, 'action': action_normalizer}
 
-
 def load_normalizers(args):
     """Load normalizers from saved metadata
     
@@ -927,3 +915,4 @@ def load_normalizers(args):
         warnings.warn(f"Failed to load normalizers from {args.model_name_or_path} because {e}")
         identity_normalizer = {'state':Identity(), 'action':Identity()}
         return identity_normalizer, 'ee', 'delta'
+

@@ -16,10 +16,11 @@ class OctoConfig(PretrainedConfig):
         action_dim: int = 14,
         state_dim: int = 14,
         chunk_size: int = 50,
-        use_wrist: bool = False,
+        use_wrist: bool = True,
         use_proprio: bool = True,
         last_hidden_dim: int = 384,
         image_size: List[int] = [256, 256],
+        wrist_image_size: List[int] = [128, 128],
         num_language_tokens: int = 16,
         **kwargs,
     ):
@@ -32,6 +33,7 @@ class OctoConfig(PretrainedConfig):
         self.use_proprio = use_proprio
         self.input_dim = last_hidden_dim 
         self.image_size = image_size
+        self.wrist_image_size = wrist_image_size
         self.num_language_tokens = num_language_tokens
         
 class OctoPolicy(PreTrainedModel):
@@ -67,7 +69,9 @@ class OctoPolicy(PreTrainedModel):
             del meta['example_batch']['observation']['image_wrist']
             pad_mask_dict.pop('image_wrist')
         else:
-            meta['example_batch']['observation']['image_wrist'] = torch.randint(0, 255, (bs, 1, 3, h, w))
+            wrist_h, wrist_w = self.config.wrist_image_size
+            meta['example_batch']['observation']['image_wrist'] = torch.randint(0, 255, (bs, 1, 3, wrist_h, wrist_w))
+            num_tokens_dict['wrist'] = int(wrist_h//16 * wrist_w//16)
         if self.config.use_proprio:
             meta["config"]["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
                 LowdimObsTokenizerPt,

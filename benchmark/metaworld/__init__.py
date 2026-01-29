@@ -23,6 +23,7 @@ class MetaWorldEnv(MetaEnv):
         self.camera_name = getattr(self.config, 'camera_name', None)
         self.use_camera = getattr(self.config, 'use_camera', True)
         self.robot_state_only = getattr(self.config, 'robot_state_only', True)
+        self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         assert self.camera_name is None or self.camera_name in ALL_CAMERA_NAMES
         self.raw_lang = TASK_DESC[self.config.task][1]
         env = self.create_env()
@@ -36,6 +37,17 @@ class MetaWorldEnv(MetaEnv):
             env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode, camera_name=self.camera_name)
         else:
             env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode)
+        
+        # Get action bounds from action_space
+        if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
+            self.min_action = env.action_space.low
+            self.max_action = env.action_space.high
+        else:
+            # Fallback
+            self.min_action = None
+            self.max_action = None
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
+        
         return env
         
     def meta2act(self, maction: MetaAction):
@@ -73,4 +85,6 @@ class MetaWorldEnv(MetaEnv):
     
     def reset(self):
         obs = self.env.reset()
+        for _ in range(self.num_steps_wait):
+            obs = self.env.step([0,0,0,0])
         return self.obs2meta(obs[0])

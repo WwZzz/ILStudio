@@ -40,25 +40,12 @@ from .ee_sim_env import make_ee_sim_env
 from .sim_env import make_sim_env, BOX_POSE
 from .utils import sample_box_pose, sample_insertion_pose
 import numpy as np
-from dataclasses import dataclass, field, fields, asdict
-from data_utils.rotate import quat2axisangle
-import os
+from dataclasses import asdict
 import numpy as np
-from torchvision import transforms
-import pickle
 import time
-import copy
-import json
-import tensorflow as tf
-from PIL import Image, ImageDraw, ImageFont
-from typing import List
-from pathlib import Path
-import argparse
-from collections import deque
-import imageio
-from robosuite.controllers import load_controller_config
 import cv2
 from multiprocessing import current_process
+from loguru import logger
 
 TASK_PROMPT = {
     'sim_transfer_cube_scripted': 'Transfer the red cube from the right arm to the left arm.',
@@ -94,11 +81,16 @@ class AlohaSimEnv(MetaEnv):
         self.raw_lang = TASK_PROMPT['sim_transfer_cube_scripted'] if 'transfer' in self.task_name else TASK_PROMPT['sim_insertion_scripted']
         # step over the environment
         env = make_sim_env('sim_'+self.task_name)
+        # Get action bounds from action_spec
+        action_spec = env.action_spec()
+        self.min_action = action_spec.minimum
+        self.max_action = action_spec.maximum
+        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
         return env
         
     def meta2act(self, maction: MetaAction):
-        assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
-        assert maction['ctrl_type']==self.ctrl_type, "Action must be relative action for LIBERO"
+        # assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
+        # assert maction['ctrl_type']==self.ctrl_type, "Action must be relative action for LIBERO"
         actions = maction['action'] # (action_dim, )
         return actions
         
@@ -109,8 +101,10 @@ class AlohaSimEnv(MetaEnv):
         img_wrist_left = cv2.resize(obs['images']['left_wrist'], self.image_size_wrist)
         img_wrist_right = cv2.resize(obs['images']['right_wrist'], self.image_size_wrist)
         all_imgs = [img_primary]
-        if '1' in self.camera_ids:
-            all_imgs = all_imgs + [img_wrist_left, img_wrist_right]
+        if '1' in self.camera_ids or 1 in self.camera_ids:
+            all_imgs = all_imgs + [img_wrist_left, ]
+        if '2' in self.camera_ids or 2 in self.camera_ids:
+            all_imgs = all_imgs + [img_wrist_right, ]
         image = np.stack(all_imgs)
         image = image.transpose(0, 3, 1, 2)
         return MetaObs(state=state_joint, image=image, raw_lang=self.raw_lang)

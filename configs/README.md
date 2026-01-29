@@ -1,87 +1,89 @@
-# 命令行参数覆写功能
+# Command-Line Configuration Override System
 
-IL-Studio 支持通过命令行参数覆写任意深度的配置文件参数，提供灵活的配置管理机制。
+IL-Studio supports flexible configuration management through command-line argument overrides that can modify parameters at any nesting depth in configuration files.
 
-## 支持的配置类型
+## Supported Configuration Types
 
-系统支持以下6种配置类型的覆写：
-- `task` - 任务配置
-- `policy` - 策略配置 
-- `training` - 训练配置
-- `robot` - 机器人配置
-- `teleop` - 遥操作配置
-- `env` - 环境配置
+The system supports override for the following 6 configuration types:
+- `task` - Task configuration
+- `policy` - Policy configuration
+- `training` - Training configuration
+- `robot` - Robot configuration
+- `teleop` - Teleoperation configuration
+- `env` - Environment configuration
 
-## 覆写语法
+## Override Syntax
 
-### 基本语法
+### Basic Syntax
 
+Two syntax formats are supported:
+
+**Space-separated format:**
 ```bash
 --<config_type>.<parameter_path> <value>
 ```
 
-或者使用等号语法：
-
+**Equals format:**
 ```bash
 --<config_type>.<parameter_path>=<value>
 ```
 
-### 支持的嵌套深度
+### Supported Nesting Depth
 
-系统支持任意深度的参数嵌套，例如：
+The system supports arbitrary nesting depth for parameters. Examples:
 
-- **2层嵌套**: `--policy.camera_names`
-- **3层嵌套**: `--policy.model_args.backbone` 
-- **4层嵌套**: `--training.optimizer.lr_scheduler.type`
-- **5层嵌套**: `--task.env.simulation.physics.timestep`
-- **更深嵌套**: `--config.a.b.c.d.e.f.value`
+- **2-level nesting**: `--policy.camera_names`
+- **3-level nesting**: `--policy.model_args.backbone`
+- **4-level nesting**: `--training.optimizer.lr_scheduler.type`
+- **5-level nesting**: `--task.env.simulation.physics.timestep`
+- **Deeper nesting**: `--config.a.b.c.d.e.f.value`
 
-## 覆写示例
+## Override Examples
 
-### Policy 配置覆写
+### Policy Configuration Overrides
 
 ```bash
-# 基本参数覆写
+# Basic parameter override
 python train.py --policy act --policy.camera_names '["primary", "wrist"]'
 
-# 嵌套参数覆写
+# Nested parameter override
 python train.py --policy act --policy.model_args.backbone resnet50
 python train.py --policy act --policy.model_args.hidden_dim 1024
 python train.py --policy act --policy.model_args.enc_layers 6
 
-# 深度嵌套覆写
+# Deep nesting override
 python train.py --policy act --policy.model_args.optimizer.lr 0.001
 python train.py --policy act --policy.model_args.optimizer.lr_scheduler.type cosine
 ```
 
-### Training 配置覆写
+### Training Configuration Overrides
 
 ```bash
-# 训练参数覆写
+# Training parameter override
 python train.py --training.learning_rate 0.0001
 python train.py --training.num_train_epochs 10
 
-# 优化器配置覆写
+# Optimizer configuration override
 python train.py --training.optimizer.weight_decay 0.01
 python train.py --training.optimizer.lr_scheduler.warmup_steps 1000
 python train.py --training.optimizer.lr_scheduler.type linear
 ```
 
-### Task 配置覆写
+### Task Configuration Overrides
 
 ```bash
-# 任务基本参数
+# Basic task parameters
 python train.py --task.action_dim 14
 python train.py --task.state_dim 14
 
-# 环境参数覆写
+# Environment parameter override
 python train.py --task.env.simulation.physics.timestep 0.01
 python train.py --task.env.simulation.physics.gravity -9.81
 python train.py --task.env.simulation.rendering.width 1920
 python train.py --task.env.simulation.rendering.height 1080
 ```
 
-### 组合使用
+### Combined Usage
 
 ```bash
 python train.py \
@@ -96,95 +98,105 @@ python train.py \
   --task.env.simulation.physics.timestep 0.01
 ```
 
-## 数据类型处理
+## Data Type Handling
 
-系统会自动尝试将字符串值转换为合适的数据类型：
+The system automatically attempts to convert string values to appropriate data types:
 
-- **整数**: `"100"` → `100`
-- **浮点数**: `"0.001"` → `0.001`
-- **布尔值**: `"true"` → `True`, `"false"` → `False`
-- **列表**: `'["a", "b", "c"]'` → `["a", "b", "c"]`
-- **字典**: `'{"key": "value"}'` → `{"key": "value"}`
-- **字符串**: 无法转换的值保持为字符串
+- **Integer**: `"100"` → `100`
+- **Float**: `"0.001"` → `0.001`
+- **Boolean**: `"true"` → `True`, `"false"` → `False`
+- **List**: `'["a", "b", "c"]'` → `["a", "b", "c"]`
+- **Dictionary**: `'{"key": "value"}'` → `{"key": "value"}`
+- **String**: Values that cannot be converted remain as strings
 
-## 覆写优先级
+The type conversion is handled by the `_convert_to_type` utility function, which intelligently infers types based on value format.
 
-参数覆写的优先级顺序（从高到低）：
+## Override Priority
 
-1. **命令行覆写** (最高优先级)
-2. **YAML 配置文件参数**
-3. **默认值** (最低优先级)
+Parameter override priority (from highest to lowest):
 
-这意味着命令行参数总是会覆盖配置文件中的相同参数。
+1. **Command-line overrides** (highest priority)
+2. **YAML configuration file parameters**
+3. **Default values** (lowest priority)
 
-## 实际应用场景
+This means command-line arguments always override the same parameters in configuration files.
 
-### 1. 快速实验不同的模型架构
+## Practical Use Cases
+
+### 1. Quick Experimentation with Different Model Architectures
 
 ```bash
-# 尝试不同的backbone
+# Try different backbones
 python train.py --policy act --policy.model_args.backbone resnet34
 python train.py --policy act --policy.model_args.backbone resnet50
 
-# 调整网络层数
+# Adjust network depth
 python train.py --policy act --policy.model_args.enc_layers 6
 python train.py --policy act --policy.model_args.dec_layers 8
 ```
 
-### 2. 调试和测试
+### 2. Debugging and Testing
 
 ```bash
-# 快速减少训练步数进行测试
+# Quickly reduce training steps for testing
 python train.py --training.max_steps 100
 
-# 调整batch size
+# Adjust batch size
 python train.py --training.per_device_train_batch_size 4
 
-# 修改相机配置
+# Modify camera configuration
 python train.py --policy.camera_names '["primary"]'
 ```
 
-### 3. 超参数搜索
+### 3. Hyperparameter Search
 
 ```bash
-# 学习率搜索
+# Learning rate search
 python train.py --training.learning_rate 0.001
 python train.py --training.learning_rate 0.0001
 python train.py --training.learning_rate 0.00001
 
-# 网络大小搜索
+# Network size search
 python train.py --policy.model_args.hidden_dim 256
 python train.py --policy.model_args.hidden_dim 512
 python train.py --policy.model_args.hidden_dim 1024
 ```
 
-## 注意事项
+## Important Notes
 
-1. **引用复杂值**: 对于包含空格、特殊字符或复杂结构的值，请使用引号包围：
+1. **Quoting Complex Values**: For values containing spaces, special characters, or complex structures, use quotes:
    ```bash
    --policy.camera_names '["primary", "wrist"]'
    --policy.description "Multi-camera policy"
    ```
 
-2. **布尔值**: 使用 `true`/`false` 字符串：
+2. **Boolean Values**: Use `true`/`false` strings:
    ```bash
    --training.do_eval true
    --policy.model_args.use_pretrained false
    ```
 
-3. **路径参数**: 确保路径的正确性：
+3. **Path Parameters**: Ensure path correctness:
    ```bash
    --training.output_dir "/path/to/output"
    --policy.model_args.pretrained_path "/path/to/checkpoint"
    ```
 
-4. **验证参数**: 系统会验证参数的有效性，无效的参数会被报告或忽略。
+4. **Parameter Validation**: The system validates parameter validity. Invalid parameters will be reported or ignored.
 
-## 错误处理
+## Error Handling
 
-- 如果指定了无效的配置类型，系统会忽略该覆写
-- 如果参数路径不存在，系统会创建必要的嵌套结构
-- 如果数据类型转换失败，系统会保持原始字符串值
-- 错误和警告信息会在训练开始时显示
+- If an invalid configuration type is specified, the system will ignore that override
+- If a parameter path doesn't exist, the system will create the necessary nested structure
+- If data type conversion fails, the system will keep the original string value
+- Errors and warnings are displayed at the start of training
 
-这个强大的覆写机制让你可以在不修改配置文件的情况下灵活地调整任何参数，极大地提高了实验效率！
+## Implementation Details
+
+The override system works by:
+
+1. **Parsing**: The `parse_overrides()` function extracts override arguments from unknown command-line arguments
+2. **Type Conversion**: The `_convert_to_type()` function converts string values to appropriate Python types
+3. **Application**: The `apply_overrides_to_mapping()` or `apply_overrides_to_object()` functions apply overrides to configuration objects using nested path resolution
+
+This powerful override mechanism allows you to flexibly adjust any parameter without modifying configuration files, greatly improving experimentation efficiency!

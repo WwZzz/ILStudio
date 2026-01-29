@@ -3,20 +3,45 @@ import torch
 import os
 import fnmatch
 import json
-import warnings
 import importlib
 from loguru import logger
 import torch
 import torch.distributed as dist
-try:
-    import pandas as pd
-except:
-    pd = None
+# import dlimp as dl # Added this import
 from PIL import Image
-from torch.utils.data import DataLoader, ConcatDataset
-from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToIterableDataset
-from .normalize import NORMTYPE2CLASS, load_normalizers, save_norm_meta_to_json, load_normalizer_from_meta
+from torch.utils.data import IterableDataset
+from .normalize import NORMTYPE2CLASS, save_norm_meta_to_json
 
+class RatioSplittingIterableDataset(IterableDataset):
+    """
+    Wraps an iterable dataset to split it into train and eval sets by ratio on the fly.
+    This is a deterministic split based on the sample index.
+    """
+    def __init__(self, dataset, eval_ratio, mode='train', seed=0):
+        super().__init__()
+        self.dataset = dataset
+        if not (0 < eval_ratio < 1):
+            raise ValueError("eval_ratio must be between 0 and 1.")
+        self.eval_ratio = eval_ratio
+        self.mode = mode
+        self.seed = seed
+
+    def __iter__(self):
+        # Use a generator for deterministic "random" decisions based on index
+        g = torch.Generator()
+        g.manual_seed(self.seed)
+
+        for i, sample in enumerate(self.dataset):
+            # Generate a random number for each sample
+            rand_val = torch.rand(1, generator=g).item()
+            
+            # Decide whether to yield the sample based on the mode
+            is_eval_sample = rand_val < self.eval_ratio
+            
+            if self.mode == 'train' and not is_eval_sample:
+                yield sample
+            elif self.mode == 'eval' and is_eval_sample:
+                yield sample
 
 def save_example_data(train_data, output_dir):
     """
@@ -222,7 +247,6 @@ def save_example_data(train_data, output_dir):
         import traceback
         traceback.print_exc()
 
-
 def safe_decode(value):
     if isinstance(value, bytes):
         return value.decode('utf-8')
@@ -334,7 +358,6 @@ def set_seed(seed):
     # environment variable (some libraries will read)
     os.environ['PYTHONHASHSEED'] = str(seed)
 
-
 def flatten_list(l):
     return [item for sublist in l for item in sublist]
     
@@ -382,24 +405,6 @@ def _create_dataset_from_config(dataset_config: dict, args):
     # Extract constructor arguments
     constructor_args = dataset_config.get('args', {})
     
-    # # Handle legacy parameters for backward compatibility (only if not in constructor_args)
-    # legacy_params = {}
-    # if 'dataset_dir' not in constructor_args and 'dataset_path_list' not in constructor_args:
-    #     if 'dataset_dir' in dataset_config or 'path' in dataset_config:
-    #         legacy_params['dataset_dir'] = dataset_config.get('dataset_dir', dataset_config.get('path'))
-    
-    # if 'camera_names' not in constructor_args:
-    #     legacy_params['camera_names'] = dataset_config.get('camera_names', [])
-    
-    # if 'chunk_size' not in constructor_args:
-    #     legacy_params['chunk_size'] = dataset_config.get('chunk_size', getattr(args, 'chunk_size', 16))
-    
-    # if 'ctrl_space' not in constructor_args:
-    #     legacy_params['ctrl_space'] = dataset_config.get('ctrl_space', 'ee')
-    
-    # if 'ctrl_type' not in constructor_args:
-    #     legacy_params['ctrl_type'] = dataset_config.get('ctrl_type', 'delta')
-    
     # Merge legacy params with constructor args (constructor args take priority)
     final_args = {}
     # final_args.update(legacy_params)
@@ -424,64 +429,115 @@ def _create_dataset_from_config(dataset_config: dict, args):
     except Exception as e:
         raise RuntimeError(f"Failed to create dataset {class_path} with args {final_args}: {e}")
 
-def load_data(args, task_config, save_norm=True):
-    """Load datasets with flexible configuration support
-    
-    Required format:
-    ```yaml
-    datasets:
-      - name: "main_dataset"
-        class: "data_utils.datasets.EpisodicDataset"
-        args:
-          dataset_path_list: ['path1']
-          camera_names: ['primary']
-          chunk_size: 64
-          ctrl_space: 'ee'
-          ctrl_type: 'delta'
-      - name: "auxiliary_dataset"  
-        class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
-        args:
-          dataset_path_list: ['path2']
-          camera_names: ['primary']
-          # ... custom args for this specific dataset
-    ```
-    """
-    
-    # Ensure new flexible format is used
-    if 'datasets' not in task_config:
-        raise ValueError(
-            "Task config must use the new flexible format with 'datasets' key. "
-            "Old format with 'dataset_dir' is no longer supported. "
-            "Please update your task config to use the datasets format."
-        )
-    return _load_data_flexible_format(args, task_config, save_norm)
 
-def _load_data_flexible_format(args, task_config, save_norm=True):
-    """Load data using the new flexible configuration format"""
+def _create_vqa_dataset_from_config(dataset_config: dict, args):
+    """Create a VQA dataset instance from configuration
     
+    Args:
+        dataset_config: Individual VQA dataset configuration
+        args: Training arguments
+    
+    Returns:
+        VQA Dataset instance with added 'name' and 'dataset_id' attributes
+    """
+    # Get dataset class
+    class_path = dataset_config.get('type') or dataset_config.get('class')
+    if not class_path:
+        raise ValueError(f"VQA dataset configuration must include a 'type' or 'class' field: {dataset_config}")
+    
+    dataset_class = _import_class_from_path(class_path)
+    
+    # Extract dataset name from config (required for identification)
+    dataset_name = dataset_config.get('name')
+    if not dataset_name:
+        raise ValueError(f"VQA dataset configuration must include a 'name' field: {dataset_config}")
+    
+    # Extract constructor arguments
+    constructor_args = dataset_config.get('args', {})
+    
+    # Create dataset instance
+    try:
+        dataset = dataset_class(**constructor_args)
+        
+        # Add name and dataset_id attributes for identification
+        dataset.name = dataset_name
+        dataset.dataset_id = dataset_name
+        
+        logger.info(f"Created VQA dataset '{dataset_name}' with class {class_path}")
+        
+        return dataset
+    except Exception as e:
+        raise RuntimeError(f"Failed to create VQA dataset {class_path} with args {constructor_args}: {e}")
+
+
+def _wrap_vqa_datasets(vqa_datasets, args, task_config):
+    """Wrap VQA datasets with MapVQAWrapper or IterVQAWrapper
+    
+    This function wraps VQA datasets to add dummy action, state, and is_pad fields
+    so they can be used alongside regular robot datasets.
+    
+    Args:
+        vqa_datasets: List of VQA datasets
+        args: Training arguments
+        task_config: Task configuration containing meta information
+    
+    Returns:
+        List of wrapped VQA datasets
+    """
+    from data_utils.dataset_wrappers import MapVQAWrapper, IterVQAWrapper
+    
+    # Get action_dim, state_dim, chunk_size from task_config meta
+    meta = task_config.get('meta', {})
+    action_dim = meta.get('action_dim')
+    state_dim = meta.get('state_dim')
+    chunk_size = meta.get('chunk_size')
+    
+    # Fallback to args if not in meta
+    if action_dim is None:
+        action_dim = getattr(args, 'action_dim', 7)
+    if state_dim is None:
+        state_dim = getattr(args, 'state_dim', 7)
+    if chunk_size is None:
+        chunk_size = getattr(args, 'chunk_size', 16)
+    
+    logger.info(f"Wrapping VQA datasets with action_dim={action_dim}, state_dim={state_dim}, chunk_size={chunk_size}")
+    
+    wrapped_datasets = []
+    for dataset in vqa_datasets:
+        # Check if it's a map-style or iterable dataset
+        if is_map_data(dataset):
+            wrapped = MapVQAWrapper(
+                dataset=dataset,
+                action_dim=action_dim,
+                state_dim=state_dim,
+                chunk_size=chunk_size,
+            )
+        elif is_iter_data(dataset):
+            wrapped = IterVQAWrapper(
+                dataset=dataset,
+                action_dim=action_dim,
+                state_dim=state_dim,
+                chunk_size=chunk_size,
+            )
+        else:
+            logger.warning(f"Unknown dataset type for VQA dataset {getattr(dataset, 'name', 'unknown')}, skipping wrap")
+            wrapped = dataset
+        
+        # Preserve name and dataset_id
+        wrapped.name = getattr(dataset, 'name', 'vqa_dataset')
+        wrapped.dataset_id = getattr(dataset, 'dataset_id', wrapped.name)
+        
+        wrapped_datasets.append(wrapped)
+        logger.info(f"Wrapped VQA dataset '{wrapped.name}' with {type(wrapped).__name__}")
+    
+    return wrapped_datasets
+
+
+def _normalize_datasets(datasets, args, task_config, save_norm=True):
     datasets_config = task_config['datasets']
-    
     # Get normalization types
     action_normtype = getattr(args, 'action_normalize', task_config.get('action_normalize', 'zscore'))
     state_normtype = getattr(args, 'state_normalize', task_config.get('state_normalize', 'zscore'))
-    
-    # Create datasets
-    rank = dist.get_rank() if is_distributed() else 0
-    datasets = []
-    
-    if rank == 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    
-    if is_distributed():
-        dist.barrier()
-        
-    if rank != 0:
-        for dataset_config in datasets_config:
-            dataset = _create_dataset_from_config(dataset_config, args)
-            datasets.append(dataset)
-    
     # Compute normalizers
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
@@ -592,10 +648,227 @@ def _load_data_flexible_format(args, task_config, save_norm=True):
             dataset_name=dataset_id
         )
         wrapped_datasets.append(wrapped_dataset)
+    return wrapped_datasets
+
+def _train_val_split_datasets(datasets, args):
+    """Split datasets into train and eval sets"""
+        # Data splitting logic based on eval_ratio and dataset types
+    eval_ratio = getattr(args, 'eval_ratio', 0.0)
+    train_data_splits = []
+    eval_data_splits = []
+
+    if eval_ratio > 0:
+        logger.info(f"Splitting each dataset with eval_ratio: {eval_ratio}")
+        for ds in datasets:
+            # --- Handle RLDS Datasets ---
+            if hasattr(ds, 'rlds_dataset') and hasattr(ds.rlds_dataset, 'split'):
+                train_rlds_ds, eval_rlds_ds = ds.rlds_dataset.split(
+                    [1.0 - eval_ratio, eval_ratio], deterministic=True, drop_remainder=False
+                )
+
+                # Re-create instances of the original class with the new split datasets
+                # This preserves all other configurations of the dataset wrapper
+                train_ds_split = ds.__class__.__new__(ds.__class__)
+                train_ds_split.__dict__ = ds.__dict__.copy()
+                train_ds_split.rlds_dataset = train_rlds_ds
+                train_ds_split.dataset = train_rlds_ds.dataset
+
+                eval_ds_split = ds.__class__.__new__(ds.__class__)
+                eval_ds_split.__dict__ = ds.__dict__.copy()
+                eval_ds_split.rlds_dataset = eval_rlds_ds
+                eval_ds_split.dataset = eval_rlds_ds.dataset
+                
+                train_data_splits.append(train_ds_split)
+                eval_data_splits.append(eval_ds_split)
+                logger.info(f"Split WrappedRLDSDataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+
+            # --- Handle Map-style Datasets ---
+            elif is_map_data(ds):
+                num_total = len(ds)
+                if num_total == 0:
+                    logger.warning(f"Dataset '{getattr(ds.dataset, 'name', 'N/A')}' is empty, skipping split.")
+                    continue
+                
+                num_eval = int(num_total * eval_ratio)
+                if num_eval == 0 and num_total > 1:
+                    num_eval = 1
+                
+                num_train = num_total - num_eval
+                if num_train <= 0 and num_total > 1:
+                    num_train = num_total - 1
+                    num_eval = 1
+                if num_train > 0 or num_eval > 0:
+                    train_split, eval_split = torch.utils.data.random_split(
+                        ds, [num_train, num_eval],
+                        generator=torch.Generator().manual_seed(getattr(args, 'seed', 0)) if getattr(args, 'seed', None) is not None else None
+                    )
+                    if len(train_split) > 0: train_data_splits.append(train_split)
+                    if len(eval_split) > 0: eval_data_splits.append(eval_split)
+                    # logger.info(f"Split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}': {len(train_split)} train, {len(eval_split)} eval.")
+                else:
+                    train_data_splits.append(ds)
+                    logger.warning(f"Could not split map-style dataset '{getattr(ds.dataset, 'name', 'N/A')}' with {num_total} samples. Added to train set.")
+
+            # --- Handle Generic Iterable Datasets ---
+            else:
+                logger.info(f"Splitting generic iterable dataset '{getattr(ds, 'name', 'N/A')}' by ratio {eval_ratio}.")
+                train_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='train', seed=getattr(args, 'seed', 0))
+                eval_split = RatioSplittingIterableDataset(ds, eval_ratio, mode='eval', seed=getattr(args, 'seed', 0))
+                train_data_splits.append(train_split)
+                eval_data_splits.append(eval_split)
+
+    else:  # eval_ratio is 0 or less
+        # Per user request, do not create an eval set if eval_ratio is not specified (or is <= 0).
+        # All datasets will be used for training.
+        logger.info("eval_ratio <= 0. All datasets will be used for training. No evaluation dataset will be created.")
+        train_data_splits.extend(datasets)
+        # eval_data_splits remains an empty list, so eval_data will be None.
+
+    # --- Finalize train and eval data ---
+    train_data = None
+    if len(train_data_splits) == 1:
+        train_data = train_data_splits[0]
+    elif len(train_data_splits) > 1:
+        train_data = train_data_splits # Return as a list for _create_mixed_dataloader
+
+    eval_data = None
+    if len(eval_data_splits) == 1:
+        eval_data = eval_data_splits[0]
+    elif len(eval_data_splits) > 1:
+        eval_data = eval_data_splits
+    return train_data, eval_data
+
+def _apply_transforms_to_datasets(datasets, args, task_config):
+    """Apply transforms to datasets
+    Args:
+        datasets: List of datasets
+        args: Training arguments
+        task_config: Task configuration
+    Returns:
+        List of transformed datasets
+    """
+    transform_configs = task_config.get('transforms', [])
+    from .transform import TransformPipeline, MapTransformPipeline, IterableTransformPipeline
+    if transform_configs and len(transform_configs) > 0:
+        # dynamically import the transform class
+        transform_pipes = []
+        for transform_config in transform_configs:
+            transform_class = _import_class_from_path(transform_config.get('type'))
+            transform = transform_class(**transform_config.get('args', {}))
+            transform_pipes.append(transform)
+        transform_pipe = TransformPipeline(transform_pipes)
+    else:
+        transform_pipe = None # keep None to append dataset_id to each dataset's samples
+    transformed_datasets = []
+    for dataset in datasets:
+        if is_map_data(dataset):
+            transformed_datasets.append(MapTransformPipeline(dataset, transform_pipe))
+        elif is_iter_data(dataset):
+            transformed_datasets.append(IterableTransformPipeline(dataset, transform_pipe))
+        else:
+            raise ValueError(f"Dataset type {type(dataset)} not supported for transformation.")
+    return transformed_datasets
+
+def _maybe_assign_weights_to_datasets(datasets, task_config):
+    sample_weights = task_config.get('sample_weights', None)
+    if sample_weights is None or not isinstance(datasets, list): return datasets
+    datasets_config = task_config.get('datasets', [])
+    vqa_configs = task_config.get('vqa', [])
+    datasets_config.extend(vqa_configs)
+    if isinstance(sample_weights, dict):
+        sample_weights = [sample_weights.get(dcfg['name'], 1.0) for dcfg in datasets_config]
+    for wi, dataset_i in zip(sample_weights, datasets):
+        dataset_i.__weight__ = wi
+    return datasets
+
+def load_data(args, task_config, save_norm=True):
+    """Load datasets with flexible configuration support
     
-    # Create combined dataset
-    train_data = wrapped_datasets[0] if len(wrapped_datasets) == 1 else wrapped_datasets
-    return {'train': train_data, 'eval': None}
+    Required format:
+    ```yaml
+    datasets:
+      - name: "main_dataset"
+        class: "data_utils.datasets.EpisodicDataset"
+        args:
+          dataset_path_list: ['path1']
+          camera_names: ['primary']
+          chunk_size: 64
+          ctrl_space: 'ee'
+          ctrl_type: 'delta'
+      - name: "auxiliary_dataset"  
+        class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
+        args:
+          dataset_path_list: ['path2']
+          camera_names: ['primary']
+          # ... custom args for this specific dataset
+    ```
+    """
+    
+    # Ensure new flexible format is used
+    if 'datasets' not in task_config and 'vqa' not in task_config:
+        raise ValueError("There is not dataset in task config")
+    if 'datasets' in task_config:
+        datasets_config = task_config['datasets']
+        # Create datasets
+        rank = dist.get_rank() if is_distributed() else 0
+        datasets = []
+        if rank == 0:
+            for dataset_config in datasets_config:
+                dataset = _create_dataset_from_config(dataset_config, args)
+                datasets.append(dataset)
+        if is_distributed():
+            dist.barrier()
+        if rank != 0:
+            for dataset_config in datasets_config:
+                dataset = _create_dataset_from_config(dataset_config, args)
+                datasets.append(dataset)
+        
+        # Normalize datasets
+        datasets = _normalize_datasets(datasets, args, task_config, save_norm)
+
+        # Apply transforms to datasets
+        datasets = _apply_transforms_to_datasets(datasets, args, task_config)
+    else:
+        datasets = []
+    if 'vqa' in task_config:
+        vqa_configs = task_config['vqa']
+        rank = dist.get_rank() if is_distributed() else 0
+        vqa_datasets = []
+        if rank == 0:
+            for dataset_config in vqa_configs:
+                dataset = _create_vqa_dataset_from_config(dataset_config, args)
+                vqa_datasets.append(dataset)
+        if is_distributed():
+            dist.barrier()
+        if rank != 0:
+            for dataset_config in vqa_configs:
+                dataset = _create_vqa_dataset_from_config(dataset_config, args)
+                vqa_datasets.append(dataset)
+        # Apply transforms to vqa datasets
+        vqa_datasets = _apply_transforms_to_datasets(vqa_datasets, args, task_config)
+        # Wrap vqa datasets
+        vqa_datasets = _wrap_vqa_datasets(vqa_datasets, args, task_config)
+        datasets.extend(vqa_datasets)
+        
+        
+
+    # Split datasets into train and eval sets
+    train_data, eval_data = _train_val_split_datasets(datasets, args)
+
+    # Assigning weights to each dataset
+    train_data = _maybe_assign_weights_to_datasets(train_data, task_config)
+    
+    return {'train': train_data, 'eval': eval_data}
+
+def is_rlds_data(ds):
+    import dlimp as dl # Ensure dlimp is imported here as well if needed
+    return isinstance(ds, dl.DLataset)
+
+def is_map_data(dataset):
+    return hasattr(dataset, '__len__') and hasattr(dataset, '__getitem__')
+
+def is_iter_data(dataset):
+    return hasattr(dataset, '__iter__') and (not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'))
 
 def _convert_to_type(value):
     """

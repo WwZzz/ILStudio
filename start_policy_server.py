@@ -10,7 +10,8 @@ import os
 import signal
 import sys
 from loguru import logger
-from data_utils.utils import set_seed, load_normalizers
+from data_utils.normalize import load_normalizers
+from data_utils.utils import set_seed
 from benchmark.base import MetaPolicy
 from deploy.remote import PolicyServer
 

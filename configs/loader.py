@@ -121,7 +121,7 @@ class ConfigLoader:
 
     def load_yaml_config(self, category: str, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         path = self._resolve(category, name_or_path)
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             cfg = yaml.safe_load(f) or {}
         
         # Convert string types in YAML (e.g., '1e-8' -> 1e-08)
@@ -475,11 +475,12 @@ class ConfigLoader:
             for key, value in all_params.items():
                 setattr(args, key, value)
             # Generate image_sizes for backward compatibility with policies that still use it
-            if isinstance(args.image_size, str):
-                args.image_size = eval(args.image_size)
-            elif isinstance(args.image_size, int):
-                args.image_size = [args.image_size, args.image_size]
-            args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
+            if hasattr(args, 'image_size'):
+                if isinstance(args.image_size, str):
+                    args.image_size = eval(args.image_size)
+                elif isinstance(args.image_size, int):
+                    args.image_size = [args.image_size, args.image_size]
+                args.image_sizes = ConfigLoader.calculate_image_sizes(args.camera_names, args.image_size)
             
             # IMPORTANT: Update args.model_args for policies that use it directly (like ACT)
             # This ensures the updated action_dim/state_dim are used during model initialization

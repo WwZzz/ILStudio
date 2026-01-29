@@ -10,3 +10,15 @@
 [submodule "third_party/lerobot"]
 	path = third_party/lerobot
 	url = https://github.com/WwZzz/lerobot.git
+[submodule "benchmark/calvin/calvin_env_10"]
+	path = benchmark/calvin/calvin_env_10
+	url = https://github.com/WwZzz/calvin_env_10.git
+[submodule "benchmark/robotwin/RoboTwin"]
+	path = benchmark/robotwin/RoboTwin
+	url = https://github.com/WwZzz/RoboTwin.git
+[submodule "policy/openvla_oft/openvla-oft"]
+	path = policy/openvla_oft/openvla-oft
+	url = https://github.com/WwZzz/openvla-oft.git
+[submodule "benchmark/bigym/bigym"]
+	path = benchmark/bigym/bigym
+	url = https://github.com/NeuracoreAI/bigym
