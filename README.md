@@ -197,6 +197,8 @@ python start_teleop_recorder.py -c so101_follower
 | robotwin | ❌ | ✅ |
 | rlbench | ❌ | ❌ |
 | calvin (Under Testing) | ❌ | ❌ |
+| bigym | ✅ | ❌ |
+| behavior1k | ❌ | ❌ |
 
 ## 🦾 Robot Gallery
 - SO101
