@@ -11,7 +11,7 @@ import yaml
 import importlib
 import cv2
 from pathlib import Path
-
+from loguru import logger
 # Add RoboTwin to path
 ROBOTWIN_ROOT = os.path.join(os.path.dirname(__file__), 'RoboTwin')
 ROBOTWIN_ROOT = os.path.abspath(ROBOTWIN_ROOT)
