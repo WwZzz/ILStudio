@@ -27,5 +27,5 @@ args:
   image_size: [480, 640]      # [H, W] for cameras (RoboTwin default)
 
   # Motion Planner Configuration
-  use_planner: false          # false: Fast inference (recommended for policy eval)
+  use_planner: true          # false: Fast inference (recommended for policy eval)
 
