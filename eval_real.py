@@ -155,10 +155,13 @@ def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str]]:
     return robot_configs, all_shm_names
 
 
-def get_obs2meta_function(robot_configs: List[dict]):
+def get_robot_module_info(robot_configs: List[dict]) -> Tuple[Optional[str], Optional[str]]:
     """
-    Get the obs2meta function from the first robot config.
-    This converts raw observation dict to MetaObs format for policy.
+    Get the robot module path and class name from the first robot config.
+    Used for loading obs2meta function in inference process.
+    
+    Returns:
+        Tuple of (module_name, class_name) or (None, None) if not found
     """
     import importlib
     
@@ -169,22 +172,14 @@ def get_obs2meta_function(robot_configs: List[dict]):
                 parts = device_type.rsplit('.', 1)
                 device_module_name = parts[0]
                 device_class_name = parts[1]
-                device_module = importlib.import_module(device_module_name)
-                device_class = getattr(device_module, device_class_name)
-                
-                # Check if device class has obs2meta as instance method
-                # We need to get it from an instance or use a default
-                if hasattr(device_class, 'obs2meta'):
-                    # Create a temporary instance to get the method
-                    # This is a bit hacky but works for now
-                    return device_class, device_module_name
+                return device_module_name, device_class_name
         except Exception as e:
-            logger.warning("Failed to get obs2meta from {}: {}", cfg.get('type', 'unknown'), e)
+            logger.warning("Failed to get robot info from {}: {}", cfg.get('type', 'unknown'), e)
     
     return None, None
 
 
-def inference_process(args, shm_names: List[str], robot_class, robot_module_name: str):
+def inference_process(args, shm_names: List[str], robot_module_name: Optional[str], robot_class_name: Optional[str]):
     """
     Inference producer process.
     Consumes observation data from SHM and produces action chunks.
@@ -234,46 +229,10 @@ def inference_process(args, shm_names: List[str], robot_class, robot_module_name
         except Exception as e:
             logger.warning("[Inference Process] Could not load obs2meta from module: {}", e)
     
-    # Default obs2meta function
-    def default_obs2meta(synced_data: dict) -> MetaObs:
-        """
-        Default conversion from synced data to MetaObs.
-        Extracts qpos from the first robot device and images from cameras.
-        """
-        qpos = None
-        images = []
-        
-        for dev_name, dev_data in synced_data.items():
-            if not isinstance(dev_data, dict):
-                continue
-            
-            # Extract qpos
-            if 'qpos' in dev_data and qpos is None:
-                qpos = np.array(dev_data['qpos'], dtype=np.float32)
-            
-            # Extract images
-            if 'image' in dev_data:
-                img = dev_data['image']
-                if isinstance(img, np.ndarray):
-                    # Ensure BCHW format
-                    if img.ndim == 3:  # HWC
-                        img = img.transpose(2, 0, 1)  # CHW
-                        img = img[np.newaxis, :]  # BCHW
-                    elif img.ndim == 4 and img.shape[-1] == 3:  # BHWC
-                        img = img.transpose(0, 3, 1, 2)  # BCHW
-                    images.append(img)
-        
-        if qpos is None:
-            qpos = np.zeros(6, dtype=np.float32)
-        
-        if images:
-            image = np.concatenate(images, axis=0)
-        else:
-            image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
-        
-        return MetaObs(state=qpos, state_joint=qpos, image=image)
+
     
     if obs2meta_func is None:
+        from deploy.base import default_obs2meta
         obs2meta_func = default_obs2meta
         logger.info("[Inference Process] Using default obs2meta function")
     
@@ -337,8 +296,8 @@ def main():
     # Load device configs
     robot_configs, all_shm_names = load_device_configs(args, getattr(args, 'unknown_args', []))
     
-    # Get robot class info for obs2meta
-    robot_class, robot_module_name = get_obs2meta_function(robot_configs)
+    # Get robot module info for obs2meta function in inference process
+    robot_module_name, robot_class_name = get_robot_module_info(robot_configs)
     
     # Clean orphaned SHM
     shm_to_clean = all_shm_names + ['policy_control_shm', 'chunk_shm']
@@ -367,7 +326,7 @@ def main():
     logger.info("Starting inference process...")
     inference_proc = mp.Process(
         target=inference_process,
-        args=(args, all_shm_names, robot_class, robot_module_name),
+        args=(args, all_shm_names, robot_module_name, robot_class_name),
         daemon=True
     )
     inference_proc.start()
