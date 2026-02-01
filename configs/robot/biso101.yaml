@@ -1,0 +1,44 @@
+- type: deploy.robot.bi_so101_follower.BiSo101Follower
+  name: bi_so101_follower
+  args:
+    control_shm_name: bi_so101_leader
+    left_arm_port: /dev/so101_left_arm
+    right_arm_port: /dev/so101_right_arm
+    robot_id: bi_so101_follower
+    # Use same arm IDs as single-arm configs to share calibration
+    # This avoids re-calibration when switching between single and bimanual configs
+    left_arm_id: so101_left_arm     # Same as so101_follower.yaml's robot_id
+    right_arm_id: so101_right_arm    # Unique ID for right arm
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: head_camera
+  args:
+    name: head_camera
+    index_or_path: /dev/head_camera
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: left_wrist_camera
+  args:
+    name: left_wrist_camera
+    index_or_path: /dev/left_camera
+    width: 640
+    height: 480
+    max_size_mb: 10
+    fps: 30
+    fourcc: MJPG
+
+# - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+#   name: right_wrist_camera
+#   args:
+#     name: right_wrist_camera
+#     index_or_path: /dev/right_camera
+#     width: 640
+#     height: 480
+#     fps: 30
+#     max_size_mb: 10
+#     fourcc: MJPG

@@ -1,22 +1,49 @@
+"""
+PyBullet Absolute Joint Control Robot
+A PyBullet-based robot with absolute joint position control
+"""
+
 import pybullet as p
 import pybullet_data
 import numpy as np
-from typing import Dict, Any, List
-from deploy.robot.base import BaseRobot, RateLimiter
+from typing import Dict, Any, List, Optional
+
+from deploy.robot.base import BaseRobot
+from deploy.utils import RateLimiter
+
 
 class AbsJointRobot(BaseRobot):
     """
-    基于PyBullet的绝对关节控制机器人，实现BaseRobot API。
+    PyBullet-based absolute joint control robot implementing BaseRobot API
     """
 
     def __init__(self,
+                 name: str = "pybullet_joint",
+                 max_size_mb: int = 64,
+                 fps: float = 240.0,
+                 control_shm_name: Optional[str] = None,
                  robot_urdf_path: str = "franka_panda/panda.urdf",
                  initial_joint_positions: List[float] = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
                  gripper_joint_indices: List[int] = [9, 10],
                  gripper_width: float = 0.04,
                  use_gui: bool = True,
-                 extra_arg=None,
-                 *args, **kwargs):
+                 **kwargs):
+        """
+        Initialize PyBullet joint control robot
+        
+        Args:
+            name: Name for the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
+            control_shm_name: Name of the control shared memory
+            robot_urdf_path: Path to the robot URDF file
+            initial_joint_positions: Initial joint positions
+            gripper_joint_indices: Gripper joint indices
+            gripper_width: Maximum gripper width
+            use_gui: Whether to use PyBullet GUI
+        """
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
+        
         self.use_gui = use_gui
         self.physics_client = None
         self.robot_id = None
@@ -26,7 +53,7 @@ class AbsJointRobot(BaseRobot):
         self.gripper_joint_indices = gripper_joint_indices
         self.gripper_width = gripper_width
 
-        # 获取可动关节索引
+        # Get controllable joint indices
         _temp_client = p.connect(p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         _temp_robot_id = p.loadURDF(self._robot_urdf_path, useFixedBase=True, physicsClientId=_temp_client)
@@ -127,8 +154,13 @@ class AbsJointRobot(BaseRobot):
         return self.physics_client is not None and p.isConnected(self.physics_client)
 
     def shutdown(self):
-        """断开与PyBullet服务器的连接。"""
+        """Disconnect from PyBullet server"""
         if self.is_running():
             print("Disconnecting from PyBullet...")
             p.disconnect(self.physics_client)
             self.physics_client = None
+
+    def close(self):
+        """Close the robot"""
+        super().close()
+        self.shutdown()

@@ -1,10 +1,9 @@
 type: deploy.teleoperator.koch_leader.KochLeader
-name: kochleader
+name: koch_leader
 args:
-  shm_name: ilstd_teleop_controller
-  action_dim: 6
-  action_dtype: float64
-  freq: 100.0
+  name: koch_leader
+  max_size_mb: 1
+  fps: 100.0
   com: /dev/ttyACM0
   robot_id: koch_leader
   elbow_drive_mode: 0

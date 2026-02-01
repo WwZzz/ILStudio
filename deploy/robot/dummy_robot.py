@@ -1,31 +1,49 @@
+"""
+Dummy Robot for Testing
+A virtual robot interface for testing purposes that generates mock observation data
+"""
+
 import numpy as np
 import time
 import threading
-from typing import Dict, Any, Tuple
-import collections
-import sys
+from typing import Dict, Any, Optional
 import os
-from .base import BaseRobot
+
+from deploy.robot.base import BaseRobot
 
 
 class DummyRobot(BaseRobot):
     """
     A virtual robot interface for testing purposes.
-    It inherits from AbstractRobotInterface and dynamically generates mock observation data and validates actions
+    It dynamically generates mock observation data and validates actions
     based on a YAML configuration file.
     """
 
-    def __init__(self, obs_config, action_config,  ctrl_type='delta', ctrl_space='ee', **kwargs):
+    def __init__(self,
+                 name: str = "dummy_robot",
+                 max_size_mb: int = 64,
+                 fps: float = 30.0,
+                 control_shm_name: Optional[str] = None,
+                 obs_config: dict = {},
+                 action_config: dict = {},
+                 ctrl_type: str = 'delta',
+                 ctrl_space: str = 'ee',
+                 **kwargs):
         """
-        Initializes the virtual robot according to the configuration in the YAML file.
-
+        Initialize the virtual robot according to the configuration
+        
         Args:
-            obs_config: Observation configuration dictionary.
-            action_config: Action configuration dictionary.
-            ctrl_type: Control type ('delta' or 'abs').
-            ctrl_space: Control space ('ee' or 'joint').
-            **kwargs: Other parameters loaded from the robot_config.yaml file.
+            name: Name for the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
+            control_shm_name: Name of the control shared memory
+            obs_config: Observation configuration dictionary
+            action_config: Action configuration dictionary
+            ctrl_type: Control type ('delta' or 'abs')
+            ctrl_space: Control space ('ee' or 'joint')
         """
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
+        
         print("[DummyRobot] Initializing...")
         self.shutdown_event = threading.Event()
 
@@ -36,7 +54,6 @@ class DummyRobot(BaseRobot):
             'int': np.int32,
             'int32': np.int32,
             'int64': np.int64,
-            # ... can add more data types
         }
 
         self.obs_config = obs_config
@@ -130,21 +147,33 @@ class DummyRobot(BaseRobot):
         time.sleep(1.0 / hz)
 
     def shutdown(self):
+        """Shutdown the robot"""
+        self.shutdown_event.set()
+
+    def close(self):
+        """Close the robot"""
+        super().close()
         self.shutdown_event.set()
 
 
+# ==============================================================================
+# Test
+# ==============================================================================
+
 if __name__ == '__main__':
     import yaml
+    from pathlib import Path
 
-    config = os.path.dirname(__file__) + '/conf/dummy.yaml'
-    with open(config, 'r') as f:
-        robot_cfg = yaml.safe_load(f)
-    robot = DummyRobot(robot_cfg['params']['config'])
+    cfg_path = Path(__file__).resolve().parents[2] / "configs" / "robot" / "dummy.yaml"
+    with open(cfg_path, 'r') as f:
+        raw = yaml.safe_load(f)
+    device_config = raw[0] if isinstance(raw, list) else raw
+
+    robot = DummyRobot(**device_config.get('args', {}))
     robot.connect()
     print("Robot is Running: ", robot.is_running())
     obs = robot.get_observation()
     print("Observation:")
-
 
     def show_array_info(data, path=""):
         """Recursively shows the shape and dtype of all arrays in a nested dictionary."""
@@ -156,13 +185,9 @@ if __name__ == '__main__':
             shape = tuple(data.shape)
             dtype = str(data.dtype)
             print(f"{path}: shape={shape}, dtype={dtype}")
-        else:
-            # Other types are skipped; can be extended as needed.
-            pass
-
 
     show_array_info(obs)
     action = np.random.rand(14)
     robot.publish_action(action)
-    robot.shutdown_event.set()
+    robot.shutdown()
     print("After set shutdown, Robot is Running: ", robot.is_running())
