@@ -1,8 +1,12 @@
-target: deploy.robot.sim_pybullet.AbsJointRobot
-action_dim: 2
-action_dtype: float64
-robot_urdf_path: "pr2_gripper.urdf"
-initial_joint_positions: [0.0, 0.0]  # 2 controllable joints
-gripper_joint_indices: [0, 1]  # Both joints are gripper joints
-gripper_width: 0.08  # PR2 gripper max width
-use_gui: true
+type: deploy.robot.sim_pybullet.AbsJointRobot
+name: pr2_gripper
+args:
+  name: pr2_gripper
+  max_size_mb: 64
+  fps: 240.0
+  control_shm_name: null
+  robot_urdf_path: pr2_gripper.urdf
+  initial_joint_positions: [0.0, 0.0]
+  gripper_joint_indices: [0, 1]
+  gripper_width: 0.08
+  use_gui: true

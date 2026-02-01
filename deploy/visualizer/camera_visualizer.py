@@ -1,0 +1,313 @@
+"""
+Camera Visualizer - Display camera images from shared memory
+
+This visualizer can display multiple camera feeds in a single window,
+reading image data from multiple shared memory channels.
+"""
+
+import cv2
+import numpy as np
+import time
+from typing import List, Optional, Tuple
+
+from deploy.shm_utils import SharedMemoryChannel
+
+
+class CameraVisualizer:
+    """
+    Visualizer for camera images from shared memory.
+    
+    Supports multiple cameras displayed in a grid layout.
+    Unlike BaseVisualizer, this class manages multiple SHM channels.
+    """
+    
+    def __init__(
+        self,
+        shm_names: List[str],
+        window_name: str = "Camera View",
+        fps: float = 30.0,
+        grid_cols: Optional[int] = None,
+        scale: float = 1.0,
+        **kwargs
+    ):
+        """
+        Initialize the camera visualizer.
+        
+        Args:
+            shm_names: List of shared memory names for cameras
+            window_name: OpenCV window title
+            fps: Target display frame rate
+            grid_cols: Number of columns in grid layout (auto if None)
+            scale: Scale factor for display (0.5 = half size)
+        """
+        self.shm_names = shm_names
+        self.window_name = window_name
+        self.fps = fps
+        self.scale = scale
+        self.is_running = False
+        
+        # Auto-calculate grid layout
+        n_cameras = len(shm_names)
+        if grid_cols is None:
+            if n_cameras <= 2:
+                grid_cols = n_cameras
+            elif n_cameras <= 4:
+                grid_cols = 2
+            else:
+                grid_cols = 3
+        self.grid_cols = grid_cols
+        self.grid_rows = (n_cameras + grid_cols - 1) // grid_cols
+        
+        # SHM channels
+        self.shm_channels: List[Optional[SharedMemoryChannel]] = [None] * n_cameras
+        
+    def connect(self, timeout: float = 30.0) -> bool:
+        """
+        Connect to all camera shared memory channels.
+        
+        Args:
+            timeout: Maximum time to wait for each SHM
+            
+        Returns:
+            True if at least one camera connected
+        """
+        connected_count = 0
+        
+        for i, name in enumerate(self.shm_names):
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    self.shm_channels[i] = SharedMemoryChannel(name, is_writer=False, timeout=1.0)
+                    print(f"[CameraVisualizer] Connected to camera SHM: {name}")
+                    connected_count += 1
+                    break
+                except Exception as e:
+                    print(f"[CameraVisualizer] Waiting for camera SHM '{name}'...")
+                    time.sleep(0.5)
+            
+            if self.shm_channels[i] is None:
+                print(f"[CameraVisualizer] Failed to connect to camera SHM: {name}")
+        
+        return connected_count > 0
+    
+    def setup(self) -> bool:
+        """Setup OpenCV window."""
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        return True
+    
+    def _create_grid_image(self, images: List[Optional[np.ndarray]]) -> np.ndarray:
+        """
+        Create a grid image from multiple camera images.
+        
+        Args:
+            images: List of images (None for missing cameras)
+            
+        Returns:
+            Combined grid image
+        """
+        # Find the max dimensions
+        max_h, max_w = 0, 0
+        for img in images:
+            if img is not None:
+                h, w = img.shape[:2]
+                max_h = max(max_h, h)
+                max_w = max(max_w, w)
+        
+        if max_h == 0 or max_w == 0:
+            # No valid images, return placeholder
+            return np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        # Apply scale
+        target_h = int(max_h * self.scale)
+        target_w = int(max_w * self.scale)
+        
+        # Create grid
+        grid_h = self.grid_rows * target_h
+        grid_w = self.grid_cols * target_w
+        grid = np.zeros((grid_h, grid_w, 3), dtype=np.uint8)
+        
+        for i, img in enumerate(images):
+            row = i // self.grid_cols
+            col = i % self.grid_cols
+            y_start = row * target_h
+            x_start = col * target_w
+            
+            if img is not None:
+                # Resize if needed
+                if img.shape[:2] != (target_h, target_w):
+                    img = cv2.resize(img, (target_w, target_h))
+                
+                # Handle grayscale
+                if len(img.shape) == 2:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                elif img.shape[2] == 4:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+                
+                grid[y_start:y_start+target_h, x_start:x_start+target_w] = img
+            else:
+                # Draw placeholder with camera name
+                cv2.putText(
+                    grid,
+                    f"Camera {i}: No Data",
+                    (x_start + 10, y_start + target_h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (128, 128, 128),
+                    2
+                )
+        
+        # Add camera labels
+        for i, name in enumerate(self.shm_names):
+            row = i // self.grid_cols
+            col = i % self.grid_cols
+            y_start = row * target_h
+            x_start = col * target_w
+            
+            # Draw label background
+            cv2.rectangle(
+                grid,
+                (x_start, y_start),
+                (x_start + len(name) * 10 + 10, y_start + 25),
+                (0, 0, 0),
+                -1
+            )
+            cv2.putText(
+                grid,
+                name,
+                (x_start + 5, y_start + 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1
+            )
+        
+        return grid
+    
+    def visualize(self) -> bool:
+        """
+        Read from all cameras and display.
+        
+        Returns:
+            True to continue, False to stop
+        """
+        images = []
+        
+        for i, shm in enumerate(self.shm_channels):
+            if shm is None:
+                images.append(None)
+                continue
+            
+            try:
+                data = shm.read(blocking=False, skip_unchanged=False)
+                if data is not None and 'image' in data:
+                    img = data['image']
+                    # Convert from RGB to BGR for OpenCV if needed
+                    if len(img.shape) == 3 and img.shape[2] == 3:
+                        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    images.append(img)
+                else:
+                    images.append(None)
+            except Exception:
+                images.append(None)
+        
+        # Create and display grid
+        grid = self._create_grid_image(images)
+        cv2.imshow(self.window_name, grid)
+        
+        # Check for quit key
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q') or key == 27:  # q or ESC
+            return False
+        
+        return True
+    
+    def cleanup(self):
+        """Cleanup OpenCV resources."""
+        cv2.destroyAllWindows()
+    
+    def start(self):
+        """Main loop: connect, setup, and continuously display camera images."""
+        if not self.connect():
+            print("[CameraVisualizer] No cameras connected, exiting")
+            return
+        
+        if not self.setup():
+            print("[CameraVisualizer] Setup failed")
+            return
+        
+        self.is_running = True
+        frame_interval = 1.0 / self.fps
+        last_frame_time = 0.0
+        
+        print(f"[CameraVisualizer] Started with {len(self.shm_names)} cameras at {self.fps} FPS")
+        print("[CameraVisualizer] Press 'q' or ESC to close")
+        
+        try:
+            while self.is_running:
+                current_time = time.time()
+                
+                # Rate limiting
+                if current_time - last_frame_time < frame_interval:
+                    time.sleep(0.001)
+                    continue
+                
+                last_frame_time = current_time
+                
+                if not self.visualize():
+                    break
+                    
+        except KeyboardInterrupt:
+            print("\n[CameraVisualizer] Interrupted")
+        finally:
+            self.cleanup()
+            for shm in self.shm_channels:
+                if shm is not None:
+                    try:
+                        shm.destroy()
+                    except Exception:
+                        pass
+            print("[CameraVisualizer] Stopped")
+    
+    def stop(self):
+        """Stop the visualization loop."""
+        self.is_running = False
+
+
+def start_camera_visualizer(shm_names: List[str], **kwargs):
+    """
+    Start the camera visualizer.
+    
+    This function is called by collect_data.py to start the camera visualizer.
+    
+    Args:
+        shm_names: List of camera shared memory names
+        **kwargs: Additional arguments passed to CameraVisualizer
+    """
+    visualizer = CameraVisualizer(shm_names=shm_names, **kwargs)
+    visualizer.start()
+
+
+# Alias for consistency with device module pattern
+Visualizer = CameraVisualizer
+
+
+# ==============================================================================
+# Test
+# ==============================================================================
+
+if __name__ == "__main__":
+    import multiprocessing as mp
+    
+    # Test with dummy camera names
+    print("Testing CameraVisualizer...")
+    print("This will fail to connect since no cameras are running.")
+    print("Use with collect_data.py for actual camera visualization.")
+    
+    visualizer = CameraVisualizer(
+        shm_names=["test_camera_1", "test_camera_2"],
+        fps=30.0,
+        scale=0.5,
+    )
+    
+    # This will timeout since no cameras are running
+    visualizer.start()

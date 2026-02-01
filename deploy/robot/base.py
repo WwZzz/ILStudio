@@ -5,39 +5,10 @@ import importlib
 from typing import Dict, Optional, Sequence, List, Any
 import numpy as np
 from benchmark.base import MetaAction, MetaObs
+from deploy.utils import RateLimiter
+from deploy.base import BaseDevice
 import time
-
-
-class RateLimiter:
-    """
-    A class to manage the rate for a single thread.
-    Each thread should have its own instance.
-    """
-
-    def __init__(self):
-        self._last_sleep_time = time.perf_counter()
-
-    def sleep(self, rate: float):
-        """
-        Sleeps for a duration that maintains the desired loop rate.
-
-        Args:
-            rate (float): The desired loop frequency in Hz.
-        """
-        if rate <= 0:
-            return
-
-        target_period = 1.0 / rate
-        current_time = time.perf_counter()
-        elapsed_time = current_time - self._last_sleep_time
-        sleep_duration = target_period - elapsed_time
-
-        if sleep_duration > 0:
-            time.sleep(sleep_duration)
-
-        # Update the timestamp for the next iteration
-        self._last_sleep_time = time.perf_counter()
-
+from loguru import logger
 
 class AbstractRobotInterface(abc.ABC):
     """Defines the abstract base class for a robot interface."""
@@ -88,7 +59,24 @@ class AbstractRobotInterface(abc.ABC):
         """Return the shape of the action space"""
         pass
 
-class BaseRobot(AbstractRobotInterface):
+class BaseRobot(BaseDevice, AbstractRobotInterface):
+    def __init__(self, name:str, max_size_mb:int=64, fps:float=1000, control_shm_name:Optional[str]=None, **kwargs):
+        BaseDevice.__init__(self, name, max_size_mb, fps)
+        AbstractRobotInterface.__init__(self)
+        self.control_shm_name = control_shm_name
+        # Note: control_shm connection is deferred to start() to allow teleop shm to be created first
+        self.control_shm = None
+
+    def read_action(self) -> dict:
+        if self.control_shm is not None:
+            return self.control_shm.read(skip_unchanged=True)
+        else:
+            return None
+
+    def process_action(self, x):
+        """Process the action"""
+        return x
+
     def meta2act(self, mact: MetaAction):
         """Convert the MetaAct to execusable actions for the robot"""
         return mact['action']
@@ -96,6 +84,57 @@ class BaseRobot(AbstractRobotInterface):
     def obs2meta(self, obs):
         """Convert the observations from the robot to MetaObs"""
         return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))
+
+
+    def get_data(self) -> dict:
+        """Get the data from the robot"""
+        return self.get_observation()
+
+    def write_data(self, data: dict):
+        """Write the robot data to the shared memory"""
+        assert self.shm is not None, "Shared memory is not created"
+        try:
+            self.shm.write(data)
+        except Exception as e:
+            logger.error(f"Failed to write data to shared memory: {e}")
+
+    def start(self):
+        """
+        Start the robot
+        """
+        # create shared memory for robot observations
+        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
+        
+        # Connect to control shm (teleop) with retry - it may not be ready yet
+        if self.control_shm_name is not None and self.control_shm is None:
+            max_retries = 10
+            for i in range(max_retries):
+                try:
+                    self.control_shm = self.connect_to_existing_shm(self.control_shm_name)
+                    logger.info(f"Connected to control SHM: {self.control_shm_name}")
+                    break
+                except ValueError as e:
+                    if i < max_retries - 1:
+                        logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
+                        import time
+                        time.sleep(0.5)
+                    else:
+                        logger.error(f"Failed to connect to control SHM: {e}")
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        while self.is_running:
+            action = self.read_action()
+            if action is not None:
+                action = self.process_action(action)
+                action_array = action.get('action', None)
+                if action_array is not None:
+                    self.publish_action(action_array)
+            data = self.get_data()
+            if data is not None:
+                self.write_data(data)
+            rate_limiter.sleep(self.fps)
+
 
 def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
     """
@@ -106,15 +145,17 @@ def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
         args: Command line arguments (not used by robots).
         max_connect_retry (int): Maximum number of connection retries. Defaults to 5.
     """
-    full_path = robot_cfg['target']
+    full_path = robot_cfg['type']
     module_path, class_name = full_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     RobotCls = getattr(module, class_name)
     print(f"Creating robot: {full_path}")
 
     # Create a copy of robot_cfg without the 'target' key for passing as kwargs
-    robot_kwargs = {k: v for k, v in robot_cfg.items() if k != 'target'}
-
+    if 'args' in robot_cfg:
+        robot_kwargs = {k: v for k, v in robot_cfg['args'].items()}
+    else:
+        robot_kwargs = {}
     robot = RobotCls(**robot_kwargs)
     # connect to robot
     retry_counts = 1

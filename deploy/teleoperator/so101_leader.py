@@ -1,58 +1,44 @@
 """
-So101 Leader 遥操作实现
-参照 Koch Leader 的实现方式
+So101 Leader Teleoperator
 """
 
-from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.teleoperators.so101_leader import SO101LeaderConfig as RobotSO101LeaderConfig, SO101Leader as RobotSO101Leader
-from deploy.robot.base import BaseRobot
 import numpy as np
-import traceback
-import time
-import numpy as np
-import multiprocessing as mp
-from multiprocessing import shared_memory
-from abc import ABC, abstractmethod
-from pynput import keyboard
-from deploy.teleoperator.base import BaseTeleopDevice
 from typing import Optional
 from pathlib import Path
-    
+
+from lerobot.teleoperators.so101_leader import SO101LeaderConfig as RobotSO101LeaderConfig, SO101Leader as RobotSO101Leader
+from deploy.teleoperator.base import BaseTeleopDevice
+
 
 class So101Leader(BaseTeleopDevice):
     """
     Concrete implementation of teleoperation using So101 Leader
-    参照 Koch Leader 的实现方式
     """
     def __init__(self, 
-                shm_name: str, 
-                shm_shape: tuple, 
-                shm_dtype: type, 
-                action_dim: int = 6,
-                action_dtype = np.float32,
-                frequency: int = 100, 
-                com: str="COM7",    
-                robot_id: str="so101_leader_arm",
-                calibration_dir: Optional[str]=None,
-                **kwargs):
+                 name: str = "so101_leader",
+                 max_size_mb: int = 1,
+                 fps: float = 100.0,
+                 com: str = "/dev/ttyACM0",
+                 robot_id: str = "so101_leader_arm",
+                 calibration_dir: Optional[str] = None,
+                 **kwargs):
         """
         Initialize the So101 Leader teleoperation device
         
         Args:
-            shm_name: Name of the shared memory segment
-            shm_shape: Shape of the shared memory array
-            shm_dtype: Data type of the shared memory array
-            action_dim: The dim of the flattened action
-            frequency: Control frequency in Hz
+            name: Name of the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
             com: Communication port for the leader device
             robot_id: Identifier for the robot
+            calibration_dir: Optional calibration directory path
         """
-        super().__init__(shm_name, shm_shape, shm_dtype, action_dim, action_dtype, frequency)
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps)
         
         self.com = com
         self.robot_id = robot_id
         
-        # 使用官方的 lerobot 支持：
+        # Use the official lerobot support:
         robot_config = RobotSO101LeaderConfig(port=com, id=robot_id)
         if calibration_dir:
             robot_config.calibration_dir = Path(calibration_dir)
@@ -60,34 +46,68 @@ class So101Leader(BaseTeleopDevice):
         self._teleop_device.connect()
         self._motors = list(self._teleop_device.bus.motors)
         
-    def get_observation(self):
-        """获取 Leader 设备的观测数据"""
+    def get_data(self) -> Optional[dict]:
+        """Get the observation data for the Leader device"""
         return self._teleop_device.get_action()
     
-    def observation_to_action(self, observation):
-        """将观测数据转换为标准化的机器人动作"""
-        return np.array([observation[mname+'.pos'] for mname in self._motors], dtype=self.action_dtype)
-    
-    def stop(self):
-        """停止遥操作设备"""
+    def convert_data_to_action(self, data: dict) -> np.ndarray:
+        """Convert the observation data to the standardized robot action"""
+        return np.array([data[mname + '.pos'] for mname in self._motors])
+
+    def close(self):
+        """Close the teleoperation device"""
+        super().close()
         if self._teleop_device.is_connected:
             self._teleop_device.disconnect()
-    
-    def get_doc(self) -> str:
-        """获取设备文档"""
-        return """
-        So101 Leader Teleoperation Device
-        
-        This device allows you to control a So101 follower robot by manipulating
-        a So101 leader device. The leader device captures your hand movements
-        and translates them into commands for the follower robot.
-        
-        Controls:
-        - Move the leader robot joints to control the follower
-        - The system captures joint positions and sends them to the follower
-        
-        Configuration:
-        - com: Communication port (default: COM7 on Windows, /dev/ttyACM0 on Linux)
-        - action_dim: Number of controllable joints (default: 6)
-        - frequency: Control frequency in Hz (default: 100)
-        """
+
+
+# ==============================================================================
+# Test (run Leader in main process so calibration input() works, then read SHM)
+# ==============================================================================
+
+if __name__ == "__main__":
+    import importlib
+    import threading
+    import time
+    import yaml
+    from pathlib import Path
+
+    from deploy.shm_utils import SharedMemoryChannel
+
+    # Load config
+    cfg_path = Path(__file__).resolve().parents[2] / "configs" / "teleop" / "so101_leader.yaml"
+    with open(cfg_path, "r") as f:
+        device_config = yaml.safe_load(f)
+
+    # Create device in main process so calibration (input()) works
+    device_type = device_config["type"]
+    module_name, class_name = device_type.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    device_class = getattr(module, class_name)
+    device = device_class(**device_config["args"])
+    # Calibration already done in __init__ -> connect()
+
+    shm_name = device_config["args"]["name"]
+    # Run device.start() in a thread (blocking loop that writes to SHM)
+    start_thread = threading.Thread(target=device.start, daemon=True)
+    start_thread.start()
+
+    time.sleep(0.5)
+    print("Reading from SHM (Ctrl+C to stop)...")
+    print("Move the leader arm to see action updates.\n")
+
+    try:
+        shm = SharedMemoryChannel(shm_name, is_writer=False, timeout=10.0)
+        while True:
+            data = shm.read(blocking=True, timeout=1.0)
+            if data is not None and "action" in data:
+                arr = data["action"]
+                print(f"  action: {arr}", end="\r", flush=True)
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        device.close()
+        start_thread.join(timeout=2.0)
+        print("Done.")

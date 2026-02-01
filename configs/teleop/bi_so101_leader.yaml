@@ -1,13 +1,6 @@
 type: deploy.teleoperator.bi_so101_leader.BiSO101Leader
 name: bi_so101_leader
 args:
-# Controller settings
-  shm_name: ilstd_teleop_controller
-action_dim: 12
-  action_dtype: float64
-freq: 100.0
-
-# Device-specific settings
-left_arm_port: /dev/ttyACM1
-right_arm_port: /dev/ttyACM2
-robot_id: bi_so101_leader
+  left_arm_port: /dev/so101_left_leader
+  right_arm_port: /dev/so101_right_leader
+  robot_id: bi_so101_leader

@@ -1,9 +1,8 @@
 type: deploy.teleoperator.so101_leader.So101Leader
-name: so101leader
+name: so101_leader
 args:
-  shm_name: ilstd_teleop_controller
-  action_dim: 6
-  action_dtype: float64
-  freq: 10.0
+  name: so101_leader
+  max_size_mb: 1
+  fps: 10.0
   com: COM3
   robot_id: so101_leader

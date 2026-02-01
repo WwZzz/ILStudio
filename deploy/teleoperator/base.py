@@ -3,134 +3,56 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
 from abc import ABC, abstractmethod
-from deploy.robot.base import RateLimiter
-
+from deploy.utils import RateLimiter
+from deploy.base import BaseDevice
 # --- 1. Base Teleoperation Device Class ---
 
-class BaseTeleopDevice(ABC):
+class BaseTeleopDevice(BaseDevice):
     """
     Abstract base class for teleoperation devices
     """
-    def __init__(self, shm_name, shm_shape, shm_dtype,  action_dim: int, action_dtype = np.float64, frequency=100):
-        self.shm_name = shm_name
-        self.shm_shape = shm_shape
-        self.shm_dtype = shm_dtype
-        self.action_dtype = action_dtype
-        self.action_dim = action_dim
-        self.frequency = frequency
-        self.shm = None
-        self.action_buffer = None
-        self.stop_event = mp.Event()
-
-    def connect_to_buffer(self):
-        """Connect to existing shared memory"""
-        try:
-            self.shm = shared_memory.SharedMemory(name=self.shm_name)
-            self.action_buffer = np.ndarray(self.shm_shape, dtype=self.shm_dtype, buffer=self.shm.buf)
-            print("Teleop device: Successfully connected to shared memory.")
-        except FileNotFoundError:
-            print(f"Teleop device: Error! Shared memory '{self.shm_name}' does not exist.")
-            raise
+    def __init__(self, name:str, max_size_mb: int=1, fps: float=1000):
+        super().__init__(name, max_size_mb=1, fps=fps)
 
     @abstractmethod
-    def get_observation(self):
-        """Get raw observation data from device (e.g., key states)"""
-        pass
-
-    @abstractmethod
-    def observation_to_action(self, observation):
+    def convert_data_to_action(self, data: dict) -> np.ndarray:
         """Convert observation data to standardized robot action"""
         pass
 
-    def put_action_to_buffer(self, action):
-        """Write action to shared memory buffer"""
-        if self.action_buffer is not None:
-            t = time.time()
-            self.action_buffer[0]['timestamp'] = t
-            self.action_buffer[0]['action'] = action
-
-    def get_doc(self) -> str:
-        return "No document is available"
-    
-    def get_zero_action(self) -> np.ndarray:
-        return np.zeros((self.action_dim, ), dtype=self.action_dtype)
-
-    def run(self):
-        """
-        Main loop: get observation, convert to action, and write to buffer at specified frequency
-        """
-        self.connect_to_buffer()
+    def start(self):
+        # create shared memory
+        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
+        self.is_running = True
         rate_limiter = RateLimiter()
-        rate = 1.0 / self.frequency
-        try:
-            while not self.stop_event.is_set():
-                start_time = time.time()
-                # Core three steps
-                observation = self.get_observation()
-                action = self.observation_to_action(observation)
-                # print(f"Teleop device: action = {action}")
-                self.put_action_to_buffer(action)
-                rate_limiter.sleep(self.frequency)
-                # elapsed_time = time.time() - start_time
-                # sleep_time = rate - elapsed_time
-                # if sleep_time > 0:
-                #     time.sleep(sleep_time)
-        finally:
-            print("Teleop device: Shutting down...")
-            if self.shm:
-                self.shm.close()
+        while self.is_running:
+            data = self.get_data()
+            if data is not None:
+                action = self.convert_data_to_action(data)
+                self.write_data_to_shm({"action": action})
+            rate_limiter.sleep(self.fps)
 
-    def stop(self):
-        """Set stop event"""
-        self.stop_event.set()
-        
-def str2dtype(s: str):
-    # 将参数转换为对应的变量
-    if s=='float32' or s=='float': return np.float32
-    elif s=='float64' or s=='double': return np.float64
-    elif s=='int' or s=='int32': return np.int
-    elif s=='long' or s=='int64': return np.int64
-    else:
-        raise ValueError(f'Invalid string {s}')
+    # def run(self):
+    #     """
+    #     Main loop: get observation, convert to action, and write to buffer at specified frequency
+    #     """
+    #     self.connect_to_buffer()
+    #     rate_limiter = RateLimiter()
+    #     rate = 1.0 / self.frequency
+    #     try:
+    #         while not self.stop_event.is_set():
+    #             start_time = time.time()
+    #             # Core three steps
+    #             observation = self.get_observation()
+    #             action = self.observation_to_action(observation)
+    #             # print(f"Teleop device: action = {action}")
+    #             self.put_action_to_buffer(action)
+    #             rate_limiter.sleep(self.frequency)
+    #             # elapsed_time = time.time() - start_time
+    #             # sleep_time = rate - elapsed_time
+    #             # if sleep_time > 0:
+    #             #     time.sleep(sleep_time)
+    #     finally:
+    #         print("Teleop device: Shutting down...")
+    #         if self.shm:
+    #             self.shm.close()
 
-def dtype2code(dtype):
-    """Convert numpy dtype to integer code"""
-    if dtype == np.float32:
-        return 0
-    elif dtype == np.float64:
-        return 1
-    elif dtype == np.int32:
-        return 2
-    elif dtype == np.int64:
-        return 3
-    else:
-        raise ValueError(f'Unsupported dtype: {dtype}')
-
-def code2dtype(code):
-    """Convert integer code to numpy dtype"""
-    if code == 0:
-        return np.float32
-    elif code == 1:
-        return np.float64
-    elif code == 2:
-        return np.int32
-    elif code == 3:
-        return np.int64
-    else:
-        raise ValueError(f'Unknown dtype code: {code}')
-
-def generate_shm_info(shm_name: str, action_dim:int, action_dtype=np.float64) -> dict:
-    """Define the shared-memory layout with metadata"""
-    dtype_code = dtype2code(action_dtype)
-    shm_info = {
-        'name': shm_name,
-        'dtype': np.dtype([
-            ('action_dim', np.int32),      # Store action_dim as metadata
-            ('action_dtype_code', np.int32), # Store dtype code as metadata
-            ('timestamp', np.float64),
-            ('action', action_dtype, action_dim),
-        ]),
-        'shape': (1,),
-    }
-    shm_info['size'] = shm_info['dtype'].itemsize
-    return shm_info

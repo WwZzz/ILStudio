@@ -1,46 +1,65 @@
+"""
+PyBullet Delta End-Effector Control Robot
+A PyBullet-based robot implementation controlled by end-effector deltas
+"""
+
 import pybullet as p
 import pybullet_data
 import numpy as np
-import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-# 假设 base_robot.py 在同一个目录下
-from deploy.robot.base import BaseRobot, RateLimiter
+from deploy.robot.base import BaseRobot
+from deploy.utils import RateLimiter
 
 
 class DeltaEERobot(BaseRobot):
     """
-    一个基于PyBullet的机器人实现，通过末端执行器（EE）的增量进行控制。
-
-    这个类封装了PyBullet的交互逻辑，实现了与仿真机器人的连接、
-    观测获取、动作发布和关闭等功能。
+    A PyBullet-based robot implementation controlled by end-effector deltas.
+    This class encapsulates PyBullet interaction logic for connecting to simulation,
+    getting observations, publishing actions, and shutdown.
     """
 
     def __init__(self,
-                 robot_urdf_path: str="franka_panda/panda.urdf",
-                 ee_link_index: int=8,
-                 initial_joint_positions: tuple=[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], gripper_joint_indices: List[int]=[9, 10], gripper_width: float=0.04,
-                 use_gui: bool = True, extra_arg=None, *args, **kwargs):
+                 name: str = "pybullet_delta_ee",
+                 max_size_mb: int = 64,
+                 fps: float = 240.0,
+                 control_shm_name: Optional[str] = None,
+                 robot_urdf_path: str = "franka_panda/panda.urdf",
+                 ee_link_index: int = 8,
+                 initial_joint_positions: List[float] = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
+                 gripper_joint_indices: List[int] = [9, 10],
+                 gripper_width: float = 0.04,
+                 use_gui: bool = True,
+                 **kwargs):
         """
-        初始化PyBullet机器人环境。
-
+        Initialize PyBullet robot environment
+        
         Args:
-            robot_urdf_path (str): 机器人URDF文件的路径。
-            ee_link_index (int): 末端执行器（EE）的link索引。
-            initial_joint_positions (tuple): 机器人关节的初始位置。
-            use_gui (bool, optional): 是否启动PyBullet的图形界面。默认为 True。
+            name: Name for the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
+            control_shm_name: Name of the control shared memory
+            robot_urdf_path: Path to the robot URDF file
+            ee_link_index: End-effector link index
+            initial_joint_positions: Initial joint positions
+            gripper_joint_indices: Gripper joint indices
+            gripper_width: Maximum gripper width
+            use_gui: Whether to use PyBullet GUI
         """
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
+        
         self.use_gui = use_gui
         self.physics_client = None
         self.robot_id = None
 
-        # 机器人相关参数
+        # Robot parameters
         self._robot_urdf_path = robot_urdf_path
         self._ee_link_index = ee_link_index
         self._initial_joint_positions = initial_joint_positions
         self.gripper_joint_indices = gripper_joint_indices
         self.gripper_width = gripper_width
-        # 获取可动的关节索引
+        
+        # Get controllable joint indices
         _temp_client = p.connect(p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         _temp_robot_id = p.loadURDF(self._robot_urdf_path, useFixedBase=True, physicsClientId=_temp_client)
@@ -49,7 +68,7 @@ class DeltaEERobot(BaseRobot):
             _temp_robot_id, i, physicsClientId=_temp_client)[2] != p.JOINT_FIXED]
         p.disconnect(physicsClientId=_temp_client)
 
-        # 视觉相关参数
+        # Visual parameters
         self._view_matrix = p.computeViewMatrixFromYawPitchRoll(
             cameraTargetPosition=[0.5, 0, 0.5],
             distance=1.5,
@@ -65,7 +84,7 @@ class DeltaEERobot(BaseRobot):
             farVal=100.0
         )
 
-        # 速率控制器
+        # Rate limiter
         self._rate_limiter = RateLimiter()
     
     def connect(self):
@@ -226,8 +245,13 @@ class DeltaEERobot(BaseRobot):
         return self.physics_client is not None and p.isConnected(self.physics_client)
 
     def shutdown(self):
-        """断开与PyBullet服务器的连接。"""
+        """Disconnect from PyBullet server"""
         if self.is_running():
             print("Disconnecting from PyBullet...")
             p.disconnect(self.physics_client)
             self.physics_client = None
+
+    def close(self):
+        """Close the robot"""
+        super().close()
+        self.shutdown()

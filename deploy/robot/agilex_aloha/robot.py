@@ -1,18 +1,47 @@
-from deploy.robot.base import BaseRobot
-from .rosoperator import RosOperator, RosTeleOperator
-from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import Dict, Optional, Sequence, List, Any
+"""
+Agilex Aloha Robot Interface
+ROS-based robot interface for Agilex Aloha dual-arm robot
+"""
+
 import numpy as np
 import rospy
 import traceback
 import time
 import os
 import h5py
+from types import SimpleNamespace
+from typing import Dict, Optional, Any
+
+from deploy.robot.base import BaseRobot
+from .rosoperator import RosOperator, RosTeleOperator
+
 
 class AgilexAloha(BaseRobot):
-    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, *args, **kwargs):
-        super().__init__()
+    """
+    Agilex Aloha dual-arm robot interface using ROS
+    """
+    def __init__(self,
+                 name: str = "agilex_aloha",
+                 max_size_mb: int = 64,
+                 fps: float = 40.0,
+                 control_shm_name: Optional[str] = None,
+                 init_pos: dict = {},
+                 ros_operator: dict = {},
+                 limit_pos: dict = {},
+                 **kwargs):
+        """
+        Initialize the Agilex Aloha robot
+        
+        Args:
+            name: Name for the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
+            control_shm_name: Name of the control shared memory
+            init_pos: Initial positions for left and right arms
+            ros_operator: ROS operator configuration
+            limit_pos: Position limits
+        """
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
         self.ros_operator = RosOperator(SimpleNamespace(**ros_operator))
         self.init_pos = init_pos
         self.limit_pos = limit_pos
@@ -79,12 +108,45 @@ class AgilexAloha(BaseRobot):
         return not rospy.is_shutdown()
 
     def shutdown(self):
+        """Shutdown the robot"""
         rospy.signal_shutdown("Shutdown robot node")
 
-  
+    def close(self):
+        """Close the robot"""
+        super().close()
+        rospy.signal_shutdown("Shutdown robot node")
+
+
 class AgilexAlohaTele(BaseRobot):
-    def __init__(self, init_pos:dict, ros_operator:dict, limit_pos:dict = {}, use_master_action:bool = False, use_ee_space:bool=False, *args, **kwargs):
-        super().__init__()
+    """
+    Agilex Aloha dual-arm robot with teleoperation support
+    """
+    def __init__(self,
+                 name: str = "agilex_aloha_tele",
+                 max_size_mb: int = 64,
+                 fps: float = 40.0,
+                 control_shm_name: Optional[str] = None,
+                 init_pos: dict = {},
+                 ros_operator: dict = {},
+                 limit_pos: dict = {},
+                 use_master_action: bool = False,
+                 use_ee_space: bool = False,
+                 **kwargs):
+        """
+        Initialize the Agilex Aloha robot with teleoperation
+        
+        Args:
+            name: Name for the shared memory segment
+            max_size_mb: Maximum size of shared memory in MB
+            fps: Control frequency in Hz
+            control_shm_name: Name of the control shared memory
+            init_pos: Initial positions for left and right arms
+            ros_operator: ROS operator configuration
+            limit_pos: Position limits
+            use_master_action: Whether to use master arm action
+            use_ee_space: Whether to use end-effector space
+        """
+        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
         self.ros_operator = RosTeleOperator(SimpleNamespace(**ros_operator))
         self.init_pos = init_pos
         self.limit_pos = limit_pos
@@ -153,6 +215,12 @@ class AgilexAlohaTele(BaseRobot):
         return not rospy.is_shutdown()
 
     def shutdown(self):
+        """Shutdown the robot"""
+        rospy.signal_shutdown("Shutdown robot node")
+
+    def close(self):
+        """Close the robot"""
+        super().close()
         rospy.signal_shutdown("Shutdown robot node")
 
     def save_episode(self, file_path, observations, actions=None):
