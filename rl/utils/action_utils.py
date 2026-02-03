@@ -86,24 +86,24 @@ def ensure_action(
     """
     Ensure actions are valid for the environment.
 
-    - Applies tanh to bound outputs to [-1, 1] (as in TD3 policies).
-    - Applies an optional refine function for env-specific processing.
+    - Always applies the refine function (e.g., tanh_action_to_space) to map 
+      network outputs to valid action space.
     - Clips to env action space bounds if available.
 
     Args:
         env: Environment (or wrapper) providing action_space.
         action: Tensor or numpy array action.
         refine_fn: Optional callable (env, action) -> action for custom refinement.
-        apply_tanh: Whether to apply tanh to the action.
     """
     try:
         reasonable = env.envs[0].ensure_action_reasonable(action)
     except ValueError:
         logger.warning(f"Environment {env.__class__.__name__} does not support ensure_action_reasonable, using tanh_action_to_space")
-    if reasonable is False:
-        if refine_fn is not None:
-            action = refine_fn(env, action)
-        else:
-            raise ValueError(f"Action {action} is not reasonable")
-
+    # Always apply refine_fn to map network outputs to action space
+    if refine_fn is not None:
+        action = refine_fn(env, action)
+    
+    # Final clip to ensure bounds (safety measure)
+    action = clip_action_to_space(env, action)
+    
     return action

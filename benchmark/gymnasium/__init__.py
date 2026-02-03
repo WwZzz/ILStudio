@@ -16,6 +16,8 @@ Usage:
 import numpy as np
 import gymnasium as gym
 from ..base import MetaEnv, MetaObs, MetaAction
+import torch
+
 
 
 def create_env(config):
@@ -144,6 +146,19 @@ class GymnasiumEnv(MetaEnv):
     def close(self):
         """Close the environment."""
         self.env.close()
+    
+    def ensure_action_reasonable(self, action):
+        """Ensure action is reasonable."""
+        if self.action_low is not None or self.action_high is not None:
+            # Convert Tensor to numpy array if needed
+            if torch is not None and torch.is_tensor(action):
+                action = action.detach().cpu().numpy()
+            action = np.asarray(action)
+            
+            if np.any(action <= self.action_high) and np.any(action >= self.action_low):
+                return True
+            
+        return False
 
 
 # Common MuJoCo environment configurations

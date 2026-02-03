@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import rl.utils.action_utils as action_utils
 from benchmark.base import MetaAction, MetaObs, MetaPolicy
 from policy.mlp.mlp import MLPPolicy, MLPPolicyConfig
 from rl.utils import polyak_update
@@ -93,7 +93,7 @@ class TD3Algorithm(BaseAlgorithm):
         config: TD3Config,
         actor_config: Optional[MLPPolicyConfig] = None,
         meta_policy: Optional[MetaPolicy] = None,
-        ensure_refine_fn=None,
+        ensure_refine_fn= action_utils.tanh_action_to_space,
         ctrl_space: str = "ee",
         ctrl_type: str = "delta",
         gripper_continuous: bool = False,
