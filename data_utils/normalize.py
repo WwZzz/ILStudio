@@ -885,7 +885,7 @@ class MinMaxNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        normalized = (data-stats['min'])/(stats['max'] - stats['min'])*self.delta+self.low
+        normalized = (data-stats['min'])/(stats['max'] - stats['min']+1e-8)*self.delta+self.low
         
         # Apply mask to selectively normalize
         result = self._apply_mask(data, normalized, self.mask)
@@ -901,7 +901,7 @@ class MinMaxNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        denormalized = ((data - self.low) / self.delta) * (stats['max'] - stats['min']) + stats['min']
+        denormalized = ((data - self.low) / self.delta) * (stats['max'] - stats['min']+1e-8) + stats['min']
         
         # Apply mask to selectively denormalize
         result = self._apply_mask(data, denormalized, self.mask)
