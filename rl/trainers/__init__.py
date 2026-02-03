@@ -21,9 +21,12 @@ This __init__.py provides factory functions for creating trainers.
 from typing import Type, Dict, Any
 
 from .base_trainer import BaseTrainer
+from .offpolicy_trainer import OffPolicyTrainer, OffPolicyTrainerConfig
 
 # Registry for trainer classes
-_TRAINER_REGISTRY: Dict[str, Type] = {}
+_TRAINER_REGISTRY: Dict[str, Type] = {
+    'offpolicy': OffPolicyTrainer,
+}
 
 
 def register_trainer(name: str, trainer_class: Type) -> None:
@@ -78,6 +81,8 @@ def list_trainers() -> list:
 
 __all__ = [
     'BaseTrainer',
+    'OffPolicyTrainer',
+    'OffPolicyTrainerConfig',
     'register_trainer',
     'get_trainer_class',
     'list_trainers',

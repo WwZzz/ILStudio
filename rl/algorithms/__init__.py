@@ -15,21 +15,25 @@ Note: Implementations are provided in separate files.
 This __init__.py provides factory functions for creating algorithms.
 """
 
-from typing import Type, Dict, Any
+from typing import Type, Dict, Any, Optional, Tuple
 
-# Registry for algorithm classes
+# Registry for algorithm classes and their config classes
 _ALGORITHM_REGISTRY: Dict[str, Type] = {}
+_CONFIG_REGISTRY: Dict[str, Type] = {}
 
 
-def register_algorithm(name: str, algorithm_class: Type) -> None:
+def register_algorithm(name: str, algorithm_class: Type, config_class: Type = None) -> None:
     """
-    Register an algorithm class.
+    Register an algorithm class and its config class.
     
     Args:
         name: Algorithm name (e.g., 'ppo', 'sac')
         algorithm_class: Algorithm class to register
+        config_class: Config class for the algorithm (optional)
     """
     _ALGORITHM_REGISTRY[name.lower()] = algorithm_class
+    if config_class is not None:
+        _CONFIG_REGISTRY[name.lower()] = config_class
 
 
 def get_algorithm_class(name_or_type: str) -> Type:
@@ -66,6 +70,32 @@ def get_algorithm_class(name_or_type: str) -> Type:
     raise ValueError(f"Unknown algorithm: '{name_or_type}'. Available: {list(_ALGORITHM_REGISTRY.keys())}")
 
 
+def get_config_class(name: str) -> Optional[Type]:
+    """
+    Get config class for an algorithm.
+    
+    Args:
+        name: Algorithm name (e.g., 'td3')
+    
+    Returns:
+        Config class or None if not registered
+    """
+    return _CONFIG_REGISTRY.get(name.lower())
+
+
+def get_algorithm_and_config(name: str) -> Tuple[Type, Optional[Type]]:
+    """
+    Get both algorithm class and config class.
+    
+    Args:
+        name: Algorithm name
+    
+    Returns:
+        Tuple of (algorithm_class, config_class)
+    """
+    return get_algorithm_class(name), get_config_class(name)
+
+
 def list_algorithms() -> list:
     """List all registered algorithms."""
     return list(_ALGORITHM_REGISTRY.keys())
@@ -74,6 +104,8 @@ def list_algorithms() -> list:
 __all__ = [
     'register_algorithm',
     'get_algorithm_class',
+    'get_config_class',
+    'get_algorithm_and_config',
     'list_algorithms',
 ]
 

@@ -254,7 +254,6 @@ class BaseTrainer(ABC):
         """
         return self.collect_rollout(n_steps, env_type=None)
     
-    @abstractmethod
     def evaluate(
         self,
         n_episodes: int = 10,
@@ -265,26 +264,187 @@ class BaseTrainer(ABC):
         """
         Evaluate policy performance.
         
+        Default implementation uses collector's environment and algorithm's select_action.
+        Subclasses can override for custom evaluation logic.
+        
         Args:
             n_episodes: Number of episodes to evaluate
             render: Whether to render environment (optional)
             env_type: Optional, specify evaluation environment type
-            **kwargs: Other evaluation parameters
+            **kwargs: Other evaluation parameters (vec_env, max_timesteps, ctrl_space, etc.)
         
         Returns:
             Dictionary containing evaluation metrics
         """
-        raise NotImplementedError
+        from benchmark.utils import organize_obs
+        
+        # Get evaluation environment
+        vec_env = kwargs.get('vec_env', None)
+        if vec_env is None:
+            # Try to get from collector
+            collector = self.get_collector(env_type)
+            if collector is not None:
+                vec_env = collector.get_env()
+            else:
+                return {'error': 'No evaluation environment available'}
+        
+        max_timesteps = kwargs.get('max_timesteps', 1000)
+        ctrl_space = kwargs.get('ctrl_space', 'joint')
+        
+        num_envs = len(vec_env)
+        all_returns = []
+        all_lengths = []
+        episodes_completed = 0
+        
+        # Set algorithm to eval mode
+        self.algorithm.eval_mode()
+        
+        while episodes_completed < n_episodes:
+            obs = vec_env.reset()
+            obs = organize_obs(obs, ctrl_space)
+            
+            episode_returns = np.zeros(num_envs, dtype=np.float32)
+            episode_lengths = np.zeros(num_envs, dtype=np.int32)
+            done_mask = np.zeros(num_envs, dtype=bool)
+            
+            for t in range(max_timesteps):
+                with torch.no_grad():
+                    action = self.algorithm.select_action(obs, noise_scale=0.0, env=vec_env)
+                
+                # Unpack action
+                if hasattr(action, 'action'):
+                    action_array = action.action
+                else:
+                    action_array = action
+                
+                if action_array.ndim == 1:
+                    action_array = action_array[np.newaxis, :]
+                
+                # Convert to list of dicts for vec_env.step
+                step_actions = [{'action': action_array[i]} for i in range(len(action_array))]
+                
+                # Step environment
+                next_obs, rewards, dones, infos = vec_env.step(step_actions)
+                next_obs = organize_obs(next_obs, ctrl_space)
+                
+                # Accumulate rewards for active episodes
+                episode_returns += rewards * (~done_mask)
+                episode_lengths += (~done_mask).astype(np.int32)
+                
+                # Check for newly done episodes
+                newly_done = dones & (~done_mask)
+                if newly_done.any():
+                    for idx in np.where(newly_done)[0]:
+                        all_returns.append(episode_returns[idx])
+                        all_lengths.append(episode_lengths[idx])
+                        episodes_completed += 1
+                
+                done_mask = done_mask | dones
+                
+                # Reset done environments
+                if dones.any():
+                    done_indices = np.where(dones)[0]
+                    reset_obs = vec_env.reset(id=done_indices)
+                    if reset_obs is not None:
+                        reset_obs_organized = organize_obs(reset_obs, ctrl_space)
+                        if isinstance(next_obs, MetaObs) and next_obs.state is not None:
+                            if hasattr(reset_obs_organized, 'state') and reset_obs_organized.state is not None:
+                                next_obs.state[done_indices] = reset_obs_organized.state
+                    episode_returns[done_indices] = 0
+                    episode_lengths[done_indices] = 0
+                    done_mask[done_indices] = False
+                
+                obs = next_obs
+                
+                if episodes_completed >= n_episodes:
+                    break
+            
+            # Handle truncated episodes
+            for idx in range(num_envs):
+                if not done_mask[idx] and episode_lengths[idx] > 0:
+                    all_returns.append(episode_returns[idx])
+                    all_lengths.append(episode_lengths[idx])
+                    episodes_completed += 1
+                    if episodes_completed >= n_episodes:
+                        break
+        
+        # Set back to train mode
+        self.algorithm.train_mode()
+        
+        # Compute statistics
+        all_returns = np.array(all_returns[:n_episodes])
+        all_lengths = np.array(all_lengths[:n_episodes])
+        
+        return {
+            'returns': all_returns.tolist(),
+            'mean_return': float(np.mean(all_returns)),
+            'std_return': float(np.std(all_returns)),
+            'min_return': float(np.min(all_returns)),
+            'max_return': float(np.max(all_returns)),
+            'episode_lengths': all_lengths.tolist(),
+            'mean_length': float(np.mean(all_lengths)),
+            'num_episodes': len(all_returns),
+        }
     
-    @abstractmethod
     def save(self, path: str) -> None:
-        """Save model and training state."""
-        raise NotImplementedError
+        """
+        Save model and training state.
+        
+        Default implementation saves the algorithm's model.
+        Subclasses can override to save additional state.
+        
+        Args:
+            path: Path to save the model
+        """
+        self.algorithm.save(path)
     
-    @abstractmethod
     def load(self, path: str) -> None:
-        """Load model and training state."""
-        raise NotImplementedError
+        """
+        Load model and training state.
+        
+        Default implementation loads the algorithm's model.
+        Subclasses can override to load additional state.
+        
+        Args:
+            path: Path to load the model from
+        """
+        self.algorithm.load(path)
+    
+    def save_checkpoint(self, path: str, step: int) -> None:
+        """
+        Save training checkpoint with step information.
+        
+        Args:
+            path: Directory or full path to save checkpoint
+            step: Current training step number
+        """
+        import os
+        if os.path.isdir(path):
+            ckpt_path = os.path.join(path, f'checkpoint_{step}.pt')
+        else:
+            ckpt_path = path
+        self.save(ckpt_path)
+    
+    def load_checkpoint(self, path: str) -> int:
+        """
+        Load checkpoint and return the step number.
+        
+        Extracts step number from checkpoint filename (e.g., checkpoint_10000.pt -> 10000).
+        
+        Args:
+            path: Path to checkpoint file
+            
+        Returns:
+            Step number extracted from checkpoint filename, or 0 if not found
+        """
+        import os
+        self.load(path)
+        # Try to extract step from checkpoint name
+        try:
+            step = int(os.path.basename(path).split('_')[-1].split('.')[0])
+        except (ValueError, IndexError):
+            step = 0
+        return step
     
     def get_algorithm(self) -> 'BaseAlgorithm':
         """Get the algorithm."""

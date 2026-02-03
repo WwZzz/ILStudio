@@ -11,7 +11,7 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 import torch
-
+from loguru import logger
 
 def _get_action_space(env) -> Optional[object]:
     """Best-effort extraction of an action_space from env or wrappers."""
@@ -52,12 +52,36 @@ def clip_action_to_space(env, action):
         return torch.clamp(action, low_t, high_t)
     return np.clip(action, low, high)
 
+def tanh_action_to_space(env, action):
+    """
+    Apply tanh to action and scale to env action space bounds.
+    
+    Maps tanh output [-1, 1] to [action_space.low, action_space.high].
+    If no action space bounds available, just applies tanh.
+    """
+    # Apply tanh to bound to [-1, 1]
+    if torch.is_tensor(action):
+        tanh_action = torch.tanh(action)
+    else:
+        tanh_action = np.tanh(action)
+    
+    # Scale to action space bounds
+    low, high = _get_action_bounds(env)
+    if low is None or high is None:
+        return tanh_action
+    
+    # Map [-1, 1] -> [low, high]: scaled = low + (tanh + 1) * (high - low) / 2
+    if torch.is_tensor(tanh_action):
+        low_t = torch.as_tensor(low, device=tanh_action.device, dtype=tanh_action.dtype)
+        high_t = torch.as_tensor(high, device=tanh_action.device, dtype=tanh_action.dtype)
+        return low_t + (tanh_action + 1.0) * (high_t - low_t) / 2.0
+    else:
+        return low + (tanh_action + 1.0) * (high - low) / 2.0
 
 def ensure_action(
     env,
     action,
     refine_fn: Optional[Callable[[object, object], object]] = None,
-    apply_tanh: bool = True,
 ):
     """
     Ensure actions are valid for the environment.
@@ -72,9 +96,14 @@ def ensure_action(
         refine_fn: Optional callable (env, action) -> action for custom refinement.
         apply_tanh: Whether to apply tanh to the action.
     """
-    if apply_tanh:
-        action = torch.tanh(action) if torch.is_tensor(action) else np.tanh(action)
-    if refine_fn is not None:
-        action = refine_fn(env, action)
-    return clip_action_to_space(env, action)
+    try:
+        reasonable = env.envs[0].ensure_action_reasonable(action)
+    except ValueError:
+        logger.warning(f"Environment {env.__class__.__name__} does not support ensure_action_reasonable, using tanh_action_to_space")
+    if reasonable is False:
+        if refine_fn is not None:
+            action = refine_fn(env, action)
+        else:
+            raise ValueError(f"Action {action} is not reasonable")
 
+    return action

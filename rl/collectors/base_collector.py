@@ -19,7 +19,9 @@ from abc import ABC, abstractmethod
 
 # Type hints for Meta classes
 from benchmark.base import MetaObs, MetaAction
-
+from benchmark.base import MetaObs, MetaAction
+from benchmark.utils import organize_obs
+from rl.buffer.transition import RLTransition
 # Vector environment protocol
 from rl.envs import VectorEnvProtocol, EnvsType
 
@@ -352,24 +354,165 @@ class BaseCollector(ABC):
 
 class DummyCollector(BaseCollector):
     """
-    Simple collector implementation for testing and basic use cases.
+    Simple collector implementation for off-policy RL algorithms.
     
     This collector:
     - Works with vectorized environments (SequentialVectorEnv, SubprocVectorEnv, etc.)
     - Handles batched observations and actions
     - Creates RLTransition objects for storage in replay buffer
     - Tracks episode statistics
+    - Supports both step-by-step and batch collection
     """
     
-    def __init__(self, envs, algorithm, **kwargs):
+    def __init__(self, envs, algorithm, ctrl_space='joint', action_dim=None, **kwargs):
         super().__init__(envs, algorithm, **kwargs)
         self.vec_env = self.get_env()
         self._last_obs = None
+        self.ctrl_space = ctrl_space
+        self.action_dim = action_dim
+        
+        # Episode tracking
+        self._episode_rewards = None
+        self._episode_lengths = None
     
     def reset(self, **kwargs):
         """Reset the collector and environments."""
         self.vec_env = self.get_env()
         self._last_obs = self.vec_env.reset()
+        
+        # Initialize episode tracking
+        num_envs = len(self.vec_env)
+        self._episode_rewards = np.zeros(num_envs, dtype=np.float32)
+        self._episode_lengths = np.zeros(num_envs, dtype=np.int32)
+    
+    def collect_step(
+        self, 
+        noise_scale: float = 0.0, 
+        use_random: bool = False,
+        env_type: str = None
+    ) -> Dict[str, Any]:
+        """
+        Collect one step of interaction data.
+        
+        This is the primary method for off-policy training where we collect
+        one step at a time and interleave with policy updates.
+        
+        Args:
+            noise_scale: Exploration noise scale (for policy actions)
+            use_random: If True, use random actions (for initial exploration)
+            env_type: Optional environment type identifier
+            
+        Returns:
+            Dictionary with statistics for this step
+        """
+        if self._last_obs is None:
+            self.reset()
+        
+        from benchmark.base import MetaObs, MetaAction
+        from benchmark.utils import organize_obs
+        from rl.buffer.transition import RLTransition
+        
+        stats = {'episode_rewards': [], 'episode_lengths': [], 'total_steps': 0}
+        
+        # Organize observations into batched MetaObs
+        obs = self._last_obs
+        if not isinstance(obs, MetaObs):
+            obs = organize_obs(obs, self.ctrl_space)
+        
+        num_envs = len(self.vec_env)
+        
+        # Select action
+        if use_random:
+            # Random exploration
+            action_dim = self.action_dim
+            if action_dim is None:
+                # Try to infer from environment
+                single_env = self.vec_env.envs[0] if hasattr(self.vec_env, 'envs') else self.vec_env
+                if hasattr(single_env, 'action_space'):
+                    action_dim = single_env.action_space.shape[0]
+                elif hasattr(single_env, 'action_dim'):
+                    action_dim = single_env.action_dim
+                else:
+                    raise ValueError("Cannot determine action_dim for random exploration")
+            action_array = np.random.uniform(-1, 1, (num_envs, action_dim)).astype(np.float32)
+            action = MetaAction(action=action_array)
+        else:
+            # Policy action with exploration noise
+            action = self.algorithm.select_action(obs, noise_scale=noise_scale, env=self.vec_env)
+        
+        # Unpack action to numpy array
+        if hasattr(action, 'action'):
+            action_array = action.action
+        else:
+            action_array = action
+        
+        if action_array.ndim == 1:
+            action_array = action_array[np.newaxis, :]
+        
+        # Convert to list of dicts for vec_env.step
+        step_actions = [{'action': action_array[i]} for i in range(num_envs)]
+        
+        # Step environment
+        next_obs, rewards, dones, infos = self.vec_env.step(step_actions)
+        
+        # Handle infos which may be None, list, or numpy array
+        if infos is not None and len(infos) > 0:
+            truncated = np.array([
+                info.get('TimeLimit.truncated', False) if isinstance(info, dict) else False 
+                for info in infos
+            ])
+        else:
+            truncated = np.zeros_like(dones)
+        
+        # Organize next observations
+        if not isinstance(next_obs, MetaObs):
+            next_obs = organize_obs(next_obs, self.ctrl_space)
+        
+        # Ensure action is MetaAction
+        if not isinstance(action, MetaAction):
+            action = MetaAction(action=action_array)
+        
+        # Create transition and record
+        transition = RLTransition(
+            obs=obs,
+            action=action,
+            next_obs=next_obs,
+            reward=rewards,
+            done=dones,
+            truncated=truncated,
+        )
+        
+        kwargs_trans = {'env_type': env_type} if env_type else {}
+        self.algorithm.record_transition(transition, **kwargs_trans)
+        
+        # Update episode statistics
+        self._episode_rewards += rewards
+        self._episode_lengths += 1
+        stats['total_steps'] = num_envs
+        self._total_steps += num_envs
+        
+        # Handle done episodes
+        done_indices = np.where(dones)[0]
+        if len(done_indices) > 0:
+            stats['episode_rewards'] = self._episode_rewards[done_indices].tolist()
+            stats['episode_lengths'] = self._episode_lengths[done_indices].tolist()
+            
+            # Reset tracking for done envs
+            self._episode_rewards[done_indices] = 0
+            self._episode_lengths[done_indices] = 0
+            
+            # Reset done environments and update next_obs
+            reset_obs = self.vec_env.reset(id=done_indices)
+            if reset_obs is not None:
+                reset_obs_organized = organize_obs(reset_obs, self.ctrl_space) if not isinstance(reset_obs, MetaObs) else reset_obs
+                if isinstance(next_obs, MetaObs) and next_obs.state is not None:
+                    if hasattr(reset_obs_organized, 'state') and reset_obs_organized.state is not None:
+                        next_obs.state[done_indices] = reset_obs_organized.state
+        
+        # Update last observation
+        self._last_obs = next_obs
+        
+        return stats
     
     def collect(self, n_steps, env_type=None):
         """
@@ -386,84 +529,13 @@ class DummyCollector(BaseCollector):
             - total_steps: Total number of steps collected
             - env_type: Environment type identifier
         """
-        if self._last_obs is None:
-            self.reset()
-        
-        from benchmark.base import dict2meta, MetaObs, MetaAction
-        from benchmark.utils import organize_obs
-        from rl.buffer.transition import RLTransition
-        
         stats = {'episode_rewards': [], 'episode_lengths': [], 'total_steps': 0, 'env_type': env_type}
-        episode_rewards = np.zeros(len(self.vec_env))
-        episode_lengths = np.zeros(len(self.vec_env), dtype=int)
         
-        for step in range(n_steps):
-            # Organize observations into batched MetaObs
-            batched_obs = organize_obs(self._last_obs) if not isinstance(self._last_obs, MetaObs) else self._last_obs
-            
-            # Get batched actions for all environments at once
-            # actions is expected to be an object array of dicts (from MetaPolicy)
-            actions = self.algorithm.select_action(batched_obs)
-            
-            # Apply exploration if configured
-            if self.exploration is not None:
-                if self.is_exploring_randomly:
-                    stats['random_steps'] = stats.get('random_steps', 0) + len(self.vec_env)
-                actions = self.apply_exploration(actions, obs=batched_obs)
-            
-            # Step all environments (expects array of dicts, one per env)
-            new_obs, rewards, dones, infos = self.vec_env.step(actions)
-            
-            # Organize next observations into batched MetaObs
-            batched_next_obs = organize_obs(new_obs) if not isinstance(new_obs, MetaObs) else new_obs
-            
-            # Reconstruct MetaAction for storage (since actions is now an object array)
-            # We need to extract the raw action arrays from the dicts
-            if isinstance(actions, np.ndarray) and actions.dtype == object:
-                # Extract 'action' field from each dict
-                raw_actions = np.stack([a['action'] for a in actions])
-                # Create MetaAction
-                stored_actions = MetaAction(action=raw_actions)
-            elif isinstance(actions, MetaAction):
-                stored_actions = actions
-            else:
-                stored_actions = dict2meta(actions, mtype='act')
-            
-            # Create single RLTransition for all environments
-            truncated = np.array([infos[i].get('TimeLimit.truncated', False) for i in range(len(infos))]) if infos else np.zeros_like(dones)
-            
-            transition = RLTransition(
-                obs=batched_obs,
-                action=stored_actions,
-                next_obs=batched_next_obs,
-                reward=rewards,
-                done=dones,
-                truncated=truncated,
-                info=infos if infos else None,
-            )
-            
-            kwargs_trans = {'env_type': env_type} if env_type else {}
-            self.algorithm.record_transition(transition, **kwargs_trans)
-            
-            # Update episode statistics
-            episode_rewards += rewards
-            episode_lengths += 1
-            stats['total_steps'] += len(self.vec_env)
-            self._total_steps += len(self.vec_env)
-            
-            # Handle done environments
-            done_indices = np.where(dones)[0]
-            if len(done_indices) > 0:
-                stats['episode_rewards'].extend(episode_rewards[done_indices].tolist())
-                stats['episode_lengths'].extend(episode_lengths[done_indices].tolist())
-                episode_rewards[done_indices] = 0.0
-                episode_lengths[done_indices] = 0
-                # Reset done environments
-                for idx in done_indices:
-                    new_obs[idx] = self.vec_env.reset(id=idx)
-            
-            # Reorganize observations for next iteration
-            self._last_obs = organize_obs(new_obs) if not isinstance(new_obs, MetaObs) else new_obs
+        for _ in range(n_steps):
+            step_stats = self.collect_step(env_type=env_type)
+            stats['episode_rewards'].extend(step_stats.get('episode_rewards', []))
+            stats['episode_lengths'].extend(step_stats.get('episode_lengths', []))
+            stats['total_steps'] += step_stats.get('total_steps', 0)
         
         return stats
 
