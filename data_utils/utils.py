@@ -430,6 +430,92 @@ def _create_dataset_from_config(dataset_config: dict, args):
         raise RuntimeError(f"Failed to create dataset {class_path} with args {final_args}: {e}")
 
 
+def _parse_datasets_config(datasets_config: list, args) -> tuple:
+    """Parse datasets configuration and handle merged datasets.
+    
+    This function parses the datasets config, handling both regular datasets
+    and merged datasets (indicated by 'merged' key).
+    
+    Args:
+        datasets_config: List of dataset configurations
+        args: Training arguments
+    
+    Returns:
+        Tuple of (datasets, flattened_configs, merge_info)
+        - datasets: List of created dataset instances
+        - flattened_configs: Flattened list of configs (for normalization)
+        - merge_info: Dict mapping merged_id -> list of source dataset_ids
+    """
+    from .dataset_wrappers import MergedDataset
+    
+    datasets = []
+    flattened_configs = []
+    merge_info = {}  # merged_id -> [source_dataset_ids]
+    
+    def _is_regular_dataset(config: dict) -> bool:
+        """Check if config is a regular dataset (has 'type' or 'name' key)."""
+        return 'type' in config or 'name' in config or 'class' in config
+    
+    def _extract_merged_config(config: dict):
+        """Extract merged_id and sub_configs from merged dataset config.
+        
+        Supports format: merged_id: [{type:..., name:..., args:...}, ...]
+        """
+        # Find the merged_id key (should be the only key, or the key that has a list value)
+        for key, value in config.items():
+            if isinstance(value, list) and len(value) > 0:
+                # Check if value is a list of dataset configs
+                if isinstance(value[0], dict) and ('type' in value[0] or 'name' in value[0]):
+                    return key, value
+        return None, None
+    
+    for config in datasets_config:
+        # Check if this is a regular dataset (has 'type', 'name', or 'class' key)
+        if _is_regular_dataset(config):
+            # Regular dataset
+            dataset = _create_dataset_from_config(config, args)
+            datasets.append(dataset)
+            flattened_configs.append(config)
+        else:
+            # This should be a merged dataset: merged_id: [sub_configs...]
+            merged_id, sub_configs = _extract_merged_config(config)
+            
+            if merged_id is None or not sub_configs:
+                raise ValueError(
+                    f"Invalid dataset config format: {config}\n"
+                    f"Expected either:\n"
+                    f"  - Regular dataset: {{type: ..., name: ..., args: ...}}\n"
+                    f"  - Merged dataset: {{merged_id: [{{type:..., name:..., args:...}}, ...]}}"
+                )
+            
+            logger.info(f"Creating merged dataset: {merged_id}")
+            
+            # Create sub-datasets
+            sub_datasets = []
+            source_ids = []
+            for sub_config in sub_configs:
+                sub_dataset = _create_dataset_from_config(sub_config, args)
+                sub_datasets.append(sub_dataset)
+                source_ids.append(sub_dataset.dataset_id)
+                flattened_configs.append(sub_config)
+            
+            # Create merged dataset
+            merged_dataset = MergedDataset(sub_datasets, merged_id)
+            datasets.append(merged_dataset)
+            merge_info[merged_id] = source_ids
+            
+            # Add a config entry for the merged dataset itself
+            merged_config = {
+                'name': merged_id,
+                'type': 'MergedDataset',
+                '_is_merged': True,
+                '_source_datasets': source_ids,
+            }
+            flattened_configs.append(merged_config)
+    
+    return datasets, flattened_configs, merge_info
+
+
 def _create_vqa_dataset_from_config(dataset_config: dict, args):
     """Create a VQA dataset instance from configuration
     
@@ -468,6 +554,54 @@ def _create_vqa_dataset_from_config(dataset_config: dict, args):
         return dataset
     except Exception as e:
         raise RuntimeError(f"Failed to create VQA dataset {class_path} with args {constructor_args}: {e}")
+
+
+def _create_normalizer_from_stats(normalizer_class, merged_stats: dict, dataset_id: str, datatype: str):
+    """Create a normalizer from pre-computed merged statistics.
+    
+    This is used for merged datasets where stats are computed by merging
+    sub-dataset statistics rather than from raw data.
+    
+    Args:
+        normalizer_class: The normalizer class to instantiate
+        merged_stats: Merged statistics dictionary
+        dataset_id: ID for this merged dataset
+        datatype: 'action' or 'state'
+    
+    Returns:
+        Normalizer instance with pre-loaded merged stats
+    """
+    import pickle
+    import os
+    
+    # Get cache directory
+    cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Extract ctrl_space and ctrl_type from stats or use defaults
+    ctrl_space = merged_stats.get('ctrl_space', 'ee')
+    ctrl_type = merged_stats.get('ctrl_type', 'delta')
+    
+    # Save merged stats to cache so normalizer can load them
+    stats_filename = f"{dataset_id}_stats_{ctrl_space}_{ctrl_type}.pkl"
+    stats_path = os.path.join(cache_dir, stats_filename)
+    
+    # Save merged stats
+    with open(stats_path, 'wb') as f:
+        pickle.dump(merged_stats, f)
+    
+    logger.info(f"Saved merged stats to: {stats_path}")
+    
+    # Create normalizer by loading from the saved stats
+    # Pass a dummy string as dataset to trigger load mode
+    normalizer = normalizer_class(
+        dataset=cache_dir,  # Trigger load mode
+        dataset_name=dataset_id,
+        ctrl_type=ctrl_type,
+        ctrl_space=ctrl_space,
+    )
+    
+    return normalizer
 
 
 def _wrap_vqa_datasets(vqa_datasets, args, task_config):
@@ -533,8 +667,22 @@ def _wrap_vqa_datasets(vqa_datasets, args, task_config):
     return wrapped_datasets
 
 
-def _normalize_datasets(datasets, args, task_config, save_norm=True):
+def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=None):
+    """Normalize datasets with support for merged datasets.
+    
+    Args:
+        datasets: List of datasets (may include MergedDataset instances)
+        args: Training arguments
+        task_config: Task configuration
+        save_norm: Whether to save normalization metadata
+        merge_info: Dict mapping merged_id -> [source_dataset_ids] for merged datasets
+    """
+    from .normalize import merge_stats
+    from .dataset_wrappers import MergedDataset
+    
     datasets_config = task_config['datasets']
+    merge_info = merge_info or {}
+    
     # Get normalization types
     action_normtype = getattr(args, 'action_normalize', task_config.get('action_normalize', 'zscore'))
     state_normtype = getattr(args, 'state_normalize', task_config.get('state_normalize', 'zscore'))
@@ -545,34 +693,81 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True):
     action_normalizers = {}
     state_normalizers = {}
     
-    # Use dataset.dataset_id as the key for normalizers instead of dataset_dir
-    # Also extract mask information from dataset_config
-    for dataset, dataset_config in zip(datasets, datasets_config):
-        dataset_id = dataset.dataset_id  # Use the dataset_id attribute added in _create_dataset_from_config
+    # For merged datasets, we need to:
+    # 1. Compute stats for each sub-dataset first
+    # 2. Merge the stats
+    # 3. Create a normalizer with the merged stats
+    
+    for dataset in datasets:
+        dataset_id = dataset.dataset_id
         
-        # Extract mask information from dataset config (same level as args)
-        action_norm_mask = dataset_config.get('action_norm_mask', None)
-        state_norm_mask = dataset_config.get('state_norm_mask', None)
-        
-        # Log mask configuration for transparency
-        if action_norm_mask is not None or state_norm_mask is not None:
-            logger.info(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
-            if action_norm_mask is not None:
-                logger.info(f"  - action_norm_mask: {action_norm_mask}")
-            if state_norm_mask is not None:
-                logger.info(f"  - state_norm_mask: {state_norm_mask}")
-        
-        # Create normalizers with masks
-        action_normalizers[dataset_id] = action_normalizer_class(
-            dataset, 
-            dataset_name=dataset_id, 
-            mask=action_norm_mask
-        )
-        state_normalizers[dataset_id] = state_normalizer_class(
-            dataset, 
-            dataset_name=dataset_id, 
-            mask=state_norm_mask
-        )
+        # Check if this is a merged dataset
+        if isinstance(dataset, MergedDataset):
+            logger.info(f"Processing merged dataset: {dataset_id}")
+            
+            # First, compute stats for each sub-dataset
+            sub_stats_list = []
+            sub_normalizers = []
+            
+            for sub_ds in dataset.datasets:
+                sub_id = sub_ds.dataset_id
+                logger.info(f"  Computing stats for sub-dataset: {sub_id}")
+                
+                # Create temporary normalizer to compute stats
+                temp_normalizer = action_normalizer_class(
+                    sub_ds,
+                    dataset_name=sub_id,
+                )
+                sub_stats_list.append(temp_normalizer.all_stats)
+                sub_normalizers.append(temp_normalizer)
+            
+            # Merge the stats
+            logger.info(f"  Merging stats from {len(sub_stats_list)} sub-datasets...")
+            merged_stats = merge_stats(sub_stats_list, keys=['state', 'action'])
+            logger.info(f"  Merged stats: {merged_stats.get('num_transitions', 0)} total transitions")
+            
+            # Create normalizers with merged stats
+            # We need to create normalizers that use the merged stats
+            action_normalizers[dataset_id] = _create_normalizer_from_stats(
+                action_normalizer_class, merged_stats, dataset_id, 'action'
+            )
+            state_normalizers[dataset_id] = _create_normalizer_from_stats(
+                state_normalizer_class, merged_stats, dataset_id, 'state'
+            )
+        else:
+            # Regular dataset - find matching config
+            dataset_config = None
+            for cfg in datasets_config:
+                if cfg.get('name') == dataset_id:
+                    dataset_config = cfg
+                    break
+            
+            if dataset_config is None:
+                dataset_config = {}
+            
+            # Extract mask information from dataset config
+            action_norm_mask = dataset_config.get('action_norm_mask', None)
+            state_norm_mask = dataset_config.get('state_norm_mask', None)
+            
+            # Log mask configuration for transparency
+            if action_norm_mask is not None or state_norm_mask is not None:
+                logger.info(f"Creating normalizers with mask configuration for dataset '{dataset_id}':")
+                if action_norm_mask is not None:
+                    logger.info(f"  - action_norm_mask: {action_norm_mask}")
+                if state_norm_mask is not None:
+                    logger.info(f"  - state_norm_mask: {state_norm_mask}")
+            
+            # Create normalizers with masks
+            action_normalizers[dataset_id] = action_normalizer_class(
+                dataset, 
+                dataset_name=dataset_id, 
+                mask=action_norm_mask
+            )
+            state_normalizers[dataset_id] = state_normalizer_class(
+                dataset, 
+                dataset_name=dataset_id, 
+                mask=state_norm_mask
+            )
     
     # Save normalization metadata
     if save_norm:
@@ -784,47 +979,57 @@ def _maybe_assign_weights_to_datasets(datasets, task_config):
 def load_data(args, task_config, save_norm=True):
     """Load datasets with flexible configuration support
     
-    Required format:
+    Supports both regular datasets and merged datasets.
+    
+    Regular format:
     ```yaml
     datasets:
       - name: "main_dataset"
-        class: "data_utils.datasets.EpisodicDataset"
+        type: "data_utils.datasets.EpisodicDataset"
         args:
           dataset_path_list: ['path1']
           camera_names: ['primary']
           chunk_size: 64
-          ctrl_space: 'ee'
-          ctrl_type: 'delta'
-      - name: "auxiliary_dataset"  
-        class: "data_utils.datasets.rlds_wrapper.WrappedTFDSDataset"
-        args:
-          dataset_path_list: ['path2']
-          camera_names: ['primary']
-          # ... custom args for this specific dataset
+    ```
+    
+    Merged format (combines multiple datasets with merged normalization):
+    ```yaml
+    datasets:
+      - merged: "transfer_cube_all"  # merged_id becomes the dataset_id
+        datasets:
+          - name: "sim_transfer_cube_scripted"
+            type: "data_utils.datasets.AlohaSimDataset"
+            args: {...}
+          - name: "sim_transfer_cube_human"
+            type: "data_utils.datasets.AlohaSimDataset"
+            args: {...}
+      - name: "other_dataset"  # regular dataset alongside merged
+        type: "data_utils.datasets.AlohaSimDataset"
+        args: {...}
     ```
     """
     
     # Ensure new flexible format is used
     if 'datasets' not in task_config and 'vqa' not in task_config:
         raise ValueError("There is not dataset in task config")
+    
+    merge_info = {}
+    
     if 'datasets' in task_config:
         datasets_config = task_config['datasets']
-        # Create datasets
+        # Create datasets (with merged dataset support)
         rank = dist.get_rank() if is_distributed() else 0
         datasets = []
+        
         if rank == 0:
-            for dataset_config in datasets_config:
-                dataset = _create_dataset_from_config(dataset_config, args)
-                datasets.append(dataset)
+            datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
         if is_distributed():
             dist.barrier()
         if rank != 0:
-            for dataset_config in datasets_config:
-                dataset = _create_dataset_from_config(dataset_config, args)
-                datasets.append(dataset)
+            datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
         
-        # Normalize datasets
-        datasets = _normalize_datasets(datasets, args, task_config, save_norm)
+        # Normalize datasets (with merged stats support)
+        datasets = _normalize_datasets(datasets, args, task_config, save_norm, merge_info)
 
         # Apply transforms to datasets
         datasets = _apply_transforms_to_datasets(datasets, args, task_config)

@@ -90,7 +90,6 @@ class LiberoEnv(MetaEnv):
             # [dx, dy, dz, droll, dpitch, dyaw, gripper]
             self.min_action = np.array([-1.0] * 7, dtype=np.float32)
             self.max_action = np.array([1.0] * 7, dtype=np.float32)
-        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
         
         return env
         

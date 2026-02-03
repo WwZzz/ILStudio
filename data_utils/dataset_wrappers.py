@@ -5,8 +5,9 @@ This module provides wrapper classes that apply normalization to dataset outputs
 supporting both map-style and iterable datasets.
 """
 import torch
-from torch.utils.data import Dataset, IterableDataset
-from typing import Dict, Optional
+from torch.utils.data import Dataset, IterableDataset, ConcatDataset
+from typing import Dict, Optional, List
+from loguru import logger
 # TensorFlow imports for RLDS dataset handling
 try:
     import tensorflow as tf
@@ -480,3 +481,151 @@ class MapToIterableDataset(IterableDataset):
     def __iter__(self):
         for idx in range(len(self.dataset)):
             yield self.dataset[idx]
+
+
+class MergedDataset(Dataset):
+    """
+    A dataset that merges multiple datasets into a single dataset.
+    
+    This is different from ConcatDataset in that it:
+    1. Has a single dataset_id for identification
+    2. Supports merged normalization statistics
+    3. Maintains a consistent interface for the merged group
+    
+    The merged dataset concatenates all underlying datasets and provides
+    a unified view with a single normalizer computed from merged statistics.
+    
+    Args:
+        datasets: List of datasets to merge
+        merged_id: Unique identifier for this merged dataset
+    
+    Example config:
+        ```yaml
+        datasets:
+          - merged: transfer_cube_all  # merged_id
+              - type: AlohaSimDataset
+                name: sim_transfer_cube_scripted
+                args: {...}
+              - type: AlohaSimDataset
+                name: sim_transfer_cube_human
+                args: {...}
+        ```
+    """
+    
+    def __init__(self, datasets: List[Dataset], merged_id: str):
+        if not datasets:
+            raise ValueError("datasets list cannot be empty")
+        
+        self.datasets = datasets
+        self.merged_id = merged_id
+        
+        # Set dataset_id for normalizer identification
+        self.dataset_id = merged_id
+        self.name = merged_id
+        
+        # Compute cumulative lengths for indexing
+        self._lengths = [len(ds) for ds in datasets]
+        self._cumulative_lengths = []
+        cumsum = 0
+        for length in self._lengths:
+            self._cumulative_lengths.append(cumsum)
+            cumsum += length
+        self._total_length = cumsum
+        
+        # Collect source dataset info for debugging
+        self._source_datasets = []
+        for ds in datasets:
+            ds_id = getattr(ds, 'dataset_id', getattr(ds, 'name', str(type(ds).__name__)))
+            self._source_datasets.append(ds_id)
+        
+        logger.info(f"Created MergedDataset '{merged_id}' with {len(datasets)} datasets, "
+                    f"total {self._total_length} samples")
+        logger.info(f"  Source datasets: {self._source_datasets}")
+        logger.info(f"  Sample counts: {self._lengths}")
+    
+    def __len__(self) -> int:
+        return self._total_length
+    
+    def __getitem__(self, idx: int) -> dict:
+        if idx < 0:
+            idx = self._total_length + idx
+        if idx < 0 or idx >= self._total_length:
+            raise IndexError(f"Index {idx} out of range for MergedDataset of size {self._total_length}")
+        
+        # Find which dataset this index belongs to
+        for i, (ds, cumlen) in enumerate(zip(self.datasets, self._cumulative_lengths)):
+            if idx < cumlen + self._lengths[i]:
+                local_idx = idx - cumlen
+                return ds[local_idx]
+        
+        raise IndexError(f"Index {idx} could not be mapped to any dataset")
+    
+    def get_dataset_dir(self) -> str:
+        """Return the merged_id as the dataset directory for compatibility."""
+        return self.merged_id
+    
+    @property
+    def num_episodes(self) -> int:
+        """Return total number of episodes if all datasets have this attribute."""
+        if all(hasattr(ds, 'num_episodes') for ds in self.datasets):
+            return sum(ds.num_episodes for ds in self.datasets)
+        return 0
+    
+    def extract_from_episode(self, episode_idx: int, keys: list):
+        """
+        Extract data from a specific episode across all merged datasets.
+        
+        This method maps the global episode index to the correct dataset.
+        """
+        # Map episode_idx to the correct dataset
+        cumulative_episodes = 0
+        for ds in self.datasets:
+            if not hasattr(ds, 'num_episodes'):
+                raise AttributeError(f"Dataset {getattr(ds, 'dataset_id', 'unknown')} "
+                                     "does not have 'num_episodes' attribute")
+            
+            ds_num_episodes = ds.num_episodes
+            if episode_idx < cumulative_episodes + ds_num_episodes:
+                local_episode_idx = episode_idx - cumulative_episodes
+                return ds.extract_from_episode(local_episode_idx, keys)
+            cumulative_episodes += ds_num_episodes
+        
+        raise IndexError(f"Episode index {episode_idx} out of range")
+    
+    def get_dataset_statistics(self) -> dict:
+        """Get merged statistics from all sub-datasets.
+        
+        This method collects statistics from each sub-dataset and merges them
+        using the merge_stats function. This ensures accurate statistics for
+        merged datasets, especially when sub-datasets have pre-computed stats
+        (e.g., LeRobot datasets with stats.json).
+        """
+        from .normalize import merge_stats
+        
+        # Collect statistics from each sub-dataset
+        sub_stats_list = []
+        for ds in self.datasets:
+            if hasattr(ds, 'get_dataset_statistics') and callable(getattr(ds, 'get_dataset_statistics')):
+                stats = ds.get_dataset_statistics()
+            else:
+                # Fallback: compute stats using normalizer
+                from .normalize import BaseNormalizer
+                normalizer = BaseNormalizer(ds, dataset_name=getattr(ds, 'dataset_id', 'unknown'))
+                stats = normalizer.all_stats
+            sub_stats_list.append(stats)
+        
+        # Merge statistics
+        merged_stats = merge_stats(sub_stats_list, keys=['state', 'action'])
+        return merged_stats
+    
+    def __getattr__(self, name):
+        """Forward unknown attributes to the first dataset for compatibility."""
+        if name in ['datasets', 'merged_id', 'dataset_id', 'name', 
+                    '_lengths', '_cumulative_lengths', '_total_length', '_source_datasets',
+                    'get_dataset_statistics']:
+            return object.__getattribute__(self, name)
+        
+        # Try to get from first dataset
+        if self.datasets:
+            return getattr(self.datasets[0], name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")

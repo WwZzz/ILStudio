@@ -23,10 +23,36 @@ class ConfigLoader:
             self._overrides = parse_overrides(self.unknown_args or [])
 
     @staticmethod
+    def _is_merged_dataset_config(cfg: Dict[str, Any]) -> bool:
+        """Check if config is a merged dataset config.
+        
+        Merged dataset format: {merged_id: [{type:..., name:..., args:...}, ...]}
+        
+        A config is considered merged if:
+        1. It has no 'type', 'name', or 'class' keys (not a regular dataset)
+        2. It has exactly one key whose value is a list
+        3. That list contains dataset configs (dicts with 'type' or 'name')
+        """
+        # Regular dataset configs have these keys
+        if 'type' in cfg or 'name' in cfg or 'class' in cfg:
+            return False
+        
+        # Check for merged format: single key with list value
+        for key, value in cfg.items():
+            if isinstance(value, list) and len(value) > 0:
+                # Check if the list contains dataset configs
+                if isinstance(value[0], dict) and ('type' in value[0] or 'name' in value[0]):
+                    return True
+        
+        return False
+    
+    @staticmethod
     def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
         Normalize config to unified format (type, name, args).
         Supports both old and new formats for backward compatibility.
+        
+        Also supports merged dataset format: {merged_id: [{type:..., name:..., args:...}, ...]}
         
         Args:
             cfg: Original config dictionary
@@ -35,6 +61,12 @@ class ConfigLoader:
             Normalized config dictionary with type, name, and args
         """
         if not isinstance(cfg, dict):
+            return cfg
+        
+        # Check if this is a merged dataset config: {merged_id: [sub_configs...]}
+        # A merged config has exactly one key whose value is a list of dataset configs
+        if ConfigLoader._is_merged_dataset_config(cfg):
+            # Don't normalize merged dataset configs, return as-is
             return cfg
         
         normalized = {}
@@ -339,7 +371,21 @@ class ConfigLoader:
         policy_chunk_size = model_args.get('chunk_size') or policy_config.get('chunk_size')
         if policy_chunk_size is not None and 'datasets' in task_config:
             for dataset in task_config['datasets']:
-                if 'args' in dataset and 'chunk_size' in dataset['args']:
+                # Check if this is a merged dataset: {merged_id: [sub_configs...]}
+                if ConfigLoader._is_merged_dataset_config(dataset):
+                    # Handle merged dataset: recursively override chunk_size in sub-datasets
+                    for merged_id, sub_configs in dataset.items():
+                        if isinstance(sub_configs, list):
+                            for sub_config in sub_configs:
+                                if isinstance(sub_config, dict) and 'args' in sub_config:
+                                    if 'chunk_size' in sub_config['args']:
+                                        task_chunk_size = sub_config['args']['chunk_size']
+                                        if task_chunk_size != policy_chunk_size:
+                                            sub_name = sub_config.get('name', 'unnamed')
+                                            logger.warning(f"Config Override: chunk_size = {policy_chunk_size} (policy) overrides {task_chunk_size} (task.datasets['{merged_id}']['{sub_name}'])")
+                                            sub_config['args']['chunk_size'] = policy_chunk_size
+                elif 'args' in dataset and 'chunk_size' in dataset['args']:
+                    # Regular dataset format
                     task_chunk_size = dataset['args']['chunk_size']
                     if task_chunk_size != policy_chunk_size:
                         logger.warning(f"Config Override: chunk_size = {policy_chunk_size} (policy) overrides {task_chunk_size} (task.datasets['{dataset.get('name', 'unnamed')}'])")

@@ -85,7 +85,6 @@ class AlohaSimEnv(MetaEnv):
         action_spec = env.action_spec()
         self.min_action = action_spec.minimum
         self.max_action = action_spec.maximum
-        logger.info(f"action_spec: min_action{self.min_action}, max_action{self.max_action}")
         return env
         
     def meta2act(self, maction: MetaAction):

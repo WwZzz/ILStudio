@@ -180,8 +180,6 @@ class RLBenchEnv(MetaEnv):
             self.min_action = None
             self.max_action = None
         
-        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
-        
         return env
     
     def _get_task_class(self, task_name):

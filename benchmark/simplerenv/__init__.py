@@ -51,8 +51,6 @@ class SimplerEnv(MetaEnv):
             self.min_action = None
             self.max_action = None
         
-        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
-        
         return env
         
     def meta2act(self, maction: MetaAction):

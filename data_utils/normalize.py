@@ -94,8 +94,263 @@ from loguru import logger
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
+
+class RunningStats:
+    """Compute statistics in a streaming/running manner using Welford's algorithm.
+    
+    This class enables memory-efficient statistics computation for large datasets
+    by processing data incrementally without storing all samples.
+    
+    Also tracks E[X²] (square_mean) for cross-dataset aggregation:
+        Combined mean = (n1*mean1 + n2*mean2) / (n1 + n2)
+        Combined E[X²] = (n1*square_mean1 + n2*square_mean2) / (n1 + n2)
+        Combined std = sqrt(Combined E[X²] - Combined mean²)
+    """
+    
+    def __init__(self, shape: tuple):
+        """Initialize running statistics tracker.
+        
+        Args:
+            shape: Shape of each data sample (excluding batch dimension)
+        """
+        self.shape = shape
+        self.n = 0
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.M2 = np.zeros(shape, dtype=np.float64)  # Sum of squared differences from mean
+        self.sum_squares = np.zeros(shape, dtype=np.float64)  # Sum of x^2 for square_mean
+        self.min_val = np.full(shape, np.inf, dtype=np.float64)
+        self.max_val = np.full(shape, -np.inf, dtype=np.float64)
+        
+        # Reservoir sampling for percentiles
+        self.reservoir_size = 10000
+        self.reservoir = []
+        self.seen = 0
+    
+    def update(self, x: np.ndarray):
+        """Update statistics with a new sample or batch of samples.
+        
+        Args:
+            x: Data array. Can be single sample of shape `self.shape` or
+               batch of shape (batch_size, *self.shape)
+        """
+        x = np.asarray(x, dtype=np.float64)
+        
+        # Handle batch dimension
+        if x.shape == self.shape:
+            x = x.reshape(1, *self.shape)
+        
+        batch_size = x.shape[0]
+        
+        for i in range(batch_size):
+            sample = x[i]
+            self.n += 1
+            
+            # Welford's algorithm for mean and variance
+            delta = sample - self.mean
+            self.mean += delta / self.n
+            delta2 = sample - self.mean
+            self.M2 += delta * delta2
+            
+            # Track sum of squares for square_mean
+            self.sum_squares += sample ** 2
+            
+            # Min/max
+            self.min_val = np.minimum(self.min_val, sample)
+            self.max_val = np.maximum(self.max_val, sample)
+            
+            # Reservoir sampling for percentiles
+            self.seen += 1
+            if len(self.reservoir) < self.reservoir_size:
+                self.reservoir.append(sample.copy())
+            else:
+                # Replace with probability reservoir_size/seen
+                j = np.random.randint(0, self.seen)
+                if j < self.reservoir_size:
+                    self.reservoir[j] = sample.copy()
+    
+    def get_stats(self) -> dict:
+        """Get computed statistics.
+        
+        Returns:
+            Dictionary with keys: mean, square_mean, std, min, max, q01, q99, count
+        """
+        if self.n == 0:
+            raise ValueError("No data has been added")
+        
+        mean = self.mean.astype(np.float32)
+        square_mean = (self.sum_squares / self.n).astype(np.float32)
+        
+        # Variance from M2 (Welford's algorithm)
+        variance = self.M2 / self.n
+        std = np.sqrt(np.maximum(variance, 0)).astype(np.float32)
+        
+        # Percentiles from reservoir
+        if self.reservoir:
+            reservoir_array = np.array(self.reservoir)
+            q01 = np.percentile(reservoir_array, 1, axis=0).astype(np.float32)
+            q99 = np.percentile(reservoir_array, 99, axis=0).astype(np.float32)
+        else:
+            q01 = mean.copy()
+            q99 = mean.copy()
+        
+        return {
+            "mean": mean,
+            "square_mean": square_mean,
+            "std": std,
+            "min": self.min_val.astype(np.float32),
+            "max": self.max_val.astype(np.float32),
+            "q01": q01,
+            "q99": q99,
+            "count": np.array(self.n, dtype=np.int64),
+        }
+
 def str2hash(s: str):
     return str(hashlib.md5(s.encode()).hexdigest())
+
+
+def merge_stats(stats_list: list, keys: list = None) -> dict:
+    """Merge statistics from multiple datasets using count-weighted averaging.
+    
+    This function combines statistics from multiple datasets into a single set
+    of statistics, using the sample counts for weighted averaging.
+    
+    For merging to work correctly, each stats dict must contain:
+    - 'count' or be available in parent dict as 'num_transitions'
+    - 'mean', 'square_mean', 'std', 'min', 'max', 'q01', 'q99'
+    
+    The merge formulas are:
+    - Combined count: n = n1 + n2 + ...
+    - Combined mean: E[X] = (n1*mean1 + n2*mean2 + ...) / n
+    - Combined E[X²]: E[X²] = (n1*square_mean1 + n2*square_mean2 + ...) / n
+    - Combined std: std = sqrt(E[X²] - E[X]²)
+    - Combined min: min of all mins
+    - Combined max: max of all maxs
+    - Combined q01/q99: weighted average (approximation)
+    
+    Args:
+        stats_list: List of stats dictionaries. Each dict should have format:
+            {
+                'num_transitions': int,  # or 'count' inside each key's stats
+                'state': {'mean': ..., 'square_mean': ..., 'std': ..., ...},
+                'action': {'mean': ..., 'square_mean': ..., 'std': ..., ...},
+            }
+        keys: Optional list of keys to merge (e.g., ['state', 'action']).
+              If None, auto-detect from first stats dict.
+    
+    Returns:
+        Merged stats dictionary with the same structure.
+    """
+    if not stats_list:
+        raise ValueError("stats_list cannot be empty")
+    
+    if len(stats_list) == 1:
+        return stats_list[0]
+    
+    # Auto-detect keys if not provided
+    if keys is None:
+        keys = [k for k in stats_list[0].keys() 
+                if isinstance(stats_list[0][k], dict) and 'mean' in stats_list[0][k]]
+    
+    merged = {}
+    total_count = 0
+    
+    # First pass: collect counts
+    counts = []
+    for stats in stats_list:
+        if 'num_transitions' in stats:
+            count = stats['num_transitions']
+        elif keys and keys[0] in stats and 'count' in stats[keys[0]]:
+            count = int(stats[keys[0]]['count'])
+        else:
+            raise ValueError("Stats must contain 'num_transitions' or 'count' for merging")
+        counts.append(count)
+        total_count += count
+    
+    merged['num_transitions'] = total_count
+    
+    # Merge num_trajectories if present
+    if all('num_trajectories' in s for s in stats_list):
+        merged['num_trajectories'] = sum(s['num_trajectories'] for s in stats_list)
+    
+    # Second pass: merge statistics for each key
+    for key in keys:
+        key_stats_list = []
+        for stats, count in zip(stats_list, counts):
+            if key not in stats:
+                raise ValueError(f"Key '{key}' not found in stats")
+            key_stats_list.append((stats[key], count))
+        
+        merged[key] = _merge_key_stats(key_stats_list, total_count)
+    
+    return merged
+
+
+def _merge_key_stats(key_stats_list: list, total_count: int) -> dict:
+    """Merge statistics for a single key (e.g., 'state' or 'action').
+    
+    Args:
+        key_stats_list: List of (stats_dict, count) tuples
+        total_count: Total sample count
+    
+    Returns:
+        Merged stats dict for this key
+    """
+    if not key_stats_list:
+        raise ValueError("key_stats_list cannot be empty")
+    
+    # Get shape from first stats
+    first_stats = key_stats_list[0][0]
+    shape = first_stats['mean'].shape
+    
+    # Initialize accumulators
+    weighted_mean = np.zeros(shape, dtype=np.float64)
+    weighted_square_mean = np.zeros(shape, dtype=np.float64)
+    min_val = np.full(shape, np.inf, dtype=np.float64)
+    max_val = np.full(shape, -np.inf, dtype=np.float64)
+    weighted_q01 = np.zeros(shape, dtype=np.float64)
+    weighted_q99 = np.zeros(shape, dtype=np.float64)
+    
+    for stats, count in key_stats_list:
+        weight = count / total_count
+        
+        # Weighted mean
+        weighted_mean += weight * stats['mean'].astype(np.float64)
+        
+        # Weighted square_mean (E[X²])
+        if 'square_mean' in stats:
+            weighted_square_mean += weight * stats['square_mean'].astype(np.float64)
+        else:
+            # Fallback: compute from mean and std
+            # E[X²] = Var(X) + E[X]² = std² + mean²
+            mean = stats['mean'].astype(np.float64)
+            std = stats['std'].astype(np.float64)
+            square_mean = std ** 2 + mean ** 2
+            weighted_square_mean += weight * square_mean
+        
+        # Min/max: take extremes
+        min_val = np.minimum(min_val, stats['min'].astype(np.float64))
+        max_val = np.maximum(max_val, stats['max'].astype(np.float64))
+        
+        # Percentiles: weighted average (approximation)
+        if 'q01' in stats:
+            weighted_q01 += weight * stats['q01'].astype(np.float64)
+        if 'q99' in stats:
+            weighted_q99 += weight * stats['q99'].astype(np.float64)
+    
+    # Compute std from E[X²] and E[X]
+    # Var(X) = E[X²] - E[X]²
+    variance = weighted_square_mean - weighted_mean ** 2
+    std = np.sqrt(np.maximum(variance, 0))
+    
+    return {
+        'mean': weighted_mean.astype(np.float32),
+        'square_mean': weighted_square_mean.astype(np.float32),
+        'std': std.astype(np.float32),
+        'min': min_val.astype(np.float32),
+        'max': max_val.astype(np.float32),
+        'q01': weighted_q01.astype(np.float32),
+        'q99': weighted_q99.astype(np.float32),
+    }
 
 def find_all_hdf5(dataset_dir):
     """
@@ -197,8 +452,23 @@ class BaseNormalizer:
         # return False
 
     def compute_stats_for_array(self, data_k):
+        """Compute statistics for an array.
+        
+        Statistics include:
+        - mean: E[X] - first moment
+        - square_mean: E[X²] - second raw moment (for aggregating std across datasets)
+        - std: standard deviation
+        - max, min: range statistics
+        - q01, q99: percentile statistics
+        
+        Note: square_mean enables aggregation of statistics across multiple datasets:
+            Combined variance = E[X²]_combined - E[X]_combined²
+            where E[X]_combined = (n1*E[X]_1 + n2*E[X]_2) / (n1 + n2)
+            and E[X²]_combined = (n1*E[X²]_1 + n2*E[X²]_2) / (n1 + n2)
+        """
         return {
             "mean": data_k.mean(0),
+            "square_mean": (data_k ** 2).mean(0),  # E[X²] for aggregating std
             "std": data_k.std(0),
             "max": data_k.max(0),
             "min": data_k.min(0),
@@ -207,7 +477,10 @@ class BaseNormalizer:
         }
     
     def compute_and_save_stats(self):
-        """Compute and save normalization statistics
+        """Compute and save normalization statistics using streaming computation.
+        
+        Uses RunningStats for memory-efficient computation - processes data
+        incrementally without storing all samples in memory.
         
         Supports multiple dataset types with flexible data extraction:
         1. Episodic datasets with num_episodes and extract_from_episode
@@ -215,8 +488,9 @@ class BaseNormalizer:
         3. Map-style datasets with __len__ and __getitem__
         4. Iterable datasets
         """
-        all_data = defaultdict(list)
         num_trajectories = None
+        running_stats = {}  # key -> RunningStats
+        
         # Method 0: Check if dataset has get_dataset_statistics()
         if hasattr(self.dataset, 'get_dataset_statistics') and callable(getattr(self.dataset, 'get_dataset_statistics')):
             logger.info(f"Using get_dataset_statistics() method")
@@ -224,32 +498,63 @@ class BaseNormalizer:
             self.save_stats(all_stats)
             return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
         
+        def _to_numpy(value):
+            """Convert value to numpy array."""
+            if hasattr(value, 'cpu'):
+                return value.cpu().numpy()
+            elif not isinstance(value, np.ndarray):
+                return np.array(value)
+            return value
+        
+        def _update_running_stats(key: str, value: np.ndarray):
+            """Update running stats for a key, initializing if needed."""
+            value = _to_numpy(value)
+            # Flatten batch dimension if present for shape detection
+            if len(value.shape) >= 2:
+                sample_shape = value.shape[1:]  # (batch, *shape) -> (*shape,)
+            else:
+                sample_shape = value.shape
+            
+            if key not in running_stats:
+                running_stats[key] = RunningStats(sample_shape)
+            
+            # Update with batch
+            running_stats[key].update(value)
+        
         # Method 1: Check if dataset has num_episodes and extract_from_episode
+        use_running = False
         if hasattr(self.dataset, 'num_episodes') and hasattr(self.dataset, 'extract_from_episode'):
-            logger.info(f"Using episodic extraction: {self.dataset.num_episodes} episodes")
+            logger.info(f"Using episodic extraction (streaming): {self.dataset.num_episodes} episodes")
             num_trajectories = self.dataset.num_episodes
+            use_running = True
             for idx in range(self.dataset.num_episodes):
                 res_each = self.dataset.extract_from_episode(idx, ['state', 'action'])
                 for k in res_each:
-                    all_data[k].append(res_each[k])
+                    _update_running_stats(k, res_each[k])
+                if (idx + 1) % 100 == 0:
+                    logger.info(f"  Processed {idx + 1}/{self.dataset.num_episodes} episodes...")
         
         # Method 2: Check if dataset has extract_all() method
         elif hasattr(self.dataset, 'extract_all') and callable(getattr(self.dataset, 'extract_all')):
-            logger.info("Using extract_all() method")
+            logger.info("Using extract_all() method (streaming)")
             try:
                 extracted = self.dataset.extract_all(['state', 'action'])
+                use_running = True
                 for k, v in extracted.items():
-                    # Assume extract_all returns already concatenated arrays
-                    if isinstance(v, (list, tuple)):
-                        all_data[k] = [v]
-                    else:
-                        all_data[k] = [v]
+                    v = _to_numpy(v)
+                    # Process in chunks to use running stats
+                    chunk_size = 10000
+                    sample_shape = v.shape[1:] if len(v.shape) >= 2 else v.shape
+                    if k not in running_stats:
+                        running_stats[k] = RunningStats(sample_shape)
+                    for i in range(0, len(v), chunk_size):
+                        running_stats[k].update(v[i:i+chunk_size])
             except Exception as e:
                 logger.warning(f"extract_all() failed: {e}, falling back to iteration")
-                all_data = None
+                use_running = False
         
-        # Method 3 & 4: Use DataLoader for map-style or iterable datasets
-        if not all_data or len(all_data) == 0:
+        # Method 3 & 4: Use DataLoader for map-style or iterable datasets (streaming)
+        if not use_running or len(running_stats) == 0:
             from torch.utils.data import DataLoader
             
             # Determine if it's a map-style dataset
@@ -259,7 +564,7 @@ class BaseNormalizer:
             returns_batches = self._detect_if_returns_batches()
             
             if is_map_style:
-                logger.info(f"Using DataLoader for map-style dataset: {len(self.dataset)} samples")
+                logger.info(f"Using DataLoader (streaming) for map-style dataset: {len(self.dataset)} samples")
                 batch_size = 1 if returns_batches else 32
                 if returns_batches:
                     logger.info("  Detected: Dataset returns batches, using batch_size=1")
@@ -274,7 +579,7 @@ class BaseNormalizer:
                     collate_fn=None if returns_batches else self._collate_for_stats
                 )
             else:
-                logger.info("Using DataLoader for iterable dataset")
+                logger.info("Using DataLoader (streaming) for iterable dataset")
                 batch_size = 1 if returns_batches else 32
                 if returns_batches:
                     logger.info("  Detected: Dataset returns batches, using batch_size=1")
@@ -289,7 +594,7 @@ class BaseNormalizer:
                     collate_fn=None if returns_batches else self._collate_for_stats
                 )
             
-            # Collect data from dataloader
+            # Stream data through running stats
             batch_count = 0
             for batch_or_sample in dataloader:
                 if batch_or_sample is None:
@@ -300,32 +605,12 @@ class BaseNormalizer:
                     # Dict format
                     for key in ['state', 'action']:
                         if key in batch_or_sample:
-                            value = batch_or_sample[key]
-                            # Convert to numpy if needed
-                            if hasattr(value, 'cpu'):
-                                value = value.cpu().numpy()
-                            elif not isinstance(value, np.ndarray):
-                                value = np.array(value)
-                            all_data[key].append(value)
+                            _update_running_stats(key, batch_or_sample[key])
                 
                 elif isinstance(batch_or_sample, (tuple, list)) and len(batch_or_sample) >= 2:
                     # Tuple/list format: (state, action, ...)
-                    state_val = batch_or_sample[0]
-                    action_val = batch_or_sample[1]
-                    
-                    # Convert to numpy
-                    if hasattr(state_val, 'cpu'):
-                        state_val = state_val.cpu().numpy()
-                    elif not isinstance(state_val, np.ndarray):
-                        state_val = np.array(state_val)
-                    
-                    if hasattr(action_val, 'cpu'):
-                        action_val = action_val.cpu().numpy()
-                    elif not isinstance(action_val, np.ndarray):
-                        action_val = np.array(action_val)
-                    
-                    all_data['state'].append(state_val)
-                    all_data['action'].append(action_val)
+                    _update_running_stats('state', batch_or_sample[0])
+                    _update_running_stats('action', batch_or_sample[1])
                 
                 batch_count += 1
                 if batch_count % 100 == 0:
@@ -333,26 +618,23 @@ class BaseNormalizer:
             
             logger.info(f"Total batches processed: {batch_count}")
         
-        # Concatenate all collected data
-        for k in all_data:
-            if len(all_data[k]) > 0:
-                all_data[k] = np.concatenate(all_data[k], axis=0)
-            else:
-                raise ValueError(f"No data collected for key '{k}'")
+        # Extract statistics from RunningStats
+        if len(running_stats) == 0:
+            raise ValueError("No data collected for statistics computation")
         
-        # Compute statistics
         all_stats = {}
         if num_trajectories is not None:
             all_stats['num_trajectories'] = num_trajectories
         
-        for k in all_data:
-            data_k = all_data[k]
+        for k, rs in running_stats.items():
+            stats_k = rs.get_stats()
             if 'num_transitions' not in all_stats:
-                all_stats['num_transitions'] = data_k.shape[0]
-            dict_k = {k.split('/')[-1]: self.compute_stats_for_array(data_k)}
-            all_stats.update(dict_k)
+                all_stats['num_transitions'] = int(stats_k['count'])
+            # Store stats (excluding count which is top-level)
+            key_name = k.split('/')[-1]
+            all_stats[key_name] = {kk: vv for kk, vv in stats_k.items() if kk != 'count'}
         
-        logger.info(f"Statistics computed: {all_stats.get('num_transitions', 0)} transitions")
+        logger.info(f"Statistics computed (streaming): {all_stats.get('num_transitions', 0)} transitions")
         self.save_stats(all_stats)
         return {k:{kk:np.array(vv) for kk,vv in v.items()} if isinstance(v, dict) else v for k,v in all_stats.items()}
     

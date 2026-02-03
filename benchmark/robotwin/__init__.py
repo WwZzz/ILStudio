@@ -208,7 +208,6 @@ class RoboTwinEnv(MetaEnv):
         # Get action bounds from action_space
         self.min_action = self.action_space.low
         self.max_action = self.action_space.high
-        logger.info(f"action_spec: min_action={self.min_action}, max_action={self.max_action}")
         
         # Don't call parent init as we handle env differently
         self.env = None
