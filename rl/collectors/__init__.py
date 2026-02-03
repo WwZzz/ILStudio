@@ -19,7 +19,7 @@ This __init__.py provides factory functions for creating collectors.
 
 from typing import Type, Dict, Any
 
-from .base_collector import BaseCollector
+from .base_collector import BaseCollector, DummyCollector
 
 # Registry for collector classes
 _COLLECTOR_REGISTRY: Dict[str, Type] = {}
@@ -77,6 +77,7 @@ def list_collectors() -> list:
 
 __all__ = [
     'BaseCollector',
+    'DummyCollector',
     'register_collector',
     'get_collector_class',
     'list_collectors',

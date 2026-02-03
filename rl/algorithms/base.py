@@ -14,10 +14,11 @@ import torch
 import numpy as np
 from typing import Dict, Any, Optional, Union, List, Callable
 from abc import ABC, abstractmethod
+from dataclasses import asdict, fields
 
 # Type hints for Meta classes (imported at runtime to avoid circular imports)
 from benchmark.base import MetaObs, MetaAction, MetaPolicy
-
+from rl.buffer.transition import RLTransition
 
 class BaseAlgorithm(ABC):
     """
@@ -100,76 +101,151 @@ class BaseAlgorithm(ABC):
         """
         raise NotImplementedError("Subclass should implement compute_loss if needed")
     
-    def select_action(self, obs: MetaObs, **kwargs) -> MetaAction:
+    def select_action(
+        self, 
+        obs: Union[MetaObs, List[MetaObs], np.ndarray], 
+        **kwargs
+    ) -> Union[MetaAction, List[MetaAction]]:
         """
-        Select action (optional, some algorithms may need this).
+        Select action(s) for given observation(s).
+        
+        Supports both single and batched inputs for vectorized environments.
+        The recommended way for vectorized envs is to use organized batch obs
+        (a single MetaObs with batched fields like (n_envs, state_dim)).
         
         Args:
-            obs: MetaObs format observation
-            **kwargs: Other parameters (e.g., exploration settings)
+            obs: Observation(s), can be:
+                - MetaObs: Single observation OR organized batch obs
+                  (with batched fields like state: (n_envs, state_dim))
+                - List[MetaObs] or np.ndarray: List of individual observations
+                  (will be organized into batch internally)
+            **kwargs: Other parameters (e.g., t for timestep)
         
         Returns:
-            MetaAction format action
+            MetaAction: Single action or batched action 
+                       (with action field shape (n_envs, action_dim) for batch)
+        
+        Note:
+            For vectorized environments, it's recommended to:
+            1. Use organize_obs() to convert List[MetaObs] -> batched MetaObs
+            2. Pass the organized obs to this method
+            3. The policy handles batched inference internally
         """
-        # Default implementation uses meta_policy's select_action
+        # Check if input is a list of observations that needs organizing
+        if isinstance(obs, (list, np.ndarray)) and len(obs) > 0:
+            first = obs[0] if isinstance(obs, list) else obs.flat[0]
+            if hasattr(first, '__dataclass_fields__'):  # List of MetaObs
+                # Organize into batched MetaObs
+                obs = self._organize_obs(obs)
+        
+        # Pass to meta_policy (handles both single and batch)
         return self.meta_policy.select_action(obs, **kwargs)
+    
+    def _organize_obs(self, obs_list: Union[List[MetaObs], np.ndarray]) -> MetaObs:
+        """
+        Organize list of MetaObs into a single batched MetaObs.
+        
+        Converts List[MetaObs] -> MetaObs with batched fields.
+        e.g., [MetaObs(state=(10,)), MetaObs(state=(10,))] -> MetaObs(state=(2, 10))
+        
+        Args:
+            obs_list: List or array of MetaObs objects
+        
+        Returns:
+            MetaObs with batched fields
+        """
+        if len(obs_list) == 0:
+            return None
+        
+        # Convert to list of dicts
+        obs_dicts = []
+        for o in obs_list:
+            if hasattr(o, '__dataclass_fields__'):
+                obs_dicts.append(asdict(o))
+            elif isinstance(o, dict):
+                obs_dicts.append(o)
+            else:
+                obs_dicts.append(vars(o) if hasattr(o, '__dict__') else {})
+        
+        # Stack each field
+        all_keys = list(obs_dicts[0].keys())
+        batched = {}
+        for k in all_keys:
+            values = [d[k] for d in obs_dicts]
+            if values[0] is None:
+                batched[k] = None
+            elif isinstance(values[0], np.ndarray):
+                batched[k] = np.stack(values)
+            elif isinstance(values[0], (int, float)):
+                batched[k] = np.array(values)
+            elif isinstance(values[0], str):
+                batched[k] = values  # Keep as list for strings
+            else:
+                batched[k] = values  # Keep as list for other types
+        
+        # Convert back to MetaObs
+        return MetaObs(**{k: v for k, v in batched.items() if k in [f.name for f in fields(MetaObs)]})
     
     def record_transition(
         self,
-        state: MetaObs,
-        action: MetaAction,
-        reward: float,
-        next_state: MetaObs,
-        done: bool,
-        info: Optional[Dict[str, Any]] = None,
+        transition: 'RLTransition',
         **kwargs
     ) -> None:
         """
         Record transition to replay buffer (if exists).
-        
-        Supports storing complete MetaObs and MetaAction information, plus additional custom fields.
-        If using multiple replay buffers (by environment type), selects corresponding replay
-        based on env_type in kwargs.
+
+        Args:
+            transition: RLTransition created by collector
+            **kwargs: Additional fields:
+                - env_type: Environment type (required for multi-buffer)
+        """
+        if self.replay is None:
+            raise ValueError("Replay buffer is not set")
+
+        from rl.buffer.transition import RLTransition
+        if not isinstance(transition, RLTransition):
+            raise TypeError("record_transition expects RLTransition")
+
+        env_type = kwargs.get('env_type', None)
+        if isinstance(self.replay, dict):
+            if env_type is None:
+                raise ValueError("env_type must be provided when using multiple replay buffers")
+            if env_type not in self.replay:
+                raise ValueError(f"env_type '{env_type}' not found in replay buffers")
+            target_replay = self.replay[env_type]
+        else:
+            target_replay = self.replay
+
+        target_replay.add(transition)
+    
+    def _stack_dicts(self, dict_list: List[Dict]) -> Dict:
+        """
+        Stack a list of dicts into a single dict with batched values.
         
         Args:
-            state: Current state (MetaObs, including all fields)
-            action: Action (MetaAction, including all fields)
-            reward: Reward
-            next_state: Next state (MetaObs, including all fields)
-            done: Whether episode ended
-            info: Additional information dictionary
-            **kwargs: Other custom fields, can store any additional information
-                     - env_type: Environment type identifier (if replay is Dict[str, BaseReplay])
-                     - e.g., value, log_prob, advantage, trajectory_id, etc.
+            dict_list: List of dicts with same keys
+        
+        Returns:
+            Dict with stacked values (numpy arrays where applicable)
         """
-        if self.replay is not None:
-            from dataclasses import asdict
-            
-            # Convert MetaObs and MetaAction to dict if they are dataclass instances
-            state_dict = asdict(state) if hasattr(state, '__dataclass_fields__') else state
-            action_dict = asdict(action) if hasattr(action, '__dataclass_fields__') else action
-            next_state_dict = asdict(next_state) if hasattr(next_state, '__dataclass_fields__') else next_state
-            
-            transition = {
-                'state': state_dict,
-                'action': action_dict,
-                'reward': reward,
-                'next_state': next_state_dict,
-                'done': done,
-                'info': info or {},
-                **kwargs
-            }
-            
-            env_type = kwargs.get('env_type', None)
-            
-            if isinstance(self.replay, dict):
-                if env_type is None:
-                    raise ValueError("env_type must be provided when using multiple replay buffers")
-                if env_type not in self.replay:
-                    raise ValueError(f"env_type '{env_type}' not found in replay buffers")
-                self.replay[env_type].add(transition)
+        if not dict_list:
+            return {}
+        
+        result = {}
+        for key in dict_list[0].keys():
+            values = [d.get(key) for d in dict_list]
+            if values[0] is None:
+                result[key] = None
+            elif isinstance(values[0], np.ndarray):
+                result[key] = np.stack(values)
+            elif isinstance(values[0], (int, float, bool)):
+                result[key] = np.array(values)
+            elif isinstance(values[0], str):
+                result[key] = values  # Keep strings as list
             else:
-                self.replay.add(transition)
+                result[key] = values  # Keep other types as list
+        
+        return result
     
     def get_policy(self) -> MetaPolicy:
         """Get the underlying MetaPolicy."""
@@ -226,6 +302,7 @@ if __name__ == '__main__':
     
     from benchmark.base import MetaObs, MetaAction, MetaPolicy
     from rl.buffer.base_replay import BaseReplay
+    from rl.algorithms.base import BaseAlgorithm
     from dataclasses import asdict
     
     # Simple replay buffer for testing
@@ -360,15 +437,15 @@ if __name__ == '__main__':
             raw_lang="test instruction"
         )
         
-        algorithm.record_transition(
-            state=state,
+        transition = RLTransition(
+            obs=state,
             action=action,
+            next_obs=next_state,
             reward=np.random.randn(),
-            next_state=next_state,
             done=(i == 9),
-            info={'step': i},
-            value=np.random.randn(),  # Custom field
+            info={'step': i, 'value': np.random.randn()},
         )
+        algorithm.record_transition(transition)
     print(f"   Replay buffer size: {len(algorithm.replay)}")
     
     # Update algorithm
@@ -390,16 +467,22 @@ if __name__ == '__main__':
         action = MetaAction(action=np.random.randn(7).astype(np.float32))
         next_state = MetaObs(state=np.random.randn(10).astype(np.float32))
         
-        multi_algorithm.record_transition(
-            state=state, action=action, reward=1.0,
-            next_state=next_state, done=False,
-            env_type='indoor'
+        transition = RLTransition(
+            obs=state,
+            action=action,
+            next_obs=next_state,
+            reward=1.0,
+            done=False,
         )
-        multi_algorithm.record_transition(
-            state=state, action=action, reward=0.5,
-            next_state=next_state, done=False,
-            env_type='outdoor'
+        multi_algorithm.record_transition(transition, env_type='indoor')
+        transition = RLTransition(
+            obs=state,
+            action=action,
+            next_obs=next_state,
+            reward=0.5,
+            done=False,
         )
+        multi_algorithm.record_transition(transition, env_type='outdoor')
     
     print(f"   Indoor replay size: {len(multi_algorithm.replay['indoor'])}")
     print(f"   Outdoor replay size: {len(multi_algorithm.replay['outdoor'])}")

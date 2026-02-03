@@ -77,3 +77,19 @@ __all__ = [
     'list_algorithms',
 ]
 
+
+# Auto-register built-in algorithms when this module is imported
+def _register_builtin_algorithms():
+    """Import algorithm submodules to trigger their registration."""
+    try:
+        from . import td3  # noqa: F401
+    except ImportError:
+        pass
+    # Add more algorithms here as they are implemented
+    # try:
+    #     from . import sac
+    # except ImportError:
+    #     pass
+
+
+_register_builtin_algorithms()

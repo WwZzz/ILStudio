@@ -21,8 +21,9 @@ The framework is designed to:
 Directory Structure:
     rl/
     ├── __init__.py              # This file
-    ├── base.py                  # BaseAlgorithm class
     ├── algorithms/              # RL algorithm implementations
+    │   ├── __init__.py          # Algorithm registry
+    │   └── base.py              # BaseAlgorithm class
     │   └── __init__.py          # Algorithm registry
     ├── buffer/                  # Replay buffer implementations
     │   ├── __init__.py
@@ -48,7 +49,7 @@ Directory Structure:
 """
 
 # Base classes
-from .base import BaseAlgorithm
+from .algorithms.base import BaseAlgorithm
 from .buffer import BaseReplay
 from .rewards import BaseReward
 from .collectors import BaseCollector
