@@ -145,7 +145,13 @@ def _write_episode_hdf5(
             f.create_dataset("timestamps", data=np.array(ts_list, dtype=np.float64))
 
 
-def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[dict]]:
+def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str], List[dict]]:
+    """
+    Load device configs from args.
+    
+    Returns:
+        Tuple of (all_configs, all_shm_names, teleop_configs)
+    """
     # Build ConfigLoader with CLI overrides (supports --robot.xxx and --teleop.xxx)
     cfg_loader = ConfigLoader(args=args, unknown_args=unknown_args)
     # Load configs using ConfigLoader (supports name or path)
@@ -198,19 +204,19 @@ def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[dict]]:
     # Device configs to run: teleop (optional) + robot (all devices including cameras)
     all_configs = teleop_configs + robot_configs
     all_shm_names = [get_shm_name(c) for c in all_configs]
-    return all_configs, all_shm_names
+    return all_configs, all_shm_names, teleop_configs
 
 def main():
     parser = argparse.ArgumentParser(description="Collect teleoperation data with timestamp sync")
     parser.add_argument("-r", "--robot", type=str, required=True, help="Robot config (name or path, e.g., 'so101_sim_qpos' or 'configs/robot/xxx.yaml')")
     parser.add_argument("-t", "--teleop", type=str, default="", help="Teleop config (name or path, optional)")
     parser.add_argument("-o", "--output-dir", type=str, default="data/teleop_recordings", help="Output directory for HDF5 episodes")
-    parser.add_argument("-f", "--frequency", type=float, default=30.0, help="Target max Hz; actual = min(-f, slowest sensor)")
+    parser.add_argument("-f", "--frequency", type=float, default=25.0, help="Target max Hz; actual = min(-f, slowest sensor)")
     parser.add_argument("-s", "--start-idx", type=int, default=0, help="Starting episode index")
     parser.add_argument("-v", "--visualize", action="store_true", help="Enable visualization (if robot module provides Visualizer)")
     args, unknown_args = parser.parse_known_args()
 
-    all_configs, all_shm_names = load_device_configs(args, unknown_args)
+    all_configs, all_shm_names, teleop_configs = load_device_configs(args, unknown_args)
 
     # Clean orphaned SHM
     cleanup_all_shm(all_shm_names)
@@ -280,29 +286,54 @@ def main():
             def stop_requested() -> bool:
                 return kb.get_input() is not None
 
+            recording_start_time = time.perf_counter()
+            frame_count = 0
+            last_debug_time = recording_start_time
+            debug_interval = 2.0  # Print debug info every 2 seconds
+            
             while not stop_requested():
-                frame = sync.get_synced_frame_blocking(stop_check=stop_requested)
+                loop_start = time.perf_counter()
+                frame = sync.get_synced_frame_blocking(stop_check=stop_requested, debug=False)
+                sync_time = time.perf_counter()
+                
                 if frame is None:
                     break
-                # Use max device timestamp as sync reference (when slowest device arrived)
-                ref_ts = max(
-                    dd.get("__timestamp__", 0.0) for dd in frame.values() if isinstance(dd, dict)
-                )
+                
+                # Use actual recording time as sync reference (not device timestamps)
+                # This fixes the issue where device timestamps may be stale
+                ref_ts = time.perf_counter()
                 frame["_sync_timestamp"] = ref_ts
                 frames.append(frame)
+                frame_count += 1
+                
+                # Debug output: show per-device data freshness
+                if ref_ts - last_debug_time >= debug_interval:
+                    # Calculate actual current fps
+                    elapsed_since_start = ref_ts - recording_start_time
+                    current_fps = frame_count / elapsed_since_start if elapsed_since_start > 0 else 0
+                    
+                    # Show per-device info (device count and keys)
+                    device_names = [k for k in frame.keys() if isinstance(frame.get(k), dict)]
+                    
+                    sync_delay_ms = (sync_time - loop_start) * 1000
+                    logger.info("[DEBUG] Frame {}: fps={:.1f}, sync_wait={:.1f}ms, devices=[{}]",
+                               frame_count, current_fps, sync_delay_ms, ", ".join(device_names))
+                    last_debug_time = ref_ts
+                
                 rate_limiter.sleep(args.frequency)
 
             # Consume stop Enter
             while kb.get_input() is not None:
                 pass
 
-            # Show actual frame rate
+            recording_end_time = time.perf_counter()
+            
+            # Show actual frame rate (use actual wall-clock time)
             if frames:
-                ts = [f["_sync_timestamp"] for f in frames if "_sync_timestamp" in f]
-                if len(ts) >= 2:
-                    elapsed = ts[-1] - ts[0]
-                    actual_fps = len(ts) / elapsed if elapsed > 0 else 0
-                    logger.info("Episode {}: {} frames, {:.2f}s, {:.1f} Hz (target max {} Hz)", episode_idx, len(frames), elapsed, actual_fps, args.frequency)
+                actual_elapsed = recording_end_time - recording_start_time
+                actual_fps = len(frames) / actual_elapsed if actual_elapsed > 0 else 0
+                logger.info("Episode {}: {} frames, {:.2f}s, {:.1f} Hz (target max {} Hz)", 
+                           episode_idx, len(frames), actual_elapsed, actual_fps, args.frequency)
 
             # Save or discard
             logger.info("Save? (Enter=SAVE, any key+Enter=DISCARD)")

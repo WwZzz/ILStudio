@@ -74,7 +74,7 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
             return None
 
     def process_action(self, x):
-        """Process the action"""
+        """Process the action (may be slow, e.g., IK computation)"""
         return x
 
     def meta2act(self, mact: MetaAction):
@@ -100,7 +100,10 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
 
     def start(self):
         """
-        Start the robot
+        Start the robot.
+        
+        IMPORTANT: process_action() MUST be fast (< 5ms) to maintain observation rate.
+        IK computation should use fast_mode=True with minimal iterations.
         """
         # create shared memory for robot observations
         self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
@@ -116,23 +119,27 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
                 except ValueError as e:
                     if i < max_retries - 1:
                         logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
-                        import time
                         time.sleep(0.5)
                     else:
                         logger.error(f"Failed to connect to control SHM: {e}")
         
         self.is_running = True
         rate_limiter = RateLimiter()
+        
         while self.is_running:
+            # 1. Get and publish observation
+            data = self.get_data()
+            if data is not None:
+                self.write_data(data)
+            
+            # 2. Process and execute action (MUST be fast!)
             action = self.read_action()
             if action is not None:
                 action = self.process_action(action)
                 action_array = action.get('action', None)
                 if action_array is not None:
                     self.publish_action(action_array)
-            data = self.get_data()
-            if data is not None:
-                self.write_data(data)
+            
             rate_limiter.sleep(self.fps)
 
 

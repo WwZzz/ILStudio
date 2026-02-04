@@ -33,6 +33,7 @@ class OpenCVCamera(BaseDevice):
         fourcc: Optional[str] = None,
         horizontal_flip: bool = False,
         vertical_flip: bool = False,
+        bgr_to_rgb: bool = False,
     ):
         super().__init__(name, max_size_mb, fps)
         self.index_or_path = index_or_path
@@ -42,6 +43,7 @@ class OpenCVCamera(BaseDevice):
         self.fourcc = fourcc
         self.horizontal_flip = horizontal_flip
         self.vertical_flip = vertical_flip
+        self.bgr_to_rgb = bgr_to_rgb
         self._backend = _get_cv2_backend()
         self.camera: Optional[cv2.VideoCapture] = None
         self._capture_width: Optional[int] = None
@@ -136,6 +138,8 @@ class OpenCVCamera(BaseDevice):
             image = cv2.flip(image, 1)  # 1 = horizontal flip
         elif self.vertical_flip:
             image = cv2.flip(image, 0)  # 0 = vertical flip
+        if self.bgr_to_rgb:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return {"image": image, "timestamp": time.perf_counter()}
 
     def close(self) -> None:

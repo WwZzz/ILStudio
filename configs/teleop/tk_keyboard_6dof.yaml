@@ -2,16 +2,17 @@
 #
 # Uses a GUI window to capture keyboard events (works in subprocess)
 # Outputs 7D delta action: [dx, dy, dz, d_roll, d_pitch, d_yaw, d_gripper]
+# Units: position in meters, rotation in radians
 #
-# Default Key Mappings:
+# Key Mappings:
 #   Translation:
-#     W/S : Forward/Backward (X)
+#     Q/E : Forward/Backward (X)
 #     A/D : Left/Right (Y)
-#     R/F : Up/Down (Z)
+#     W/S : Up/Down (Z)
 #
 #   Rotation:
-#     Q/E : Roll +/-
-#     T/G : Pitch +/-
+#     R/F : Roll +/-
+#     1/3 : Pitch +/-
 #     Z/C : Yaw +/-
 #
 #   Gripper:
@@ -29,17 +30,18 @@ args:
   name: keyboard_6dof
   max_size_mb: 1
   fps: 50.0
-  trans_scale: 1.0    # Scale factor for translation deltas (X, Y, Z)
-  rot_scale: 1.0      # Scale factor for rotation deltas (Roll, Pitch, Yaw)
-  gripper_scale: 1.0  # Scale factor for gripper delta
+  # Output actual units: meters for position, radians for rotation
+  trans_scale: 0.002     # Key press → 2mm per frame
+  rot_scale: 0.01        # Key press → 0.01 rad (~0.57°) per frame
+  gripper_scale: 0.01    # Gripper delta per frame
   debug: false
   
-  # Optional: Override default key mappings
-  # key_mappings:
-  #   - {name: "X (forward/back)", key_positive: "w", key_negative: "s", scale: 1.0}
-  #   - {name: "Y (left/right)", key_positive: "a", key_negative: "d", scale: 1.0}
-  #   - {name: "Z (up/down)", key_positive: "r", key_negative: "f", scale: 1.0}
-  #   - {name: "Roll", key_positive: "q", key_negative: "e", scale: 1.0}
-  #   - {name: "Pitch", key_positive: "t", key_negative: "g", scale: 1.0}
-  #   - {name: "Yaw", key_positive: "z", key_negative: "c", scale: 1.0}
-  #   - {name: "Gripper", key_positive: "v", key_negative: "b", scale: 1.0}
+  # Custom key mappings
+  key_mappings:
+    - {name: "X (forward/back)", key_positive: "q", key_negative: "e", scale: 0.002}
+    - {name: "Y (left/right)", key_positive: "d", key_negative: "a", scale: 0.002}
+    - {name: "Z (up/down)", key_positive: "w", key_negative: "s", scale: 0.002}
+    - {name: "Roll", key_positive: "r", key_negative: "f", scale: 0.01}
+    - {name: "Pitch", key_positive: "1", key_negative: "3", scale: 0.01}
+    - {name: "Yaw", key_positive: "z", key_negative: "c", scale: 0.01}
+    - {name: "Gripper", key_positive: "v", key_negative: "b", scale: 0.01}

@@ -10,6 +10,8 @@ import numpy as np
 import traceback
 import time
 import threading
+import multiprocessing as mp
+from multiprocessing import Queue
 from typing import Optional, List
 from pathlib import Path
 
@@ -24,7 +26,7 @@ from deploy.robot.base import BaseRobot
 from benchmark.base import MetaObs
 
 # Import kinematics from so101_sim (shared implementation)
-from deploy.robot.so101_sim.kinematics import create_so101, lerobot_FK, lerobot_IK
+from deploy.robot.so101.kinematics import create_so101, lerobot_FK, lerobot_IK
 
 
 # Default control limits in radians (matching so101)
@@ -64,9 +66,9 @@ class BiSo101Follower(BaseRobot):
                  camera_configs: dict = {},
                  calibration_dir: Optional[str] = None,
                  control_mode: str = "qpos",
-                 position_scale: float = 0.001,
-                 rotation_scale: float = 0.01,
-                 gripper_scale: float = 0.01,
+                 position_scale: float = 1.0,
+                 rotation_scale: float = 1.0,
+                 gripper_scale: float = 1.0,
                  qlimit_min: Optional[List[float]] = None,
                  qlimit_max: Optional[List[float]] = None,
                  glimit_min: Optional[List[float]] = None,
@@ -167,6 +169,14 @@ class BiSo101Follower(BaseRobot):
         self._right_norm_offset = np.zeros(6, dtype=np.float64)
         self._left_is_norm_calibrated = False
         self._right_is_norm_calibrated = False
+        
+        # State synchronization parameters
+        # Periodically sync internal state with real robot feedback to prevent drift
+        self._sync_counter = 0
+        self._sync_interval = 50  # Sync every N observations
+        self._sync_threshold = 0.1  # Sync if joint error > threshold (radians, ~5.7 degrees)
+        self._last_left_real_qpos_rad = None
+        self._last_right_real_qpos_rad = None
         
         # Debug mode
         self.debug = debug
@@ -305,6 +315,53 @@ class BiSo101Follower(BaseRobot):
                 result[i] = 0.0
         return result
     
+    def _sync_state_with_real(self, real_qpos_rad: np.ndarray, arm_name: str):
+        """
+        Synchronize internal target state with real robot feedback for one arm.
+        
+        This prevents drift between internal state (which accumulates delta commands)
+        and real robot state (which may not fully execute each command).
+        
+        Args:
+            real_qpos_rad: Current real robot joint positions in radians (6D)
+            arm_name: "LEFT" or "RIGHT"
+        """
+        with self._lock:
+            if arm_name == "LEFT":
+                target_qpos_rad = self.left_target_qpos_rad
+            else:
+                target_qpos_rad = self.right_target_qpos_rad
+            
+            if target_qpos_rad is None:
+                return
+            
+            # Compute error between internal target and real position
+            error = np.abs(target_qpos_rad - real_qpos_rad)
+            max_error = np.max(error)
+            max_error_joint = np.argmax(error)
+            
+            # If error exceeds threshold, sync internal state to real
+            if max_error > self._sync_threshold:
+                joint_names = ['base', 'shoulder', 'elbow', 'wrist_pitch', 'wrist_roll', 'gripper']
+                if self.debug:
+                    print(f"[SYNC-{arm_name}] State drift detected: max_error={max_error:.4f} rad at {joint_names[max_error_joint]}")
+                    print(f"       Internal target: {target_qpos_rad}")
+                    print(f"       Real position:   {real_qpos_rad}")
+                
+                # Sync: update internal state to match real robot
+                new_gpos = lerobot_FK(real_qpos_rad[1:5], robot=self.robot_kin)
+                
+                if arm_name == "LEFT":
+                    self.left_target_qpos_rad = real_qpos_rad.copy()
+                    self.left_target_gpos = new_gpos
+                else:
+                    self.right_target_qpos_rad = real_qpos_rad.copy()
+                    self.right_target_gpos = new_gpos
+                
+                if self.debug:
+                    print(f"       Synced gpos:     {new_gpos}")
+                    print(f"[SYNC-{arm_name}] Internal state synchronized with real robot")
+    
     def _calibrate_normalization(self, qpos_normalized: np.ndarray, qpos_rad: np.ndarray, 
                                   arm_name: str, norm_offset: np.ndarray, is_calibrated: bool) -> tuple:
         """Calibrate normalization offset for one arm"""
@@ -335,6 +392,10 @@ class BiSo101Follower(BaseRobot):
             if self.control_mode == "delta_ee":
                 left_qpos_rad = self._normalized_to_radians(left_qpos)
                 right_qpos_rad = self._normalized_to_radians(right_qpos)
+                
+                # Store real positions for sync
+                self._last_left_real_qpos_rad = left_qpos_rad.copy()
+                self._last_right_real_qpos_rad = right_qpos_rad.copy()
                 
                 # Calibration for each arm
                 if not self._left_is_norm_calibrated:
@@ -387,6 +448,14 @@ class BiSo101Follower(BaseRobot):
                     else:
                         self._right_safety_verified = True
                     print("="*60 + "\n")
+                
+                # Periodic state synchronization for both arms (moved outside of else!)
+                if self.left_target_qpos_rad is not None and self.right_target_qpos_rad is not None:
+                    self._sync_counter += 1
+                    if self._sync_counter >= self._sync_interval:
+                        self._sync_counter = 0
+                        self._sync_state_with_real(left_qpos_rad, "LEFT")
+                        self._sync_state_with_real(right_qpos_rad, "RIGHT")
             
             return {'qpos': np.concatenate([left_qpos, right_qpos]), **obs}
         except Exception as e:
@@ -435,28 +504,25 @@ class BiSo101Follower(BaseRobot):
         new_target_gpos[3] += delta_rot[0]    # Roll
         new_target_gpos[4] += delta_rot[1]    # Pitch
         
-        # Compute IK for joints 1-4
+        # Compute IK for joints 1-4 (fast_mode=True - MUST be ultra-fast due to GIL)
         fd_qpos = current_qpos_rad[1:5]
-        qpos_inv, ik_success = lerobot_IK(fd_qpos, new_target_gpos, robot=self.robot_kin)
+        qpos_inv, ik_success = lerobot_IK(fd_qpos, new_target_gpos, robot=self.robot_kin, fast_mode=True)
         
         if not ik_success:
-            # Try reducing delta
-            for scale in [0.5, 0.25, 0.1]:
-                scaled_gpos = current_gpos.copy()
-                scaled_gpos[0] += forward_update * scale
-                scaled_gpos[2] += delta_pos[2] * scale
-                scaled_gpos[3] += delta_rot[0] * scale
-                scaled_gpos[4] += delta_rot[1] * scale
-                
-                qpos_inv, ik_success = lerobot_IK(fd_qpos, scaled_gpos, robot=self.robot_kin)
-                if ik_success:
-                    new_target_gpos = scaled_gpos
-                    theta_update *= scale
-                    break
+            # IK failed - try ONE smaller movement (0.3x scale)
+            # Keep fallback minimal to avoid blocking
+            scaled_gpos = current_gpos.copy()
+            scaled_gpos[0] += forward_update * 0.3
+            scaled_gpos[2] += delta_pos[2] * 0.3
+            scaled_gpos[3] += delta_rot[0] * 0.3
+            scaled_gpos[4] += delta_rot[1] * 0.3
             
-            if not ik_success:
-                if self.debug:
-                    print(f"[BiSo101Follower-{arm_name}] IK failed for target_gpos={new_target_gpos}")
+            qpos_inv, ik_success = lerobot_IK(fd_qpos, scaled_gpos, robot=self.robot_kin, fast_mode=True)
+            if ik_success:
+                new_target_gpos = scaled_gpos
+                theta_update *= 0.3
+            else:
+                # Still failed - skip this frame
                 return None, target_qpos_rad, target_gpos, False
         
         # Build target joint positions
@@ -494,6 +560,11 @@ class BiSo101Follower(BaseRobot):
         # Apply deadzone threshold
         if self.zero_threshold > 0:
             action = self._apply_deadzone(action)
+        
+        # If action is all zeros after deadzone, skip processing entirely
+        if np.allclose(action, 0):
+            action_dict['action'] = None
+            return action_dict
         
         # Safety check: Block if FK-IK not verified for either arm
         if self.safety_check and (not self._left_safety_verified or not self._right_safety_verified):
@@ -538,9 +609,20 @@ class BiSo101Follower(BaseRobot):
             if left_success and left_qpos_normalized is not None:
                 self.left_target_qpos_rad = new_left_qpos_rad.copy()
                 self.left_target_gpos = new_left_gpos.copy()
+            elif not left_success and np.any(left_action != 0):
+                # IK failed on non-zero action - reset to real robot position
+                if self._last_left_real_qpos_rad is not None:
+                    self.left_target_qpos_rad = self._last_left_real_qpos_rad.copy()
+                    self.left_target_gpos = lerobot_FK(self._last_left_real_qpos_rad[1:5], robot=self.robot_kin)
+            
             if right_success and right_qpos_normalized is not None:
                 self.right_target_qpos_rad = new_right_qpos_rad.copy()
                 self.right_target_gpos = new_right_gpos.copy()
+            elif not right_success and np.any(right_action != 0):
+                # IK failed on non-zero action - reset to real robot position
+                if self._last_right_real_qpos_rad is not None:
+                    self.right_target_qpos_rad = self._last_right_real_qpos_rad.copy()
+                    self.right_target_gpos = lerobot_FK(self._last_right_real_qpos_rad[1:5], robot=self.robot_kin)
         
         # Combine actions for both arms
         if left_qpos_normalized is None and right_qpos_normalized is None:
@@ -589,6 +671,310 @@ class BiSo101Follower(BaseRobot):
             image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
             
         return MetaObs(state=qpos, state_joint=qpos, image=image)
+    
+    def start(self):
+        """
+        Start the robot with async IK processing.
+        
+        Uses multiprocessing to run IK computation in a separate process,
+        preventing it from blocking observation publishing due to GIL.
+        
+        Main loop (this process): read observation -> write to SHM -> read processed action -> execute
+        IK process: read raw action -> compute IK -> write processed action
+        """
+        from deploy.utils import RateLimiter
+        from loguru import logger
+        
+        # Create shared memory for robot observations
+        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
+        
+        # Connect to control shm (teleop) with retry
+        if self.control_shm_name is not None and self.control_shm is None:
+            max_retries = 10
+            for i in range(max_retries):
+                try:
+                    self.control_shm = self.connect_to_existing_shm(self.control_shm_name)
+                    logger.info(f"Connected to control SHM: {self.control_shm_name}")
+                    break
+                except ValueError as e:
+                    if i < max_retries - 1:
+                        logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
+                        time.sleep(0.5)
+                    else:
+                        logger.error(f"Failed to connect to control SHM: {e}")
+        
+        # Use sync mode (async IK has too much multiprocessing overhead)
+        # IK with fast_mode=True is fast enough for real-time control
+        self._start_sync()
+    
+    def _start_sync(self):
+        """
+        Start with observation publishing decoupled from IK computation.
+        
+        Uses a background thread for IK to prevent blocking observation publishing.
+        This is different from full async (multiprocessing) - we use threading here
+        which has lower overhead but is still affected by GIL. However, since we
+        release GIL during sleep and I/O, observations can still be published
+        while IK is computing.
+        """
+        from deploy.utils import RateLimiter
+        from loguru import logger
+        import queue
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        
+        # Queue for passing actions to IK thread
+        action_queue = queue.Queue(maxsize=1)
+        # Store latest processed action
+        self._pending_action = None
+        self._pending_action_lock = threading.Lock()
+        
+        def ik_worker():
+            """Background thread for IK computation"""
+            while self.is_running:
+                try:
+                    # Get action with timeout to allow checking is_running
+                    try:
+                        raw_action = action_queue.get(timeout=0.05)
+                    except queue.Empty:
+                        continue
+                    
+                    # Process action (IK computation)
+                    processed = self.process_action(raw_action)
+                    action_array = processed.get('action', None) if processed else None
+                    
+                    # Store result
+                    with self._pending_action_lock:
+                        self._pending_action = action_array
+                        
+                except Exception as e:
+                    print(f"[IK Thread] Error: {e}")
+        
+        # Start IK worker thread
+        ik_thread = threading.Thread(target=ik_worker, daemon=True)
+        ik_thread.start()
+        logger.info(f"[{self.name}] Started IK worker thread")
+        
+        try:
+            while self.is_running:
+                # 1. Get and publish observation (NEVER blocked by IK)
+                data = self.get_data()
+                if data is not None:
+                    self.write_data(data)
+                
+                # 2. Execute any pending processed action
+                with self._pending_action_lock:
+                    if self._pending_action is not None:
+                        self.publish_action(self._pending_action)
+                        self._pending_action = None
+                
+                # 3. Read new raw action and send to IK thread (non-blocking)
+                raw_action = self.read_action()
+                if raw_action is not None:
+                    try:
+                        # Clear old action, keep only latest
+                        while not action_queue.empty():
+                            try:
+                                action_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                        action_queue.put_nowait(raw_action)
+                    except queue.Full:
+                        pass  # Skip if queue full
+                
+                rate_limiter.sleep(self.fps)
+        finally:
+            self.is_running = False
+            ik_thread.join(timeout=1.0)
+    
+    def _start_async_ik(self):
+        """
+        Async start with IK in separate process.
+        
+        Observation publishing is never blocked by IK computation.
+        """
+        from deploy.utils import RateLimiter
+        from loguru import logger
+        
+        # Create queues for IK process communication
+        action_in_queue = mp.Queue(maxsize=2)
+        action_out_queue = mp.Queue(maxsize=2)
+        
+        # Start IK worker process
+        ik_process = mp.Process(
+            target=self._ik_worker,
+            args=(action_in_queue, action_out_queue),
+            daemon=True
+        )
+        ik_process.start()
+        logger.info(f"[{self.name}] Started async IK process")
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        pending_result = None  # Latest result from IK worker
+        
+        try:
+            while self.is_running:
+                # 1. Get and publish observation (NEVER blocked by IK)
+                data = self.get_data()
+                if data is not None:
+                    self.write_data(data)
+                
+                # 2. Check for processed result from IK process (non-blocking)
+                try:
+                    while not action_out_queue.empty():
+                        pending_result = action_out_queue.get_nowait()
+                except:
+                    pass
+                
+                # 3. Execute pending action and update state
+                if pending_result is not None:
+                    processed_action = pending_result.get('action', {})
+                    action_array = processed_action.get('action', None) if processed_action else None
+                    
+                    if action_array is not None:
+                        self.publish_action(action_array)
+                    
+                    # Update internal state from IK worker result
+                    with self._lock:
+                        if pending_result.get('left_target_qpos_rad') is not None:
+                            self.left_target_qpos_rad = np.array(pending_result['left_target_qpos_rad'])
+                            self.left_target_gpos = np.array(pending_result['left_target_gpos'])
+                        if pending_result.get('right_target_qpos_rad') is not None:
+                            self.right_target_qpos_rad = np.array(pending_result['right_target_qpos_rad'])
+                            self.right_target_gpos = np.array(pending_result['right_target_gpos'])
+                    
+                    pending_result = None
+                
+                # 4. Read new raw action and send to IK process with state (non-blocking)
+                raw_action = self.read_action()
+                if raw_action is not None:
+                    # Package action with current state for IK worker
+                    with self._lock:
+                        if self.left_target_qpos_rad is not None and self.right_target_qpos_rad is not None:
+                            msg = {
+                                'action': raw_action,
+                                'left_target_qpos_rad': self.left_target_qpos_rad.copy(),
+                                'left_target_gpos': self.left_target_gpos.copy(),
+                                'right_target_qpos_rad': self.right_target_qpos_rad.copy(),
+                                'right_target_gpos': self.right_target_gpos.copy(),
+                                'left_norm_offset': self._left_norm_offset.copy(),
+                                'right_norm_offset': self._right_norm_offset.copy(),
+                                'left_is_norm_calibrated': self._left_is_norm_calibrated,
+                                'right_is_norm_calibrated': self._right_is_norm_calibrated,
+                                # Also send real robot state for fallback reset
+                                'left_real_qpos_rad': self._last_left_real_qpos_rad.copy() if self._last_left_real_qpos_rad is not None else None,
+                                'right_real_qpos_rad': self._last_right_real_qpos_rad.copy() if self._last_right_real_qpos_rad is not None else None,
+                            }
+                            try:
+                                # Clear old messages, keep only latest
+                                while not action_in_queue.empty():
+                                    try:
+                                        action_in_queue.get_nowait()
+                                    except:
+                                        break
+                                action_in_queue.put_nowait(msg)
+                            except:
+                                pass  # Queue full, skip
+                
+                rate_limiter.sleep(self.fps)
+        finally:
+            # Cleanup
+            action_in_queue.put(None)  # Signal worker to stop
+            ik_process.join(timeout=1.0)
+            if ik_process.is_alive():
+                ik_process.terminate()
+            logger.info(f"[{self.name}] Stopped async IK process")
+    
+    def _ik_worker(self, action_in_queue: Queue, action_out_queue: Queue):
+        """
+        IK worker process - runs in separate process to avoid GIL.
+        
+        Receives messages containing raw action + state, computes IK, outputs processed actions.
+        """
+        # Re-initialize kinematics in this process
+        from deploy.robot.so101.kinematics import create_so101, lerobot_FK, lerobot_IK
+        self.robot_kin = create_so101()
+        
+        # Skip safety check in worker (verified in main process)
+        self._left_safety_verified = True
+        self._right_safety_verified = True
+        
+        while True:
+            try:
+                # Get message (blocking with timeout)
+                try:
+                    msg = action_in_queue.get(timeout=0.1)
+                except:
+                    continue
+                
+                if msg is None:  # Shutdown signal
+                    break
+                
+                # Unpack state from message
+                raw_action = msg['action']
+                self.left_target_qpos_rad = msg['left_target_qpos_rad']
+                self.left_target_gpos = msg['left_target_gpos']
+                self.right_target_qpos_rad = msg['right_target_qpos_rad']
+                self.right_target_gpos = msg['right_target_gpos']
+                self._left_norm_offset = msg['left_norm_offset']
+                self._right_norm_offset = msg['right_norm_offset']
+                self._left_is_norm_calibrated = msg['left_is_norm_calibrated']
+                self._right_is_norm_calibrated = msg['right_is_norm_calibrated']
+                left_real_qpos_rad = msg.get('left_real_qpos_rad', None)
+                right_real_qpos_rad = msg.get('right_real_qpos_rad', None)
+                
+                # Check if input action is non-zero (before processing)
+                input_action = raw_action.get('action', None)
+                has_nonzero_input = input_action is not None and not np.allclose(input_action, 0)
+                
+                # Process action (IK computation)
+                processed_action = self.process_action(raw_action)
+                
+                # If IK failed AND there was a non-zero input, reset internal state
+                # Don't reset for zero actions (that's normal - no movement requested)
+                action_array = processed_action.get('action', None) if processed_action else None
+                ik_failed = action_array is None and has_nonzero_input
+                if ik_failed:
+                    # IK failed on real movement attempt - reset state to real robot position
+                    reset_done = False
+                    if left_real_qpos_rad is not None:
+                        self.left_target_qpos_rad = left_real_qpos_rad.copy()
+                        self.left_target_gpos = lerobot_FK(left_real_qpos_rad[1:5], robot=self.robot_kin)
+                        reset_done = True
+                    if right_real_qpos_rad is not None:
+                        self.right_target_qpos_rad = right_real_qpos_rad.copy()
+                        self.right_target_gpos = lerobot_FK(right_real_qpos_rad[1:5], robot=self.robot_kin)
+                        reset_done = True
+                    if reset_done:
+                        print(f"[IK Worker] IK failed on movement -> RESET state to real robot position", flush=True)
+                
+                # Package result with updated state
+                result = {
+                    'action': processed_action,
+                    'left_target_qpos_rad': self.left_target_qpos_rad,
+                    'left_target_gpos': self.left_target_gpos,
+                    'right_target_qpos_rad': self.right_target_qpos_rad,
+                    'right_target_gpos': self.right_target_gpos,
+                }
+                
+                # Output result (non-blocking, keep latest)
+                try:
+                    while not action_out_queue.empty():
+                        try:
+                            action_out_queue.get_nowait()
+                        except:
+                            break
+                    action_out_queue.put_nowait(result)
+                except:
+                    pass
+                    
+            except Exception as e:
+                import traceback
+                print(f"[IK Worker] Error: {e}", flush=True)
+                traceback.print_exc()
+                continue
     
     def shutdown(self):
         """Shutdown robot and cameras"""

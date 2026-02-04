@@ -40,6 +40,7 @@ dependencies = [
     "draccus",
     "tensorflow_graphics",
     "loguru",
+    "websockets",
 ]
 
 

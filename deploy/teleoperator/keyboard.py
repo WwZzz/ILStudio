@@ -83,15 +83,15 @@ class Keyboard(BaseTeleopDevice):
         lines = []
         for m in self.key_mappings:
             name = m.get("name", "Action")
-            key_pos = m.get("key_positive", "?").upper()
-            key_neg = m.get("key_negative", "?").upper()
+            key_pos = str(m.get("key_positive", "?")).upper()
+            key_neg = str(m.get("key_negative", "?")).upper()
             lines.append(f"  {name}: {key_pos}/{key_neg}")
-        lines.append(f"\n  Reset: {self.reset_key.upper()}")
+        lines.append(f"\n  Reset: {str(self.reset_key).upper()}")
         return "\n".join(lines)
 
-    def _keyboard_gui_process(self, shared_array, key_mappings, reset_key, title, action_dim):
+    def _keyboard_gui_process(self, shared_array, key_mappings, reset_key, title, action_dim, debug=False):
         """GUI process that captures keyboard events"""
-        print(f"[Keyboard GUI] Process started", flush=True)
+        print(f"[Keyboard GUI] Process started, debug={debug}", flush=True)
         
         # Set of currently pressed keys
         pressed_keys = set()
@@ -123,10 +123,10 @@ class Keyboard(BaseTeleopDevice):
         instr_lines = ["Key Mappings:"]
         for m in key_mappings:
             name = m.get("name", "Action")
-            key_pos = m.get("key_positive", "?").upper()
-            key_neg = m.get("key_negative", "?").upper()
+            key_pos = str(m.get("key_positive", "?")).upper()
+            key_neg = str(m.get("key_negative", "?")).upper()
             instr_lines.append(f"  {name}: {key_pos} (+) / {key_neg} (-)")
-        instr_lines.append(f"\n  Reset all: {reset_key.upper()}")
+        instr_lines.append(f"\n  Reset all: {str(reset_key).upper()}")
         instructions = "\n".join(instr_lines)
         
         instr_label = tk.Label(
@@ -243,6 +243,8 @@ class Keyboard(BaseTeleopDevice):
         
         def on_key_press(event):
             key = event.keysym.lower()
+            if debug:
+                print(f"[Keyboard] Key press: keysym='{event.keysym}' -> '{key}'", flush=True)
             pressed_keys.add(key)
         
         def on_key_release(event):
@@ -253,15 +255,23 @@ class Keyboard(BaseTeleopDevice):
             """Update action based on pressed keys"""
             action = np.zeros(action_dim, dtype=np.float64)
             
+            # Debug: print pressed keys periodically
+            if debug and pressed_keys:
+                print(f"[Keyboard] Pressed keys: {pressed_keys}", flush=True)
+            
             # Process each key mapping
             for i, m in enumerate(key_mappings):
-                key_pos = m.get("key_positive", "").lower()
-                key_neg = m.get("key_negative", "").lower()
+                key_pos = str(m.get("key_positive", "")).lower()
+                key_neg = str(m.get("key_negative", "")).lower()
                 scale = m.get("scale", 1.0)
                 
-                if key_pos in pressed_keys:
+                # Check if key matches (handle both single char and keysym names)
+                pos_match = key_pos in pressed_keys
+                neg_match = key_neg in pressed_keys
+                
+                if pos_match:
                     action[i] += scale
-                if key_neg in pressed_keys:
+                if neg_match:
                     action[i] -= scale
             
             # Reset
@@ -333,7 +343,7 @@ class Keyboard(BaseTeleopDevice):
         # Start the GUI process
         self._gui_proc = mp.Process(
             target=self._keyboard_gui_process,
-            args=(self._action_values, self.key_mappings, self.reset_key, self.title, self.action_dim)
+            args=(self._action_values, self.key_mappings, self.reset_key, self.title, self.action_dim, self.debug)
         )
         self._gui_proc.daemon = True
         self._gui_proc.start()

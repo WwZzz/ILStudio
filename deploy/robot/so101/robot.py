@@ -11,6 +11,8 @@ import numpy as np
 import traceback
 import time
 import threading
+import multiprocessing as mp
+from multiprocessing import Queue
 from typing import Optional, List
 from pathlib import Path
 
@@ -25,7 +27,7 @@ from deploy.robot.base import BaseRobot
 from benchmark.base import MetaObs
 
 # Import kinematics from so101_sim (shared implementation)
-from deploy.robot.so101_sim.kinematics import create_so101, lerobot_FK, lerobot_IK
+from deploy.robot.so101.kinematics import create_so101, lerobot_FK, lerobot_IK
 
 
 # Default control limits in radians (matching so101_sim)
@@ -63,9 +65,9 @@ class So101FollowerWithCamera(BaseRobot):
                  camera_configs: dict = {},
                  calibration_dir: Optional[str] = None,
                  control_mode: str = "qpos",
-                 position_scale: float = 0.001,
-                 rotation_scale: float = 0.01,
-                 gripper_scale: float = 0.01,
+                 position_scale: float = 1.0,
+                 rotation_scale: float = 1.0,
+                 gripper_scale: float = 1.0,
                  qlimit_min: Optional[List[float]] = None,
                  qlimit_max: Optional[List[float]] = None,
                  glimit_min: Optional[List[float]] = None,
@@ -157,6 +159,13 @@ class So101FollowerWithCamera(BaseRobot):
         self._norm_offset = np.zeros(6, dtype=np.float64)  # Offset to add to normalized output
         self._is_norm_calibrated = False
         
+        # State synchronization parameters
+        # Periodically sync internal state with real robot feedback to prevent drift
+        self._sync_counter = 0
+        self._sync_interval = 50  # Sync every N observations
+        self._sync_threshold = 0.1  # Sync if joint error > threshold (radians, ~5.7 degrees)
+        self._last_real_qpos_rad = None  # Store last real robot position
+        
         # Debug mode
         self.debug = debug
         self._debug_step = 0
@@ -216,8 +225,10 @@ class So101FollowerWithCamera(BaseRobot):
         Convert normalized joint values to radians
         
         SO101 uses different normalization for different joints:
-        - Joints 0-4 (body): MotorNormMode.RANGE_M100_100, range [-100, 100]
-        - Joint 5 (gripper): MotorNormMode.RANGE_0_100, range [0, 100]
+        - Joints 0-4 (body): RANGE_M100_100, range [-100, 100]
+          normalized = 0 corresponds to (qlimit_min + qlimit_max) / 2
+        - Joint 5 (gripper): RANGE_0_100, range [0, 100]
+          normalized = 0 corresponds to qlimit_min
         
         Args:
             normalized: 6D array with normalized values
@@ -231,6 +242,7 @@ class So101FollowerWithCamera(BaseRobot):
             qmax = self.qlimit_max[i]
             norm_signed = normalized[i] * self.joint_signs[i]
             norm_clamped = np.clip(norm_signed, -100.0, 100.0)
+            # normalized=-100 -> qmin, normalized=0 -> mid, normalized=100 -> qmax
             radians[i] = (norm_clamped + 100.0) / 200.0 * (qmax - qmin) + qmin
         
         # Joint 5 (gripper): RANGE_0_100 [0, 100]
@@ -246,10 +258,7 @@ class So101FollowerWithCamera(BaseRobot):
         """
         Convert radians to normalized joint values
         
-        SO101 uses different normalization for different joints:
-        - Joints 0-4 (body): MotorNormMode.RANGE_M100_100, range [-100, 100]
-        - Joint 5 (gripper): MotorNormMode.RANGE_0_100, range [0, 100]
-        
+        Inverse of _normalized_to_radians.
         After calibration, applies the calibrated offset to ensure round-trip consistency.
         
         Args:
@@ -346,6 +355,41 @@ class So101FollowerWithCamera(BaseRobot):
             if abs(result[i]) < self.zero_threshold:
                 result[i] = 0.0
         return result
+    
+    def _sync_state_with_real(self, real_qpos_rad: np.ndarray):
+        """
+        Synchronize internal target state with real robot feedback.
+        
+        This prevents drift between internal state (which accumulates delta commands)
+        and real robot state (which may not fully execute each command).
+        
+        Args:
+            real_qpos_rad: Current real robot joint positions in radians
+        """
+        with self._lock:
+            if self.target_qpos_rad is None:
+                return
+            
+            # Compute error between internal target and real position
+            error = np.abs(self.target_qpos_rad - real_qpos_rad)
+            max_error = np.max(error)
+            max_error_joint = np.argmax(error)
+            
+            # If error exceeds threshold, sync internal state to real
+            if max_error > self._sync_threshold:
+                joint_names = ['base', 'shoulder', 'elbow', 'wrist_pitch', 'wrist_roll', 'gripper']
+                if self.debug:
+                    print(f"[SYNC] State drift detected: max_error={max_error:.4f} rad at {joint_names[max_error_joint]}")
+                    print(f"       Internal target: {self.target_qpos_rad}")
+                    print(f"       Real position:   {real_qpos_rad}")
+                
+                # Sync: update internal state to match real robot
+                self.target_qpos_rad = real_qpos_rad.copy()
+                self.target_gpos = lerobot_FK(real_qpos_rad[1:5], robot=self.robot_kin)
+                
+                if self.debug:
+                    print(f"       Synced gpos:     {self.target_gpos}")
+                    print(f"[SYNC] Internal state synchronized with real robot")
 
     def get_observation(self):
         """Get complete observation data (including camera images)"""
@@ -356,6 +400,7 @@ class So101FollowerWithCamera(BaseRobot):
             # Update internal state for delta_ee mode
             if self.control_mode == "delta_ee":
                 qpos_rad = self._normalized_to_radians(qpos_normalized)
+                self._last_real_qpos_rad = qpos_rad.copy()  # Store real position
                 
                 # First-time normalization calibration:
                 # Compute offset so that radians_to_normalized(normalized_to_radians(n)) == n
@@ -388,6 +433,12 @@ class So101FollowerWithCamera(BaseRobot):
                         self._safety_verified = True
                     
                     print("="*60 + "\n")
+                else:
+                    # Periodic state synchronization: check if internal state drifted too far from real
+                    self._sync_counter += 1
+                    if self._sync_counter >= self._sync_interval:
+                        self._sync_counter = 0
+                        self._sync_state_with_real(qpos_rad)
             
             return {'qpos': qpos_normalized, **obs}
         except Exception as e:
@@ -515,30 +566,27 @@ class So101FollowerWithCamera(BaseRobot):
         target_gpos[3] += delta_rot[0]    # Roll
         target_gpos[4] += delta_rot[1]    # Pitch
         
-        # Compute IK for joints 1-4 (Pitch, Elbow, Wrist_Pitch, Wrist_Roll)
+        # Compute IK for joints 1-4 (fast_mode=True - MUST be ultra-fast due to GIL)
         fd_qpos = current_qpos_rad[1:5]
-        qpos_inv, ik_success = lerobot_IK(fd_qpos, target_gpos, robot=self.robot_kin)
+        qpos_inv, ik_success = lerobot_IK(fd_qpos, target_gpos, robot=self.robot_kin, fast_mode=True)
         
         if not ik_success:
-            # IK failed - try reducing the delta (binary search for feasible motion)
-            # This helps when the full delta is unreachable but partial motion is possible
-            for scale in [0.5, 0.25, 0.1]:
-                scaled_gpos = current_gpos.copy()
-                scaled_gpos[0] += forward_update * scale
-                scaled_gpos[2] += delta_pos[2] * scale
-                scaled_gpos[3] += delta_rot[0] * scale
-                scaled_gpos[4] += delta_rot[1] * scale
-                
-                qpos_inv, ik_success = lerobot_IK(fd_qpos, scaled_gpos, robot=self.robot_kin)
-                if ik_success:
-                    target_gpos = scaled_gpos
-                    theta_update *= scale  # Also scale base rotation
-                    break
+            # IK failed - try ONE smaller movement (0.3x scale)
+            # Keep fallback minimal to avoid blocking
+            scaled_gpos = current_gpos.copy()
+            scaled_gpos[0] += forward_update * 0.3
+            scaled_gpos[2] += delta_pos[2] * 0.3
+            scaled_gpos[3] += delta_rot[0] * 0.3
+            scaled_gpos[4] += delta_rot[1] * 0.3
             
-            if not ik_success:
-                # Still failed, keep current position
+            qpos_inv, ik_success = lerobot_IK(fd_qpos, scaled_gpos, robot=self.robot_kin, fast_mode=True)
+            if ik_success:
+                target_gpos = scaled_gpos
+                theta_update *= 0.3
+            else:
+                # Still failed - skip this frame
                 if self.debug:
-                    print(f"[So101FollowerWithCamera] IK failed for target_gpos={target_gpos}")
+                    print(f"[So101] IK failed, skipping action")
                 action_dict['action'] = None
                 return action_dict
         
@@ -616,6 +664,190 @@ class So101FollowerWithCamera(BaseRobot):
             image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
             
         return MetaObs(state=qpos, state_joint=qpos, image=image)
+    
+    def start(self):
+        """
+        Start the robot with async IK processing.
+        
+        Uses multiprocessing to run IK computation in a separate process,
+        preventing it from blocking observation publishing due to GIL.
+        """
+        from deploy.utils import RateLimiter
+        from loguru import logger
+        
+        # Create shared memory for robot observations
+        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
+        
+        # Connect to control shm (teleop) with retry
+        if self.control_shm_name is not None and self.control_shm is None:
+            max_retries = 10
+            for i in range(max_retries):
+                try:
+                    self.control_shm = self.connect_to_existing_shm(self.control_shm_name)
+                    logger.info(f"Connected to control SHM: {self.control_shm_name}")
+                    break
+                except ValueError as e:
+                    if i < max_retries - 1:
+                        logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
+                        time.sleep(0.5)
+                    else:
+                        logger.error(f"Failed to connect to control SHM: {e}")
+        
+        # For delta_ee mode: use async IK processing
+        if self.control_mode == "delta_ee" and self.control_shm is not None:
+            self._start_async_ik()
+        else:
+            self._start_sync()
+    
+    def _start_sync(self):
+        """Synchronous start (for qpos mode or no control SHM)"""
+        from deploy.utils import RateLimiter
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        
+        while self.is_running:
+            data = self.get_data()
+            if data is not None:
+                self.write_data(data)
+            
+            action = self.read_action()
+            if action is not None:
+                action = self.process_action(action)
+                action_array = action.get('action', None)
+                if action_array is not None:
+                    self.publish_action(action_array)
+            
+            rate_limiter.sleep(self.fps)
+    
+    def _start_async_ik(self):
+        """Async start with IK in separate process."""
+        from deploy.utils import RateLimiter
+        from loguru import logger
+        
+        action_in_queue = mp.Queue(maxsize=2)
+        action_out_queue = mp.Queue(maxsize=2)
+        
+        ik_process = mp.Process(
+            target=self._ik_worker,
+            args=(action_in_queue, action_out_queue),
+            daemon=True
+        )
+        ik_process.start()
+        logger.info(f"[{self.name}] Started async IK process")
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        pending_result = None
+        
+        try:
+            while self.is_running:
+                # 1. Get and publish observation (NEVER blocked by IK)
+                data = self.get_data()
+                if data is not None:
+                    self.write_data(data)
+                
+                # 2. Check for processed result (non-blocking)
+                try:
+                    while not action_out_queue.empty():
+                        pending_result = action_out_queue.get_nowait()
+                except:
+                    pass
+                
+                # 3. Execute pending action and update state
+                if pending_result is not None:
+                    processed_action = pending_result.get('action', {})
+                    action_array = processed_action.get('action', None) if processed_action else None
+                    
+                    if action_array is not None:
+                        self.publish_action(action_array)
+                    
+                    # Update internal state from IK worker result
+                    with self._lock:
+                        if pending_result.get('target_qpos_rad') is not None:
+                            self.target_qpos_rad = np.array(pending_result['target_qpos_rad'])
+                            self.target_gpos = np.array(pending_result['target_gpos'])
+                    
+                    pending_result = None
+                
+                # 4. Send new raw action with state to IK process (non-blocking)
+                raw_action = self.read_action()
+                if raw_action is not None:
+                    with self._lock:
+                        if self.target_qpos_rad is not None:
+                            msg = {
+                                'action': raw_action,
+                                'target_qpos_rad': self.target_qpos_rad.copy(),
+                                'target_gpos': self.target_gpos.copy(),
+                                'norm_offset': self._norm_offset.copy(),
+                                'is_norm_calibrated': self._is_norm_calibrated,
+                            }
+                            try:
+                                while not action_in_queue.empty():
+                                    try:
+                                        action_in_queue.get_nowait()
+                                    except:
+                                        break
+                                action_in_queue.put_nowait(msg)
+                            except:
+                                pass
+                
+                rate_limiter.sleep(self.fps)
+        finally:
+            action_in_queue.put(None)
+            ik_process.join(timeout=1.0)
+            if ik_process.is_alive():
+                ik_process.terminate()
+            logger.info(f"[{self.name}] Stopped async IK process")
+    
+    def _ik_worker(self, action_in_queue: Queue, action_out_queue: Queue):
+        """IK worker process - runs in separate process to avoid GIL."""
+        from deploy.robot.so101.kinematics import create_so101
+        self.robot_kin = create_so101()
+        
+        # Skip safety check in worker (verified in main process)
+        self._safety_verified = True
+        
+        while True:
+            try:
+                try:
+                    msg = action_in_queue.get(timeout=0.1)
+                except:
+                    continue
+                
+                if msg is None:
+                    break
+                
+                # Unpack state from message
+                raw_action = msg['action']
+                self.target_qpos_rad = msg['target_qpos_rad']
+                self.target_gpos = msg['target_gpos']
+                self._norm_offset = msg['norm_offset']
+                self._is_norm_calibrated = msg['is_norm_calibrated']
+                
+                # Process action (IK computation)
+                processed_action = self.process_action(raw_action)
+                
+                # Package result with updated state
+                result = {
+                    'action': processed_action,
+                    'target_qpos_rad': self.target_qpos_rad,
+                    'target_gpos': self.target_gpos,
+                }
+                
+                try:
+                    while not action_out_queue.empty():
+                        try:
+                            action_out_queue.get_nowait()
+                        except:
+                            break
+                    action_out_queue.put_nowait(result)
+                except:
+                    pass
+                    
+            except Exception as e:
+                print(f"[IK Worker] Error: {e}")
+                continue
     
     def shutdown(self):
         """Shutdown robot and cameras"""

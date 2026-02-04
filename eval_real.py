@@ -213,7 +213,7 @@ def inference_process(args, shm_names: List[str], robot_module_name: Optional[st
         shm_channels=shm_channels,
         buffer_maxlen=100,
         max_tolerance_s=0.05,
-    )
+    ) 
     
     # Create chunk_shm for outputting action chunks
     chunk_shm = SharedMemoryChannel(name='chunk_shm', max_size_mb=10, is_writer=True)

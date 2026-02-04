@@ -1,7 +1,9 @@
 """
-SO101 Kinematics Module
+SO101 Kinematics Module for Real Robot
 Forward Kinematics (FK) and Inverse Kinematics (IK) for SO101 robot arm
 Based on lerobot-kinematics implementation
+
+This version includes fast_mode for real-time control on physical robots.
 """
 
 import numpy as np

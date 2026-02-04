@@ -36,17 +36,18 @@
     control_mode: delta_ee           # 14D delta EE control with IK (7D per arm)
     
     # Action scaling (adjust for comfortable control speed)
-    position_scale: 0.001   # Scale for position deltas (m per unit)
-    rotation_scale: 0.01    # Scale for rotation deltas (rad per unit)
-    gripper_scale: 0.01     # Scale for gripper deltas (rad per unit)
+    # Action scaling (1.0 = no scaling, input is used directly)
+    position_scale: 1.0
+    rotation_scale: 1.0
+    gripper_scale: 1.0
     
     # Joint direction signs (1=normal, -1=reversed)
     # Shared for both arms
-    joint_signs: [-1, 1, 1, 1, 1, 1]
+    joint_signs: [1, 1, 1, 1, 1, 1]
     
     # Delta action direction signs for each arm (7D: dx, dy, dz, droll, dpitch, dyaw, dgripper)
     # Use -1 to reverse a direction, 1 for normal
-    left_delta_signs: [1, -1, 1, 1, 1, 1, 1]   # Left arm: Y reversed
+    left_delta_signs: [1, 1, 1, 1, 1, 1, 1]   # Left arm: Y reversed
     right_delta_signs: [1, 1, 1, 1, 1, 1, 1]   # Right arm: default
     
     # =========== SAFETY SETTINGS (IMPORTANT!) ===========
@@ -57,10 +58,11 @@
     # =====================================================
     
     # Deadzone threshold: actions smaller than this are treated as zero
-    zero_threshold: 0.01
+    # Note: Must be smaller than teleop trans_scale, otherwise movement is ignored!
+    zero_threshold: 0.001
     
     # Debug mode: print qpos/gpos values each step
-    debug: true
+    debug: false
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: head_camera
@@ -72,6 +74,8 @@
     fps: 30
     max_size_mb: 10
     fourcc: MJPG
+    bgr_to_rgb: true
+    horizontal_flip: true
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: left_wrist_camera
@@ -83,14 +87,16 @@
     max_size_mb: 10
     fps: 30
     fourcc: MJPG
+    bgr_to_rgb: true
 
-# - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
-#   name: right_wrist_camera
-#   args:
-#     name: right_wrist_camera
-#     index_or_path: /dev/right_camera
-#     width: 640
-#     height: 480
-#     fps: 30
-#     max_size_mb: 10
-#     fourcc: MJPG
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: right_wrist_camera
+  args:
+    name: right_wrist_camera
+    index_or_path: /dev/right_camera
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+    bgr_to_rgb: true

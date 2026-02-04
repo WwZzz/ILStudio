@@ -6,6 +6,7 @@ Uses GUI sliders to generate actions for teleoperation
 import tkinter as tk
 import numpy as np
 import multiprocessing as mp
+import signal
 from typing import Optional, List, Tuple
 
 from deploy.teleoperator.base import BaseTeleopDevice
@@ -50,16 +51,9 @@ class SliderTeleop(BaseTeleopDevice):
             slider_labels = [f"Action {i}" for i in range(action_dim)]
         self.slider_labels = slider_labels
 
-        # Shared array for slider values
-        self._slider_values = mp.Array('d', action_dim)  # double precision for generality
-
-        # Start the GUI process
-        self._gui_proc = mp.Process(
-            target=self._slider_gui_process,
-            args=(self._slider_values, self.slider_ranges, self.slider_labels)
-        )
-        self._gui_proc.daemon = True
-        self._gui_proc.start()
+        # Shared array for slider values (will be created in start())
+        self._slider_values = None
+        self._gui_proc = None
 
     def _slider_gui_process(self, shared_array, slider_ranges, slider_labels):
         root = tk.Tk()
@@ -93,13 +87,80 @@ class SliderTeleop(BaseTeleopDevice):
                 shared_array[i] = scale.get()
             root.after(50, update_shared)  # update every 50 ms
 
+        # Track if already closing to avoid double destroy
+        closing = [False]
+        
+        def safe_close():
+            if closing[0]:
+                return
+            closing[0] = True
+            try:
+                root.quit()
+            except Exception:
+                pass
+            try:
+                root.destroy()
+            except Exception:
+                pass
+        
+        root.protocol("WM_DELETE_WINDOW", safe_close)
+        
+        # Handle SIGTERM signal for graceful shutdown
+        def sigterm_handler(signum, frame):
+            safe_close()
+        
+        signal.signal(signal.SIGTERM, sigterm_handler)
+        signal.signal(signal.SIGINT, sigterm_handler)
+
         root.after(50, update_shared)
-        root.mainloop()
+        try:
+            root.mainloop()
+        except Exception:
+            pass
 
     def get_data(self) -> Optional[dict]:
         """Read the current slider values from the shared array"""
+        if self._slider_values is None:
+            return None
         arr = np.frombuffer(self._slider_values.get_obj()).copy()
         return {"sliders": arr}
+    
+    def start(self):
+        """Start the teleoperator device with GUI in subprocess"""
+        # Create shared array in start() to ensure proper process context
+        self._slider_values = mp.Array('d', self.action_dim)
+        
+        # Start the GUI process
+        self._gui_proc = mp.Process(
+            target=self._slider_gui_process,
+            args=(self._slider_values, self.slider_ranges, self.slider_labels)
+        )
+        self._gui_proc.daemon = True
+        self._gui_proc.start()
+        
+        # Setup signal handlers for graceful shutdown
+        self._closing = False
+        original_sigterm = signal.getsignal(signal.SIGTERM)
+        original_sigint = signal.getsignal(signal.SIGINT)
+        
+        def cleanup_handler(signum, frame):
+            if self._closing:
+                return
+            self._closing = True
+            self.close()
+            # Restore original handlers and re-raise
+            signal.signal(signal.SIGTERM, original_sigterm)
+            signal.signal(signal.SIGINT, original_sigint)
+        
+        signal.signal(signal.SIGTERM, cleanup_handler)
+        signal.signal(signal.SIGINT, cleanup_handler)
+        
+        # Call parent start() for main loop
+        try:
+            super().start()
+        finally:
+            if not self._closing:
+                self.close()
 
     def convert_data_to_action(self, data: dict) -> np.ndarray:
         """Convert slider values to action"""
@@ -107,10 +168,18 @@ class SliderTeleop(BaseTeleopDevice):
 
     def close(self):
         """Close the teleoperation device"""
+        self.is_running = False
+        if self._gui_proc is not None:
+            try:
+                if self._gui_proc.is_alive():
+                    self._gui_proc.terminate()
+                    self._gui_proc.join(timeout=0.5)
+                if self._gui_proc.is_alive():
+                    self._gui_proc.kill()
+                    self._gui_proc.join(timeout=0.3)
+            except Exception:
+                pass
         super().close()
-        if hasattr(self, "_gui_proc") and self._gui_proc.is_alive():
-            self._gui_proc.terminate()
-            self._gui_proc.join()
 
 
 # ==============================================================================

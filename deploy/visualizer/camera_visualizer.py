@@ -5,6 +5,44 @@ This visualizer can display multiple camera feeds in a single window,
 reading image data from multiple shared memory channels.
 """
 
+import importlib.util
+import os
+import sys
+
+# Qt in OpenCV writes to fd 2 directly, so we must create the font dir it expects
+def _ensure_qt_font_dir():
+    spec = importlib.util.find_spec("cv2")
+    if not spec or not spec.origin:
+        return
+    cv2_dir = os.path.dirname(spec.origin)
+    fonts_dir = os.path.join(cv2_dir, "qt", "fonts")
+    if os.path.isdir(fonts_dir):
+        return
+    try:
+        os.makedirs(fonts_dir, exist_ok=True)
+    except OSError:
+        return
+    for sysfont in ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/TTF", "/usr/share/fonts"):
+        if not os.path.isdir(sysfont):
+            continue
+        for f in os.listdir(sysfont):
+            if not (f.endswith(".ttf") or f.endswith(".otf")):
+                continue
+            src = os.path.join(sysfont, f)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(fonts_dir, f)
+            if os.path.lexists(dst):
+                continue
+            try:
+                os.symlink(src, dst)
+            except OSError:
+                pass
+        if os.listdir(fonts_dir):
+            break
+
+_ensure_qt_font_dir()
+
 import cv2
 import numpy as np
 import time

@@ -464,6 +464,7 @@ class SharedMemoryDataSynchronizer:
         self,
         stop_check: Optional[Callable[[], bool]] = None,
         poll_interval_s: float = 0.001,
+        debug: bool = False,
     ) -> Optional[Dict[str, dict]]:
         """
         Block until ALL devices have NEW data (timestamp > last_emitted), then return one
@@ -474,10 +475,15 @@ class SharedMemoryDataSynchronizer:
         Args:
             stop_check: If provided, called each loop iteration. If returns True, abort and return None.
             poll_interval_s: Sleep duration when waiting for new data.
+            debug: If True, print which device is being waited for.
 
         Returns:
             Dict mapping device name -> data dict, or None if stop_check aborted.
         """
+        wait_start = time.perf_counter()
+        wait_count = 0
+        last_waiting_for = None
+        
         while True:
             self.read_and_buffer()
             if stop_check is not None and stop_check():
@@ -485,11 +491,13 @@ class SharedMemoryDataSynchronizer:
 
             # For each device, collect timestamps of "new" samples (ts > last_emitted)
             new_ts_per_device: Dict[str, List[float]] = {}
+            waiting_for = None
             for name, _ in self.shm_channels:
                 buf = self._buffers[name]
                 last = self._last_emitted_ts[name]
                 new_ts = [b[0] for b in buf if b[0] > last]
                 if not new_ts:
+                    waiting_for = name
                     time.sleep(poll_interval_s)
                     break
                 new_ts_per_device[name] = new_ts
@@ -504,6 +512,7 @@ class SharedMemoryDataSynchronizer:
                     last = self._last_emitted_ts[name]
                     candidates = [(b[0], b[1]) for b in buf if b[0] > last]
                     if not candidates:
+                        waiting_for = name
                         time.sleep(poll_interval_s)
                         break
                     # Pick sample with ts closest to ref, preferring fresher (ts >= ref)
@@ -512,13 +521,83 @@ class SharedMemoryDataSynchronizer:
                         key=lambda x: (abs(x[0] - ref), -x[0]),  # min |ts-ref|, then prefer larger ts
                     )
                     if abs(best_ts - ref) > self.max_tolerance_s:
+                        waiting_for = f"{name}(tolerance)"
                         time.sleep(poll_interval_s)
                         break
                     self._last_emitted_ts[name] = best_ts
                     result[name] = best_data
                 else:
+                    # Success - print debug if waited
+                    if debug and wait_count > 0:
+                        wait_time_ms = (time.perf_counter() - wait_start) * 1000
+                        if wait_time_ms > 5:  # Only print if waited > 5ms
+                            print(f"[Sync] Waited {wait_time_ms:.1f}ms ({wait_count} loops), last waiting for: {last_waiting_for}")
                     return result
+            
+            # Track what we're waiting for
+            wait_count += 1
+            if waiting_for:
+                last_waiting_for = waiting_for
+                
         return None  # unreachable
+
+    def get_latest_frame_nonblocking(
+        self,
+        required_devices: Optional[List[str]] = None,
+        strict_new_only: bool = True,
+    ) -> Optional[Dict[str, dict]]:
+        """
+        Get the latest available data from all devices without blocking.
+        
+        Args:
+            required_devices: Devices that must have new data. If None, all devices are required.
+            strict_new_only: If True, ALL devices must have new (unused) data.
+                            If False, only required_devices must have new data,
+                            others use latest available (may be reused).
+            
+        Returns:
+            Dict mapping device name -> data dict, or None if required conditions not met.
+        """
+        self.read_and_buffer()
+        
+        if required_devices is None:
+            required_devices = [name for name, _ in self.shm_channels]
+        
+        result = {}
+        for name, _ in self.shm_channels:
+            buf = self._buffers[name]
+            if len(buf) == 0:
+                if name in required_devices or strict_new_only:
+                    return None  # Required device has no data
+                continue
+            
+            last = self._last_emitted_ts[name]
+            
+            # Get new samples (not yet emitted)
+            new_samples = [(b[0], b[1]) for b in buf if b[0] > last]
+            
+            if name in required_devices:
+                # Must have NEW data
+                if not new_samples:
+                    return None  # Required device has no new data
+                # Use the newest new sample
+                best_ts, best_data = max(new_samples, key=lambda x: x[0])
+            elif strict_new_only:
+                # All devices must have new data in strict mode
+                if not new_samples:
+                    return None
+                best_ts, best_data = max(new_samples, key=lambda x: x[0])
+            else:
+                # Non-strict: use latest available (may be old)
+                if new_samples:
+                    best_ts, best_data = max(new_samples, key=lambda x: x[0])
+                else:
+                    best_ts, best_data = max(buf, key=lambda x: x[0])
+            
+            self._last_emitted_ts[name] = best_ts
+            result[name] = best_data
+        
+        return result
 
     def get_synced_frame_at_time_or_none(
         self,

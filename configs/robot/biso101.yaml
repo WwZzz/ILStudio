@@ -20,6 +20,8 @@
     fps: 30
     max_size_mb: 10
     fourcc: MJPG
+    horizontal_flip: true
+    bgr_to_rgb: true
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: left_wrist_camera
@@ -31,14 +33,16 @@
     max_size_mb: 10
     fps: 30
     fourcc: MJPG
-
-# - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
-#   name: right_wrist_camera
-#   args:
-#     name: right_wrist_camera
-#     index_or_path: /dev/right_camera
-#     width: 640
-#     height: 480
-#     fps: 30
-#     max_size_mb: 10
-#     fourcc: MJPG
+    bgr_to_rgb: true
+    
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: right_wrist_camera
+  args:
+    name: right_wrist_camera
+    index_or_path: /dev/right_camera
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+    bgr_to_rgb: true

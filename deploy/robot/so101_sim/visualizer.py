@@ -19,6 +19,57 @@ from deploy.visualizer.base import BaseVisualizer
 JOINT_NAMES = ["Rotation", "Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll", "Jaw"]
 
 
+def draw_coordinate_frame(viewer, pos, axis_length=0.05, axis_radius=0.002):
+    """
+    Draw RGB coordinate axes at the specified position.
+    
+    This draws the CONTROL coordinate system (mapped to MuJoCo world):
+    - Red (Control X / W,S keys): Forward = MuJoCo +Y
+    - Green (Control Y / A,D keys): Left/Right = MuJoCo -X  
+    - Blue (Control Z / R,F keys): Up/Down = MuJoCo +Z
+    
+    Args:
+        viewer: MuJoCo viewer object
+        pos: 3D position of the frame origin
+        axis_length: Length of each axis
+        axis_radius: Radius of each axis cylinder
+    """
+    # Control frame to MuJoCo world frame mapping (empirically determined):
+    # Control X (forward, W/S) -> MuJoCo +Y
+    # Control Y (left, A/D)    -> MuJoCo -X
+    # Control Z (up, R/F)      -> MuJoCo +Z
+    axes_and_colors = [
+        (np.array([0, 1, 0]), [1, 0, 0, 1]),   # Control X (forward) - Red -> MuJoCo +Y
+        (np.array([-1, 0, 0]), [0, 1, 0, 1]),  # Control Y (left) - Green -> MuJoCo -X
+        (np.array([0, 0, 1]), [0, 0, 1, 1]),   # Control Z (up) - Blue -> MuJoCo +Z
+    ]
+    
+    with viewer.lock():
+        for axis, color in axes_and_colors:
+            # Calculate start and end points
+            start = pos
+            end = pos + axis * axis_length
+            
+            # Add geometry to scene
+            mujoco.mjv_initGeom(
+                viewer.user_scn.geoms[viewer.user_scn.ngeom],
+                mujoco.mjtGeom.mjGEOM_CAPSULE,
+                np.zeros(3),  # size (will be set by from-to)
+                np.zeros(3),  # pos (will be set by from-to)
+                np.eye(3).flatten(),  # mat
+                np.array(color, dtype=np.float32)
+            )
+            # Set capsule from start to end
+            mujoco.mjv_connector(
+                viewer.user_scn.geoms[viewer.user_scn.ngeom],
+                mujoco.mjtGeom.mjGEOM_CAPSULE,
+                axis_radius,
+                start,
+                end
+            )
+            viewer.user_scn.ngeom += 1
+
+
 class Visualizer(BaseVisualizer):
     """
     MuJoCo Visualizer for SO101 Simulation Robot.
@@ -30,6 +81,7 @@ class Visualizer(BaseVisualizer):
                  shm_name: str, 
                  fps: float = 60.0,
                  xml_path: Optional[str] = None,
+                 show_tcp_frame: bool = True,
                  **kwargs):
         """
         Initialize the visualizer.
@@ -38,6 +90,7 @@ class Visualizer(BaseVisualizer):
             shm_name: Name of the shared memory to read robot data from
             fps: Target visualization frame rate
             xml_path: Path to MuJoCo XML model file (uses default if None)
+            show_tcp_frame: Whether to show the TCP coordinate frame
         """
         super().__init__(shm_name=shm_name, fps=fps, **kwargs)
         
@@ -52,6 +105,8 @@ class Visualizer(BaseVisualizer):
         self.mjdata = None
         self.viewer = None
         self.qpos_indices = None
+        self.tcp_site_id = None
+        self.show_tcp_frame = show_tcp_frame
     
     def setup(self) -> bool:
         """
@@ -68,6 +123,14 @@ class Visualizer(BaseVisualizer):
                 for name in JOINT_NAMES
             ])
             
+            # Get TCP site index
+            try:
+                self.tcp_site_id = self.mjmodel.site('tcp').id
+                print(f"[Visualizer] Found TCP site (id={self.tcp_site_id})")
+            except KeyError:
+                print("[Visualizer] Warning: TCP site not found in model")
+                self.tcp_site_id = None
+            
             # Launch passive viewer
             self.viewer = mujoco.viewer.launch_passive(
                 self.mjmodel, 
@@ -77,6 +140,8 @@ class Visualizer(BaseVisualizer):
             )
             
             print("[Visualizer] MuJoCo viewer launched")
+            if self.show_tcp_frame:
+                print("[Visualizer] TCP frame visualization enabled (RGB = XYZ)")
             return True
             
         except Exception as e:
@@ -112,9 +177,16 @@ class Visualizer(BaseVisualizer):
         self.mjdata.qpos[self.qpos_indices] = qpos
         mujoco.mj_forward(self.mjmodel, self.mjdata)
         
+        # Reset user scene geometry count
+        self.viewer.user_scn.ngeom = 0
+        
+        # Draw TCP coordinate frame (world-aligned control frame)
+        if self.show_tcp_frame and self.tcp_site_id is not None:
+            tcp_pos = self.mjdata.site_xpos[self.tcp_site_id].copy()
+            draw_coordinate_frame(self.viewer, tcp_pos,
+                                  axis_length=0.06, axis_radius=0.003)
+        
         # Sync viewer
-        with self.viewer.lock():
-            pass  # State already updated
         self.viewer.sync()
         
         return True
