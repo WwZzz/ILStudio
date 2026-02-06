@@ -1,0 +1,31 @@
+# Alicia-D Robot Configuration
+# 6-DOF robot arm with gripper, using Pinocchio IK solver
+#
+# Dependencies: pinocchio, pyserial (NO robocore/synriard needed)
+
+type: deploy.robot.alicia_d.AliciaD
+args:
+  name: alicia_d
+  port: /dev/ttyACM2
+  fps: 200.0
+  control_mode: qpos  # "qpos" for direct joint control, "delta_ee" for IK-based EE control
+  
+  # URDF path (uses local file by default, no synriard dependency)
+  # urdf_path: null  # Uses deploy/robot/alicia_d/urdf/Alicia_D_v5_6_gripper_50mm.urdf
+  
+  # Speed settings
+  speed_deg_s: 50.0
+  gripper_speed_deg_s: 483.4
+  
+  # IK settings (used when control_mode is "delta_ee")
+  ik_eps: 0.001        # 1mm tolerance
+  ik_max_iter: 20      # Max iterations (optimized for ~0.3ms solve time)
+  ik_dt: 1.0           # Large step size for fast convergence
+  
+  # Delta EE scaling (used when control_mode is "delta_ee")
+  position_scale: 1.0
+  rotation_scale: 1.0
+  gripper_scale: 1.0
+  
+  # Debug mode
+  debug: false

@@ -489,14 +489,37 @@ AFRAME.registerComponent('controller-updater', {
                     x: leftGamepad.axes[2] || 0,
                     y: leftGamepad.axes[3] || 0
                 };
-                // 侧边按钮
+                // 侧边按钮 - Quest3左手: X和Y按钮
+                // Note: Quest3左手控制器物理按钮是X和Y，不是A和B
+                // Debug: log all button states to identify correct mapping
+                const leftBtnStates = [];
+                for (let i = 0; i < Math.min(leftGamepad.buttons.length, 10); i++) {
+                    leftBtnStates.push(!!leftGamepad.buttons[i]?.pressed);
+                }
+                // Log when any button is pressed
+                if (leftBtnStates.some(b => b)) {
+                    console.log(`Left buttons state:`, leftBtnStates.map((p, i) => `[${i}]=${p}`).join(', '));
+                }
+                
+                // Try multiple possible indices for Y button
+                const btnX = !!leftGamepad.buttons[4]?.pressed;  // X button (should work like A)
+                const btnY3 = !!leftGamepad.buttons[3]?.pressed;  // Try index 3
+                const btnY5 = !!leftGamepad.buttons[5]?.pressed;  // Try index 5 (sometimes Y is here)
+                
                 leftController.buttons = {
-                    a: !!leftGamepad.buttons[3]?.pressed,
-                    b: !!leftGamepad.buttons[4]?.pressed,
+                    x: btnX,
+                    y: btnY3 || btnY5,  // Try both indices 3 and 5
+                    a: btnX,  // Keep for backward compatibility (mapped to X)
+                    b: btnY3 || btnY5,  // Keep for backward compatibility (mapped to Y)
                     squeeze: !!leftGamepad.buttons[1]?.pressed,
                     thumbstick: !!leftGamepad.buttons[2]?.pressed,
                     menu: !!leftGamepad.buttons[6]?.pressed
                 };
+                
+                // Debug: log which Y button index is active
+                if (btnY3 || btnY5) {
+                    console.log(`Left Y button: [3]=${btnY3}, [5]=${btnY5}`);
+                }
             }
         }
     } else {
@@ -566,14 +589,36 @@ AFRAME.registerComponent('controller-updater', {
                     x: rightGamepad.axes[2] || 0,
                     y: rightGamepad.axes[3] || 0
                 };
-                // 侧边按钮
+                // 侧边按钮 - Quest3右手: A和B按钮
+                // Note: buttons[3] and buttons[4] may be swapped on some Quest3 controllers
+                // Debug: log all button states to identify correct mapping
+                const btnStates = [];
+                for (let i = 0; i < Math.min(rightGamepad.buttons.length, 10); i++) {
+                    btnStates.push(!!rightGamepad.buttons[i]?.pressed);
+                }
+                // Log when any button is pressed
+                if (btnStates.some(b => b)) {
+                    console.log(`Right buttons state:`, btnStates.map((p, i) => `[${i}]=${p}`).join(', '));
+                }
+                
+                // Try multiple possible indices for B button
+                // Quest3 B button might be at different index
+                const btnA = !!rightGamepad.buttons[4]?.pressed;  // A button (confirmed working)
+                const btnB3 = !!rightGamepad.buttons[3]?.pressed;  // Try index 3
+                const btnB5 = !!rightGamepad.buttons[5]?.pressed;  // Try index 5 (sometimes B is here)
+                
                 rightController.buttons = {
-                    a: !!rightGamepad.buttons[3]?.pressed,
-                    b: !!rightGamepad.buttons[4]?.pressed,
+                    a: btnA,
+                    b: btnB3 || btnB5,  // Try both indices 3 and 5
                     squeeze: !!rightGamepad.buttons[1]?.pressed,
                     thumbstick: !!rightGamepad.buttons[2]?.pressed,
                     menu: !!rightGamepad.buttons[6]?.pressed
                 };
+                
+                // Debug: log which B button index is active
+                if (btnB3 || btnB5) {
+                    console.log(`Right B button: [3]=${btnB3}, [5]=${btnB5}`);
+                }
             }
         }
     } else {

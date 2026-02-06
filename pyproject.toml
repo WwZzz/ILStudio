@@ -41,6 +41,7 @@ dependencies = [
     "tensorflow_graphics",
     "loguru",
     "websockets",
+    "pin",
 ]
 
 

@@ -49,7 +49,9 @@ class BiSo101Follower(BaseRobot):
     1. "qpos" (default): Direct joint position control in normalized space (12D)
     2. "delta_ee": 14D delta EE control with IK (7D per arm)
     """
-    
+
+    _left_motors = ["left_shoulder_pan", "left_shoulder_lift", "left_elbow_flex", "left_wrist_flex", "left_wrist_roll", "left_gripper"]
+    _right_motors = ["right_shoulder_pan", "right_shoulder_lift", "right_elbow_flex", "right_wrist_flex", "right_wrist_roll", "right_gripper"]
     # Valid control modes
     CONTROL_MODES = ("delta_ee", "qpos")
     
@@ -206,8 +208,6 @@ class BiSo101Follower(BaseRobot):
         if calibration_dir:
             robot_config.calibration_dir = Path(calibration_dir)
         self._robot = BiSO101Follower(robot_config)
-        self._left_motors = list(self._robot.left_arm.bus.motors)
-        self._right_motors = list(self._robot.right_arm.bus.motors)
         
         # Connect to robot
         retry_counts = 0
@@ -385,8 +385,8 @@ class BiSo101Follower(BaseRobot):
         """Get complete observation data (including camera images)"""
         try:
             obs = self._robot.get_observation()
-            left_qpos = np.array([obs['left_'+m+'.pos'] for m in self._left_motors], dtype=np.float64)
-            right_qpos = np.array([obs['right_'+m+'.pos'] for m in self._right_motors], dtype=np.float64)
+            left_qpos = np.array([obs[m+'.pos'] for m in self._left_motors], dtype=np.float64)
+            right_qpos = np.array([obs[m+'.pos'] for m in self._right_motors], dtype=np.float64)
             
             # Update internal state for delta_ee mode
             if self.control_mode == "delta_ee":
@@ -656,21 +656,29 @@ class BiSo101Follower(BaseRobot):
         
         return action_dict
     
-    def obs2meta(self, obs):
+    @classmethod
+    def obs2meta(cls, obs):
         """Convert the observations from the robot to MetaObs"""
         if obs is None:
             return None
         
-        left_qpos = np.array([obs['left_'+mname+'.pos'] for mname in self._left_motors], dtype=np.float32)
-        right_qpos = np.array([obs['right_'+mname+'.pos'] for mname in self._right_motors], dtype=np.float32)
+        left_qpos = np.array([obs[mname+'.pos'] for mname in cls._left_motors], dtype=np.float32)
+        right_qpos = np.array([obs[mname+'.pos'] for mname in cls._right_motors], dtype=np.float32)
         qpos = np.concatenate([left_qpos, right_qpos])
-        
-        if 'front_camera' in obs:
-            image = obs['front_camera'][np.newaxis, :].transpose(0, 3, 1, 2)
+        images = []
+        if 'head_camera' in obs:
+            image = obs['head_camera']
+            images.append(image)
         else:
-            image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
-            
-        return MetaObs(state=qpos, state_joint=qpos, image=image)
+            images.append(np.zeros((1, 3, 480, 640), dtype=np.uint8))
+        if 'left_wrist_camera' in obs:
+            image = obs['left_wrist_camera']
+            images.append(image)
+        if 'right_wrist_camera' in obs:
+            image = obs['right_wrist_camera']
+            images.append(image)
+        images = np.stack(images).transpose(0, 3, 1, 2)
+        return MetaObs(state=qpos,  image=images)
     
     def start(self):
         """
@@ -990,8 +998,8 @@ class BiSo101Follower(BaseRobot):
     def publish_action(self, action: np.ndarray):
         """Publish action to robot (12D: 6 left + 6 right)"""
         try:
-            left_action = {'left_'+mname+'.pos': action[i] for i, mname in enumerate(self._left_motors)}
-            right_action = {'right_'+mname+'.pos': action[i+len(self._left_motors)] for i, mname in enumerate(self._right_motors)}
+            left_action = {mname+'.pos': action[i] for i, mname in enumerate(self._left_motors)}
+            right_action = {mname+'.pos': action[i+len(self._left_motors)] for i, mname in enumerate(self._right_motors)}
             action_dict = {**left_action, **right_action}
             self._robot.send_action(action_dict)
         except Exception as e:

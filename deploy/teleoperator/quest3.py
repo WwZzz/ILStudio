@@ -36,15 +36,13 @@ class Quest3Teleop(BaseTeleopDevice):
     
     VR Controller Button Mapping:
     =============================
-    - SQUEEZE (side grip button): Enables pose delta transmission. 
-      Hold this button to move the robot arm. When released, no pose data is sent.
-      In code: is_squeeze_pressed, squeeze_active, _left_squeeze_active, _right_squeeze_active
+    - unsqueeze (side grip): Enables pose delta transmission.
+      Hold to move the robot arm. When released, pose deltas are zeroed.
+      In code: is_unsqueeze_pressed, _left_unsqueeze_active, _right_unsqueeze_active
       
-    - TRIGGER (front trigger): Controls the robot's GRIPPER (end-effector jaw).
-      Press to open/close the gripper depending on gripper_default_closed setting.
-      In code: trigger_active, trigger_value
-      
-    Note: "Squeeze" is the VR button name, "Gripper" refers to the robot's jaw.
+    - GRIPPER CONTROL:
+      * gripper_button_control=True: A/X button opens, TRIGGER closes
+      * gripper_button_control=False: TRIGGER controls gripper (original mode)
     
     Action format:
         Single arm: [dx, dy, dz, droll, dpitch, dyaw, gripper] (7D)
@@ -65,6 +63,7 @@ class Quest3Teleop(BaseTeleopDevice):
         gripper_default_closed: bool = True,
         gripper_delta_mode: bool = False,
         gripper_delta_value: float = 1.0,
+        gripper_button_control: bool = False,  # Use A/B (right) or X/Y (left) buttons instead of trigger
         debug: bool = False,
         **kwargs
     ):
@@ -91,6 +90,11 @@ class Quest3Teleop(BaseTeleopDevice):
                                If False, gripper outputs absolute state (0=closed, 1=open)
             gripper_delta_value: The delta value to use when gripper_delta_mode is True
                                 Default: 1.0 (adjust based on robot's gripper speed)
+            gripper_button_control: If True, use A/B buttons (right hand) or X/Y buttons (left hand)
+                                   to control gripper instead of trigger.
+                                   Right hand: A=open delta, B=close delta
+                                   Left hand: X=open delta, Y=close delta
+                                   Requires gripper_delta_mode=True
             debug: Enable debug output
         """
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps)
@@ -102,6 +106,7 @@ class Quest3Teleop(BaseTeleopDevice):
         self.gripper_default_closed = gripper_default_closed
         self.gripper_delta_mode = gripper_delta_mode
         self.gripper_delta_value = gripper_delta_value
+        self.gripper_button_control = gripper_button_control
         self.debug = debug
         
         # Calibration transform matrix (3x3)
@@ -123,12 +128,12 @@ class Quest3Teleop(BaseTeleopDevice):
         # State tracking for delta calculation
         self._left_prev_position = None
         self._left_prev_quaternion = None
-        self._left_squeeze_active = False  # VR SQUEEZE button state (not robot gripper!)
+        self._left_unsqueeze_active = False  # VR side grip state - enables pose transmission
         self._left_last_goal_id = None  # Track if goal changed
         
         self._right_prev_position = None
         self._right_prev_quaternion = None
-        self._right_squeeze_active = False  # VR SQUEEZE button state (not robot gripper!)
+        self._right_unsqueeze_active = False  # VR side grip state - enables pose transmission
         self._right_last_goal_id = None  # Track if goal changed
         
         # Robot GRIPPER states (0.0 = open, 1.0 = closed) - controlled by VR TRIGGER
@@ -220,35 +225,31 @@ class Quest3Teleop(BaseTeleopDevice):
         goal,
         prev_position: Optional[np.ndarray],
         prev_quaternion: Optional[np.ndarray],
-        squeeze_was_active: bool
+        unsqueeze_was_active: bool,
+        is_right_hand: bool = True
     ) -> tuple:
         """
         Compute pose delta for one arm.
         
         Args:
-            squeeze_was_active: Whether VR SQUEEZE button (side grip) was active last frame
+            unsqueeze_was_active: Whether VR side grip was active last frame
+            is_right_hand: True for right hand (A button), False for left hand (X button)
         
         Returns:
-            (delta_pose, new_position, new_quaternion, new_squeeze_active, gripper_value)
-            - delta_pose: [dx, dy, dz, droll, dpitch, dyaw] (6D)
-            - new_squeeze_active: VR SQUEEZE button state (for pose transmission)
-            - gripper_value: Robot GRIPPER (jaw) control value
+            (delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value)
+            - delta_pose: [dx, dy, dz, droll, dpitch, dyaw] (6D) - only non-zero when unsqueeze active
+            - new_unsqueeze_active: VR side grip state (for pose transmission)
+            - gripper_value: Robot GRIPPER control value
         """
         delta_pose = np.zeros(6)
-        # Set default robot gripper value based on mode and settings
-        # NOTE: gripper_value controls the ROBOT's jaw, not the VR squeeze button!
-        if self.gripper_delta_mode:
-            # Delta mode: negative = close, positive = open
-            gripper_value = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
-        else:
-            # Absolute mode: 0.0 = closed, 1.0 = open
-            gripper_value = 0.0 if self.gripper_default_closed else 1.0
+        # Default gripper value: no change in button control mode
+        gripper_value = 0.0
         new_position = prev_position
         new_quaternion = prev_quaternion
-        new_squeeze_active = squeeze_was_active
+        new_unsqueeze_active = unsqueeze_was_active
         
         if goal is None:
-            return delta_pose, new_position, new_quaternion, new_squeeze_active, gripper_value
+            return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
         
         # Get current position (use vr_position for raw VR coordinates)
         current_position = None
@@ -267,81 +268,141 @@ class Quest3Teleop(BaseTeleopDevice):
                 current_quaternion = np.array([quat['x'], quat['y'], quat['z'], quat['w']])
         
         # ============================================================
-        # VR SQUEEZE BUTTON (side grip) - enables pose delta transmission
+        # Squeeze (side grip) - unfreezes pose delta transmission
+        # When pressed, position/rotation deltas are computed and sent
         # This is NOT the robot gripper! This is the VR controller's side button.
         # ============================================================
-        is_squeeze_pressed = False
+        is_unsqueeze_pressed = False
         if goal.metadata:
-            # Check grip_active field (VR squeeze button state from XLeVR)
-            is_squeeze_pressed = goal.metadata.get("grip_active", False)
+            # Check grip_active field (VR side grip state from XLeVR)
+            is_unsqueeze_pressed = goal.metadata.get("grip_active", False)
             
-            # Also check buttons dict for squeeze
+            # Also check buttons dict for unsqueeze
             buttons = goal.metadata.get("buttons", {})
-            if buttons and buttons.get("squeeze", False):
-                is_squeeze_pressed = True
+            
+            if buttons and buttons.get("unsqueeze", False):
+                is_unsqueeze_pressed = True
             
             # ============================================================
-            # VR TRIGGER BUTTON (front trigger) - controls ROBOT GRIPPER
-            # trigger_active -> controls gripper_value (robot's jaw)
+            # GRIPPER CONTROL - via trigger or buttons (A/B for right, X/Y for left)
             # ============================================================
-            trigger_active = goal.metadata.get("trigger_active", False)
-            
-            # Also check buttons dict for trigger
-            if not trigger_active and buttons:
-                trigger_active = buttons.get("trigger", False)
-            
-            # Also check trigger_value (some VR systems report as float 0-1)
-            trigger_value = goal.metadata.get("trigger_value", 0.0)
-            if not trigger_active and trigger_value > 0.5:
-                trigger_active = True
-            
-            if self.debug:
-                print(f"[Quest3Teleop] trigger_active={trigger_active}, trigger_value={trigger_value}")
-            
-            if self.gripper_delta_mode:
-                # Delta mode: output incremental values for robots using delta control
-                # Positive = open more, Negative = close more
-                if self.gripper_default_closed:
-                    # Default closing, trigger opens
-                    if trigger_active:
-                        gripper_value = self.gripper_delta_value   # Open (positive delta)
-                    else:
-                        gripper_value = -self.gripper_delta_value  # Close (negative delta)
+            if self.gripper_button_control:
+                # Button control mode: 
+                # Right hand: A=open, B=close (or trigger=close)
+                # Left hand: X=open, Y=close (or trigger=close)
+                if is_right_hand:
+                    # Right hand: check for A button (open) and B button (close)
+                    open_button = (buttons.get("a", False) or 
+                                 buttons.get("button_a", False) or
+                                 buttons.get("A", False))
+                    close_button_btn = (buttons.get("b", False) or 
+                                      buttons.get("button_b", False) or
+                                      buttons.get("B", False))
                 else:
-                    # Default opening, trigger closes
-                    if trigger_active:
-                        gripper_value = -self.gripper_delta_value  # Close (negative delta)
-                    else:
-                        gripper_value = self.gripper_delta_value   # Open (positive delta)
+                    # Left hand: check for X button (open) and Y button (close)
+                    open_button = (buttons.get("x", False) or 
+                                 buttons.get("button_x", False) or
+                                 buttons.get("X", False))
+                    close_button_btn = (buttons.get("y", False) or 
+                                      buttons.get("button_y", False) or
+                                      buttons.get("Y", False))
+                
+                # Use trigger for close (both hands) - trigger can also close
+                trigger_active = goal.metadata.get("trigger_active", False)
+                if not trigger_active:
+                    trigger_value = goal.metadata.get("trigger_value", 0.0)
+                    if trigger_value > 0.5:
+                        trigger_active = True
+                close_button = trigger_active or close_button_btn
+                
+                # Button control requires delta mode
+                if open_button:
+                    gripper_value = self.gripper_delta_value   # Open (positive delta)
+                elif close_button:
+                    gripper_value = -self.gripper_delta_value  # Close (negative delta)
+                else:
+                    gripper_value = 0.0  # No change when no button pressed
+                
+                if self.debug:
+                    hand_name = 'Right' if is_right_hand else 'Left'
+                    btn_name = 'A' if is_right_hand else 'X'
+                    close_btn_name = 'B/Trigger' if is_right_hand else 'Y/Trigger'
+                    print(f"[Quest3Teleop] {hand_name} hand: open({btn_name})={open_button}, close({close_btn_name})={close_button} (btn={close_button_btn}, trigger={trigger_active}), gripper_value={gripper_value}")
+                    if buttons:
+                        print(f"[Quest3Teleop]   Available buttons: {list(buttons.keys())}")
+                        # Print all button states for debugging
+                        btn_states = {k: v for k, v in buttons.items() if v}
+                        if btn_states:
+                            print(f"[Quest3Teleop]   Active buttons: {btn_states}")
+                        # Check specific button names
+                        if is_right_hand:
+                            print(f"[Quest3Teleop]   Button 'b' value: {buttons.get('b', 'NOT_FOUND')}")
+                            print(f"[Quest3Teleop]   Button 'B' value: {buttons.get('B', 'NOT_FOUND')}")
+                            print(f"[Quest3Teleop]   Button 'button_b' value: {buttons.get('button_b', 'NOT_FOUND')}")
+                        else:
+                            print(f"[Quest3Teleop]   Button 'y' value: {buttons.get('y', 'NOT_FOUND')}")
+                            print(f"[Quest3Teleop]   Button 'Y' value: {buttons.get('Y', 'NOT_FOUND')}")
+                            print(f"[Quest3Teleop]   Button 'button_y' value: {buttons.get('button_y', 'NOT_FOUND')}")
             else:
-                # Absolute mode: output state values (0=closed, 1=open)
-                if self.gripper_default_closed:
-                    # Default closed, trigger opens
-                    if trigger_active:
-                        gripper_value = 1.0  # Open when trigger pressed
+                # Trigger control mode (original behavior)
+                trigger_active = goal.metadata.get("trigger_active", False)
+                
+                # Also check buttons dict for trigger
+                if not trigger_active and buttons:
+                    trigger_active = buttons.get("trigger", False)
+                
+                # Also check trigger_value (some VR systems report as float 0-1)
+                trigger_value = goal.metadata.get("trigger_value", 0.0)
+                if not trigger_active and trigger_value > 0.5:
+                    trigger_active = True
+                
+                if self.debug:
+                    print(f"[Quest3Teleop] trigger_active={trigger_active}, trigger_value={trigger_value}")
+                
+                if self.gripper_delta_mode:
+                    # Delta mode: output incremental values for robots using delta control
+                    # Positive = open more, Negative = close more
+                    if self.gripper_default_closed:
+                        # Default closing, trigger opens
+                        if trigger_active:
+                            gripper_value = self.gripper_delta_value   # Open (positive delta)
+                        else:
+                            gripper_value = -self.gripper_delta_value  # Close (negative delta)
                     else:
-                        gripper_value = 0.0  # Closed when trigger released
+                        # Default opening, trigger closes
+                        if trigger_active:
+                            gripper_value = -self.gripper_delta_value  # Close (negative delta)
+                        else:
+                            gripper_value = self.gripper_delta_value   # Open (positive delta)
                 else:
-                    # Default open, trigger closes
-                    if trigger_active:
-                        gripper_value = 0.0  # Closed when trigger pressed
+                    # Absolute mode: output state values (0=closed, 1=open)
+                    if self.gripper_default_closed:
+                        # Default closed, trigger opens
+                        if trigger_active:
+                            gripper_value = 1.0  # Open when trigger pressed
+                        else:
+                            gripper_value = 0.0  # Closed when trigger released
                     else:
-                        gripper_value = 1.0  # Open when trigger released
+                        # Default open, trigger closes
+                        if trigger_active:
+                            gripper_value = 0.0  # Closed when trigger pressed
+                        else:
+                            gripper_value = 1.0  # Open when trigger released
         
-        # Handle VR SQUEEZE button state transitions (controls pose transmission)
+        # Handle unsqueeze (side grip) state transitions - enables pose transmission
         if current_position is not None:
-            if is_squeeze_pressed:
-                if not squeeze_was_active:
-                    # Squeeze just activated - set current position as reference
-                    # Don't send delta on first frame of squeeze
+            if is_unsqueeze_pressed:
+                if not unsqueeze_was_active:
+                    # unsqueeze just activated - set current position as reference
+                    # Don't send delta on first frame
                     new_position = current_position.copy()
                     new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
-                    new_squeeze_active = True
+                    new_unsqueeze_active = True
                     if self.debug:
-                        print(f"[Quest3Teleop] Squeeze activated - setting reference position")
-                    return delta_pose, new_position, new_quaternion, new_squeeze_active, gripper_value
+                        print(f"[Quest3Teleop] unsqueeze activated")
+                    return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
                 else:
-                    # Squeeze held - compute delta from reference
+                    # unsqueeze held - compute delta from reference
                     if prev_position is not None:
                         """
                         # 1. 位置增量转换
@@ -403,14 +464,14 @@ class Quest3Teleop(BaseTeleopDevice):
                     # Update reference for next frame
                     new_position = current_position.copy()
                     new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
-                    new_squeeze_active = True
+                    new_unsqueeze_active = True
             else:
-                # Squeeze not pressed - reset reference, delta stays zero
+                # unsqueeze not pressed - pose frozen, update reference for next activation
                 new_position = current_position.copy()
                 new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
-                new_squeeze_active = False
+                new_unsqueeze_active = False
         
-        return delta_pose, new_position, new_quaternion, new_squeeze_active, gripper_value
+        return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
     
     def convert_data_to_action(self, data: dict) -> tuple:
         """
@@ -421,7 +482,11 @@ class Quest3Teleop(BaseTeleopDevice):
             
         Returns:
             (action, should_write): Action array and whether to write to shm
-            should_write is True only when VR SQUEEZE button is pressed AND there's new VR data
+            should_write is True whenever there's new VR data
+            
+        Note:
+            - unsqueeze (side grip): Enables pose delta transmission
+            - Gripper (A/X + trigger): Works independently, always active
         """
         should_write = False
         has_new_data = False
@@ -444,11 +509,12 @@ class Quest3Teleop(BaseTeleopDevice):
             
             if left_is_new:
                 (left_delta, self._left_prev_position, self._left_prev_quaternion, 
-                 self._left_squeeze_active, left_gripper) = self._compute_arm_delta(
+                 self._left_unsqueeze_active, left_gripper) = self._compute_arm_delta(
                     left_goal, 
                     self._left_prev_position, 
                     self._left_prev_quaternion,
-                    self._left_squeeze_active
+                    self._left_unsqueeze_active,
+                    is_right_hand=False  # Left hand: X button
                 )
                 action[0:6] = left_delta
                 action[6] = left_gripper
@@ -462,18 +528,19 @@ class Quest3Teleop(BaseTeleopDevice):
             
             if right_is_new:
                 (right_delta, self._right_prev_position, self._right_prev_quaternion,
-                 self._right_squeeze_active, right_gripper) = self._compute_arm_delta(
+                 self._right_unsqueeze_active, right_gripper) = self._compute_arm_delta(
                     right_goal,
                     self._right_prev_position,
                     self._right_prev_quaternion,
-                    self._right_squeeze_active
+                    self._right_unsqueeze_active,
+                    is_right_hand=True  # Right hand: A button
                 )
                 action[7:13] = right_delta
                 action[13] = right_gripper
                 has_new_data = True
             
-            # Only write when VR SQUEEZE is active AND there's new data
-            should_write = has_new_data and (self._left_squeeze_active or self._right_squeeze_active)
+            # Only write when VR unsqueeze is active AND there's new data
+            should_write = has_new_data and (self._left_unsqueeze_active or self._right_unsqueeze_active)
             
         elif self.arm_mode == "left":
             # Initialize with default gripper value
@@ -491,17 +558,18 @@ class Quest3Teleop(BaseTeleopDevice):
             
             if left_is_new:
                 (left_delta, self._left_prev_position, self._left_prev_quaternion,
-                 self._left_squeeze_active, left_gripper) = self._compute_arm_delta(
+                 self._left_unsqueeze_active, left_gripper) = self._compute_arm_delta(
                     left_goal,
                     self._left_prev_position,
                     self._left_prev_quaternion,
-                    self._left_squeeze_active
+                    self._left_unsqueeze_active,
+                    is_right_hand=False  # Left hand: X button
                 )
                 action[0:6] = left_delta
                 action[6] = left_gripper
                 has_new_data = True
             
-            should_write = has_new_data and self._left_squeeze_active
+            should_write = has_new_data and self._left_unsqueeze_active
             
         else:  # right
             # Initialize with default gripper value
@@ -518,17 +586,18 @@ class Quest3Teleop(BaseTeleopDevice):
             
             if right_is_new:
                 (right_delta, self._right_prev_position, self._right_prev_quaternion,
-                 self._right_squeeze_active, right_gripper) = self._compute_arm_delta(
+                 self._right_unsqueeze_active, right_gripper) = self._compute_arm_delta(
                     right_goal,
                     self._right_prev_position,
                     self._right_prev_quaternion,
-                    self._right_squeeze_active
+                    self._right_unsqueeze_active,
+                    is_right_hand=True  # Right hand: A button
                 )
                 action[0:6] = right_delta
                 action[6] = right_gripper
                 has_new_data = True
             
-            should_write = has_new_data and self._right_squeeze_active
+            should_write = has_new_data and self._right_unsqueeze_active
         
         if self.debug and should_write:
             # Print action only when writing
@@ -575,7 +644,7 @@ class Quest3Teleop(BaseTeleopDevice):
                 
                 if data is not None:
                     action, should_write = self.convert_data_to_action(data)
-                    # Only write to shm when squeeze button is pressed AND there's new VR data
+                    # Only write to shm when unsqueeze button is pressed AND there's new VR data
                     if should_write:
                         self.write_data_to_shm({"action": action})
                         self._write_count += 1
@@ -619,7 +688,115 @@ if __name__ == "__main__":
                         help="VR connection timeout in seconds (default: 60)")
     parser.add_argument("--debug", "-d", action="store_true",
                         help="Enable debug output")
+    parser.add_argument("--test-buttons", action="store_true",
+                        help="Test button data capture (direct VR access)")
     args = parser.parse_args()
+    
+    # Button test mode: directly access VR data without starting device process
+    if args.test_buttons:
+        print("=== Button Test Mode ===")
+        print("Press buttons on VR controller to see their states.")
+        print("Available buttons: trigger, a, b, x, y, unsqueeze (side grip)\n")
+        
+        # Create a test instance to access VR data directly
+        test_teleop = Quest3Teleop(
+            name="quest3_test",
+            arm_mode=args.mode,
+            debug=True,
+            gripper_button_control=True,
+            gripper_delta_mode=True,
+        )
+        
+        if not test_teleop.connect():
+            print("Failed to connect to VR. Exiting.")
+            sys.exit(1)
+        
+        try:
+            last_print_time = 0
+            print_interval = 0.1  # Print every 100ms
+            
+            while True:
+                vr_data = test_teleop.get_data()
+                current_time = time.time()
+                
+                # Collect data from both hands
+                right_data = None
+                left_data = None
+                
+                if vr_data is not None:
+                    # Check right controller buttons
+                    if vr_data.get("has_right") and vr_data.get("right"):
+                        right_goal = vr_data["right"]
+                        if right_goal and right_goal.metadata:
+                            buttons = right_goal.metadata.get("buttons", {})
+                            right_data = {
+                                "buttons": buttons,
+                                "trigger_active": right_goal.metadata.get("trigger_active", False),
+                                "trigger_value": right_goal.metadata.get("trigger_value", 0.0),
+                                "grip_active": right_goal.metadata.get("grip_active", False),
+                            }
+                    
+                    # Check left controller buttons
+                    if vr_data.get("has_left") and vr_data.get("left"):
+                        left_goal = vr_data["left"]
+                        if left_goal and left_goal.metadata:
+                            buttons = left_goal.metadata.get("buttons", {})
+                            left_data = {
+                                "buttons": buttons,
+                                "trigger_active": left_goal.metadata.get("trigger_active", False),
+                                "trigger_value": left_goal.metadata.get("trigger_value", 0.0),
+                                "grip_active": left_goal.metadata.get("grip_active", False),
+                            }
+                
+                # Print both hands together every 100ms
+                if current_time - last_print_time >= print_interval:
+                    print("\n" + "="*70)
+                    print("DUAL HAND BUTTON STATES")
+                    print("="*70)
+                    
+                    # Right hand
+                    if right_data:
+                        print("\nRIGHT CONTROLLER:")
+                        print(f"  trigger_active: {right_data['trigger_active']}")
+                        print(f"  trigger_value: {right_data['trigger_value']:.3f}")
+                        print(f"  grip_active (unsqueeze): {right_data['grip_active']}")
+                        print(f"  buttons dict: {right_data['buttons']}")
+                        if right_data['buttons']:
+                            print("  Individual buttons:")
+                            for btn_name, btn_state in right_data['buttons'].items():
+                                status = "✓" if btn_state else "✗"
+                                print(f"    {status} {btn_name}: {btn_state}")
+                        else:
+                            print("  WARNING: buttons dict is empty!")
+                    else:
+                        print("\nRIGHT CONTROLLER: Not available")
+                    
+                    # Left hand
+                    if left_data:
+                        print("\nLEFT CONTROLLER:")
+                        print(f"  trigger_active: {left_data['trigger_active']}")
+                        print(f"  trigger_value: {left_data['trigger_value']:.3f}")
+                        print(f"  grip_active (unsqueeze): {left_data['grip_active']}")
+                        print(f"  buttons dict: {left_data['buttons']}")
+                        if left_data['buttons']:
+                            print("  Individual buttons:")
+                            for btn_name, btn_state in left_data['buttons'].items():
+                                status = "✓" if btn_state else "✗"
+                                print(f"    {status} {btn_name}: {btn_state}")
+                        else:
+                            print("  WARNING: buttons dict is empty!")
+                    else:
+                        print("\nLEFT CONTROLLER: Not available")
+                    
+                    print("="*70)
+                    last_print_time = current_time
+                
+                time.sleep(0.01)  # Small sleep to avoid CPU spinning
+        except KeyboardInterrupt:
+            print("\nStopping button test...")
+        finally:
+            test_teleop.close()
+        sys.exit(0)
     
     print(f"Starting Quest3 Teleop in {args.mode.upper()} mode...")
     
@@ -644,7 +821,7 @@ if __name__ == "__main__":
     
     time.sleep(2.0)
     print("Reading from SHM (Ctrl+C to stop)...")
-    print("Press and hold SQUEEZE button on VR controller to send pose deltas.\n")
+    print("Press and hold unsqueeze button on VR controller to send pose deltas.\n")
     
     try:
         shm = SharedMemoryChannel(shm_name, is_writer=False, timeout=args.timeout + 10)
@@ -655,8 +832,8 @@ if __name__ == "__main__":
                 if len(arr) >= 14:
                     # Dual arm mode
                     print(
-                        f"L: [{arr[0]:+.3f},{arr[1]:+.3f},{arr[2]:+.3f}] rot:[{arr[3]:+.2f},{arr[4]:+.2f},{arr[5]:+.2f}] g:{arr[6]:.0f} | "
-                        f"R: [{arr[7]:+.3f},{arr[8]:+.3f},{arr[9]:+.3f}] rot:[{arr[10]:+.2f},{arr[11]:+.2f},{arr[12]:+.2f}] g:{arr[13]:.0f}",
+                        f"L: [{arr[0]:+.3f},{arr[1]:+.3f},{arr[2]:+.3f}] rot:[{arr[3]:+.2f},{arr[4]:+.2f},{arr[5]:+.2f}] g:{arr[6]:.3f} | "
+                        f"R: [{arr[7]:+.3f},{arr[8]:+.3f},{arr[9]:+.3f}] rot:[{arr[10]:+.2f},{arr[11]:+.2f},{arr[12]:+.2f}] g:{arr[13]:.3f}",
                         end="\r",
                         flush=True,
                     )
@@ -665,7 +842,7 @@ if __name__ == "__main__":
                     print(
                         f"pos: [{arr[0]:+.3f},{arr[1]:+.3f},{arr[2]:+.3f}] "
                         f"rot: [{arr[3]:+.2f},{arr[4]:+.2f},{arr[5]:+.2f}] "
-                        f"grip: {arr[6]:.0f}",
+                        f"grip: {arr[6]:.3f}",
                         end="\r",
                         flush=True,
                     )

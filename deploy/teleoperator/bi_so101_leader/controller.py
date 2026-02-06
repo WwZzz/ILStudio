@@ -89,7 +89,7 @@ if __name__ == "__main__":
     from deploy.shm_utils import SharedMemoryChannel
 
     # Load config
-    cfg_path = Path(__file__).resolve().parents[3] / "configs" / "teleop" / "bi_so101_leader.yaml"
+    cfg_path = Path(__file__).resolve().parents[3] / "configs" / "teleop" / "biso101_leader.yaml"
     with open(cfg_path, "r") as f:
         device_config = yaml.safe_load(f)
 
