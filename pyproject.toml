@@ -42,6 +42,8 @@ dependencies = [
     "loguru",
     "websockets",
     "pin",
+    "fastapi",
+    "uvicorn",
 ]
 
 
