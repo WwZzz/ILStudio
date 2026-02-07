@@ -1,5 +1,5 @@
 from loguru import logger
-from deploy.remote import PolicyClient, parse_server_address, is_server_address
+from deploy.comm import create_client, is_server_address, is_http_address
 import numpy as np
 import re
 
@@ -171,14 +171,15 @@ def load_policy(args):
         logger.info("="*60)
         logger.info("🤖 Remote Policy Evaluation")
         logger.info("="*60)
-        # Remote server mode
-        host, port = parse_server_address(args.model_name_or_path)
-        logger.info(f"🌐 Using remote policy server: {host}:{port}")
+        address = args.model_name_or_path
+        if is_http_address(address):
+            logger.info(f"🌐 Using remote FastAPI policy server: {address}")
+        else:
+            logger.info(f"🌐 Using remote TCP policy server: {address}")
         
-        # Create remote policy client (no need for normalizers or local model)
-        policy = PolicyClient(
-            host=host,
-            port=port,
+        # Create remote policy client (auto-detect TCP vs HTTP)
+        policy = create_client(
+            address=address,
             chunk_size=getattr(args, 'chunk_size', None),
         )
         

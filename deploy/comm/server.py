@@ -1,5 +1,5 @@
 """
-Policy Server for Remote Inference
+Policy Server for Remote Inference (TCP + pickle)
 
 This module provides the PolicyServer class that listens for observation data 
 and returns predicted actions over a network connection.
@@ -15,8 +15,10 @@ from loguru import logger
 from typing import Optional
 from benchmark.base import MetaObs, MetaAction, MetaPolicy
 
+from .base import BaseServer
 
-class PolicyServer:
+
+class PolicyServer(BaseServer):
     """
     Policy server that listens for observation data and returns predicted actions.
     

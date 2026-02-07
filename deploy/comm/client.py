@@ -1,8 +1,8 @@
 """
-Remote Policy Client for Evaluation
+Remote Policy Client for Evaluation (TCP + pickle)
 
-This module provides the RemotePolicyClient class that acts like a MetaPolicy 
-but communicates with a remote policy server.
+This module provides the PolicyClient class that acts like a MetaPolicy 
+but communicates with a remote policy server over TCP.
 """
 
 import socket
@@ -16,8 +16,10 @@ import numpy as np
 from loguru import logger
 from benchmark.base import MetaObs, MetaAction
 
+from .base import BaseClient
 
-class PolicyClient:
+
+class PolicyClient(BaseClient):
     """
     Remote Policy Client that acts like a MetaPolicy but communicates with a policy server.
     
@@ -60,15 +62,16 @@ class PolicyClient:
                 pass
             self.socket = None
     
-    def _send_meta_obs(self, meta_obs: MetaObs) -> List[MetaAction]:
+    def send_meta_obs(self, meta_obs: MetaObs, **kwargs) -> List:
         """
         Send MetaObs to server and receive MetaAction list.
         
         Args:
             meta_obs: MetaObs object to send
+            **kwargs: Ignored (for interface compatibility with FastAPI client)
             
         Returns:
-            List of MetaAction objects
+            List of MetaAction-like objects (numpy object arrays)
         """
         if not self.socket:
             raise RuntimeError("Not connected to server")
@@ -95,7 +98,7 @@ class PolicyClient:
                 self._disconnect()
                 self._connect()
                 logger.info("✓ Reconnected to server, retrying...")
-                return self._send_meta_obs(meta_obs)
+                return self.send_meta_obs(meta_obs, **kwargs)
             except:
                 raise RuntimeError(f"Failed to communicate with server and reconnection failed: {e}")
     
@@ -182,7 +185,7 @@ class PolicyClient:
             logger.debug(f"  📤 Requesting new action chunk from server (t={t})")
             
             # Send observation to server and get action chunk
-            mact_list = self._send_meta_obs(mobs)
+            mact_list = self.send_meta_obs(mobs)
             
             if not mact_list:
                 raise RuntimeError("Server returned empty action list")
@@ -220,10 +223,14 @@ class PolicyClient:
         """Reset the policy (clear action queue)"""
         self.action_queue.clear()
         logger.debug("  🔄 Remote policy reset (cleared action queue)")
+
+    def close(self):
+        """Close the connection to the server."""
+        self._disconnect()
     
     def __del__(self):
         """Cleanup on destruction"""
-        self._disconnect()
+        self.close()
 
 
 def parse_server_address(model_path: str) -> tuple:

@@ -14,15 +14,7 @@ from policy.policy_loader import (
     load_policy_model_for_training,
 )
 from policy.trainer import BaseTrainer
-import torch
-import numpy
-try:
-    torch.serialization.add_safe_globals([numpy.ndarray])
-    torch.serialization.add_safe_globals([numpy.core.multiarray._reconstruct])
-    torch.serialization.add_safe_globals([numpy.dtype])
-    torch.serialization.safe_globals([numpy.dtype])
-except:
-    pass
+
 
 def parse_param():
     """

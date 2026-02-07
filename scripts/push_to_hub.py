@@ -215,20 +215,20 @@ def main():
         description="Push trained models or datasets to Hugging Face Hub",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Push a model checkpoint
-  python push_to_hub.py --type model --path ckpt/act_example --repo_id username/model-name
-  
-  # Push a dataset
-  python push_to_hub.py --type dataset --path data/my_dataset --repo_id username/dataset-name
-  
-  # Push with custom commit message
-  python push_to_hub.py --type model --path ckpt/act_example \\
-      --repo_id username/model-name --commit_message "Update model v2"
-  
-  # Push to a private repository
-  python push_to_hub.py --type model --path ckpt/act_example \\
-      --repo_id username/model-name --private
+            Examples:
+            # Push a model checkpoint
+            python push_to_hub.py --type model --path ckpt/act_example --repo_id username/model-name
+            
+            # Push a dataset
+            python push_to_hub.py --type dataset --path data/my_dataset --repo_id username/dataset-name
+            
+            # Push with custom commit message
+            python push_to_hub.py --type model --path ckpt/act_example \\
+                --repo_id username/model-name --commit_message "Update model v2"
+            
+            # Push to a private repository
+            python push_to_hub.py --type model --path ckpt/act_example \\
+                --repo_id username/model-name --private
         """
     )
     

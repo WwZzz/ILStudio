@@ -21,3 +21,17 @@ logging.getLogger("dm_control").setLevel(logging.ERROR)
 
 ILSTD_CACHE = os.environ.get('ILSTD_CACHE', os.path.join(os.path.expanduser('~'), ".cache/ilstd"))
 os.makedirs(ILSTD_CACHE, exist_ok=True)
+
+import torch
+import numpy as np
+
+safe_types = [
+    np.ndarray,
+    np.dtype,
+    np.core.multiarray._reconstruct,
+]
+for name in dir(np.dtypes):
+    obj = getattr(np.dtypes, name)
+    if isinstance(obj, type):
+        safe_types.append(obj)
+torch.serialization.add_safe_globals(safe_types)

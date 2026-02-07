@@ -4,6 +4,11 @@ Policy Server Startup Script
 
 This script starts a policy server that listens for observation data 
 and returns predicted actions over a network connection.
+
+Supports three transport modes:
+- TCP + pickle (default): --host 0.0.0.0 --port 5000
+- HTTP/JSON (FastAPI):    --host http(s)://0.0.0.0 --port 8000
+- Shared Memory (SHM):    --host shm://policy
 """
 import configs  
 import os
@@ -13,7 +18,7 @@ from loguru import logger
 from data_utils.normalize import load_normalizers
 from data_utils.utils import set_seed
 from benchmark.base import MetaPolicy
-from deploy.remote import PolicyServer
+from deploy.comm import create_server, is_http_address
 
 def parse_param():
     """
@@ -28,7 +33,9 @@ def parse_param():
     
     # Server arguments
     parser.add_argument('--host', type=str, default='0.0.0.0',
-                       help='Host address to bind (default: 0.0.0.0 for all interfaces)')
+                       help='Host address to bind. Formats: '
+                            '0.0.0.0 (TCP), http://0.0.0.0 (HTTP), '
+                            'shm://shm_name (Shared Memory)')
     parser.add_argument('-p', '--port', type=int, default=5000,
                        help='Port to listen on (default: 5000)')
     
@@ -68,27 +75,27 @@ if __name__=='__main__':
     args.is_training = False
     
     logger.info("="*60)
-    logger.info("🚀 Policy Server Startup")
+    logger.info("Policy Server Startup")
     logger.info("="*60)
     
     # Load normalizers and model
-    logger.info("📦 Loading model and normalizers...")
-    logger.info(f"   Model path: {args.model_name_or_path}")
-    logger.info(f"   Dataset ID: {args.dataset_id if args.dataset_id else '(first dataset)'}")
-    logger.info(f"   Device: {args.device}")
+    logger.info("Loading model and normalizers...")
+    logger.info(f"Model path: {args.model_name_or_path}")
+    logger.info(f"Dataset ID: {args.dataset_id if args.dataset_id else '(first dataset)'}")
+    logger.info(f"Device: {args.device}")
     
     # Load normalizers
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
     args.ctrl_space, args.ctrl_type = ctrl_space, ctrl_type
     
     # Load policy directly from checkpoint
-    logger.info(f"   ✓ Loading model from checkpoint: {args.model_name_or_path}")
+    logger.info(f"Loading model from checkpoint: {args.model_name_or_path}")
     from policy.direct_loader import load_model_from_checkpoint
     model_components = load_model_from_checkpoint(args.model_name_or_path, args)
     model = model_components['model']
     config = model_components.get('config', None)
     if config:
-        logger.info(f"   ✓ Loaded config from checkpoint: {type(config).__name__}")
+        logger.info(f"Loaded config from checkpoint: {type(config).__name__}")
     
     # Create policy
     # Ensure model is in evaluation mode
@@ -102,18 +109,16 @@ if __name__=='__main__':
         ctrl_space=ctrl_space, 
         ctrl_type=ctrl_type
     )
-    logger.info(f"   ✓ Policy created with chunk_size={args.chunk_size}")
+    logger.info(f"Policy created with chunk_size={args.chunk_size}")
     
-    # Create and start server
-    logger.info("🌐 Starting Policy Server...")
-    server = PolicyServer(policy, host=args.host, port=args.port)
+    server = create_server(policy, address=args.host, port=args.port)
     
     try:
         server.start()
     except KeyboardInterrupt:
-        logger.info("⏸ Server interrupted by user")
+        logger.info("Server interrupted by user")
     except Exception as e:
-        logger.error(f"✗ Server error: {e}")
+        logger.error(f"Server error: {e}")
     finally:
         server.stop()
-        logger.info("👋 Server shutdown complete")
+        logger.info("Server shutdown complete")
