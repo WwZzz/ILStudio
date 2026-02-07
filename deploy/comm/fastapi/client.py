@@ -11,11 +11,14 @@ Key requirement:
 
 Note:
 - SSL certificate verification is disabled by default to support self-signed certificates.
+- Each client instance has a unique `client_id` for server-side request deduplication.
 """
 
 from __future__ import annotations
 
 import base64
+import os
+import uuid
 from collections import deque
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -117,6 +120,12 @@ class FastAPIPolicyClient(BaseClient):
     `select_action` follows the same chunked-action semantics:
     - when queue is empty OR (t % chunk_size == 0), request a new chunk
     - otherwise pop from queue
+    
+    Each client instance has a unique `client_id` for server-side request deduplication:
+    - When requests arrive faster than the server can process, only the LATEST
+      observation from each client is used for inference.
+    - Earlier requests receive the same action result as the latest one.
+    - This prevents stale observations from being processed.
     """
 
     def __init__(
@@ -126,6 +135,7 @@ class FastAPIPolicyClient(BaseClient):
         timeout_s: float = 30.0,
         ctrl_space: str = "ee",
         ctrl_type: str = "delta",
+        client_id: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.chunk_size = chunk_size
@@ -133,11 +143,17 @@ class FastAPIPolicyClient(BaseClient):
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
         self.action_queue = deque(maxlen=chunk_size) if (chunk_size is not None and chunk_size > 0) else deque(maxlen=1000)
+        
+        # Generate unique client_id for request deduplication
+        if client_id is None:
+            client_id = f"fastapi_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        self.client_id = client_id
 
         self._session = requests.Session()
         # Disable SSL verification to support self-signed certificates
         self._session.verify = False
         logger.info(f"✓ Connected to FastAPI policy server at {self.base_url}")
+        logger.info(f"   Client ID: {self.client_id}")
 
     def health_check(self) -> bool:
         try:
@@ -155,7 +171,10 @@ class FastAPIPolicyClient(BaseClient):
         reasoning: Any = None,
         timestamp: Optional[float] = None,
     ) -> List[np.ndarray]:
-        payload: Dict[str, Any] = {"meta_obs": _to_jsonable(meta_obs)}
+        payload: Dict[str, Any] = {
+            "meta_obs": _to_jsonable(meta_obs),
+            "client_id": self.client_id,  # For server-side request deduplication
+        }
         if episode_id is not None:
             payload["episode_id"] = episode_id
         if index is not None:

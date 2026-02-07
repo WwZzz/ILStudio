@@ -175,6 +175,7 @@ def create_server(
     policy,
     address: str,
     port: Optional[int] = None,
+    batch_wait_ms: float = 1.0,
 ) -> BaseServer:
     """
     Create a policy server based on address format.
@@ -198,6 +199,8 @@ def create_server(
             - "shm://policy" (Shared Memory)
         port: Port number. If None, defaults to 5000 (TCP) or 8000 (HTTP).
               Ignored for SHM mode.
+        batch_wait_ms: Time to wait for collecting requests before batching (ms).
+                       Used by FastAPI and SHM servers. Default: 1.0ms.
     """
     if is_http_address(address):
         # Extract host and scheme from URL for binding
@@ -260,6 +263,7 @@ def create_server(
             port=p,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
+            batch_wait_ms=batch_wait_ms,
         )
     elif is_shm_address(address):
         # Shared memory mode
@@ -267,6 +271,7 @@ def create_server(
         return SHMPolicyServer(
             policy,
             shm_name=shm_name,
+            batch_wait_ms=batch_wait_ms,
         )
     else:
         # Plain host string -> TCP

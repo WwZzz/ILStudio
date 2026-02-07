@@ -2,8 +2,10 @@
 """
 FastAPI-based Policy Server for Remote Inference (HTTP/JSON).
 
+Supports multiple concurrent clients with batched inference.
+
 Client sends a JSON payload containing a serialized MetaObs (numpy arrays are base64-encoded).
-Server decodes payload -> MetaObs -> MetaPolicy.inference(...) -> returns actions as JSON.
+Server collects requests, batches them, runs inference, and returns actions as JSON.
 
 This is an HTTP/JSON alternative to the TCP+pickle server in `deploy/comm/server.py`.
 """
@@ -15,8 +17,12 @@ import base64
 import os
 import signal
 import sys
+import time
+import threading
+import uuid
+from collections import deque
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -113,21 +119,11 @@ def _payload_to_metaobs(meta_obs_payload: Dict[str, Any]) -> MetaObs:
     return dict2meta(decoded, mtype="obs")
 
 
-def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
+def _enrich_samples(samples: List[dict], payload: Dict[str, Any]) -> None:
     """
-    Build ILStudio standard-format samples (per `.cursor/rules/data-rule.mdc`)
-    and feed them into the model for inference.
-
-    This mirrors `benchmark.base.MetaPolicy.inference`, but ensures the sample dict includes:
-    - image/state/raw_lang/timestamp
-    - action/is_pad placeholders (None) for inference
-    - reasoning/episode_id/__index__ metadata from request payload (best-effort)
+    Enrich samples with metadata from request payload.
+    Modifies samples in-place.
     """
-    # Normalize state first (same as MetaPolicy.inference)
-    normed_mobs = policy.state_normalizer.normalize_metaobs(mobs, policy.ctrl_space)
-    samples = policy.normed_mobs_to_samples(normed_mobs)
-
-    # Enrich samples to the "standard dict format" required by ILStudio project rules.
     reasoning = _from_jsonable(payload.get("reasoning", None)) if payload.get("reasoning", None) is not None else None
     episode_id = payload.get("episode_id", -1)
     index = payload.get("__index__", -1)
@@ -143,6 +139,24 @@ def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
         # `normed_mobs_to_samples` fills timestamp from mobs.timestep; keep it if already present.
         if "timestamp" not in s and ts is not None:
             s["timestamp"] = ts
+
+
+def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
+    """
+    Build ILStudio standard-format samples (per `.cursor/rules/data-rule.mdc`)
+    and feed them into the model for inference.
+
+    This mirrors `benchmark.base.MetaPolicy.inference`, but ensures the sample dict includes:
+    - image/state/raw_lang/timestamp
+    - action/is_pad placeholders (None) for inference
+    - reasoning/episode_id/__index__ metadata from request payload (best-effort)
+    """
+    # Normalize state first (same as MetaPolicy.inference)
+    normed_mobs = policy.state_normalizer.normalize_metaobs(mobs, policy.ctrl_space)
+    samples = policy.normed_mobs_to_samples(normed_mobs)
+
+    # Enrich samples with metadata
+    _enrich_samples(samples, payload)
 
     # Convert samples to model input
     policy_obs = policy.meta2obs(samples)
@@ -183,13 +197,363 @@ def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
     return mact_list
 
 
-def create_app(policy) -> FastAPI:
+class BatchedInferenceManager:
+    """
+    Manages batched inference for multiple concurrent HTTP requests.
+    
+    Collects requests over a short time window (batch_wait_ms), batches them,
+    runs inference, and distributes results back to waiting requests.
+    
+    Key feature: Per-client deduplication
+    - Each client is identified by `client_id` in the request payload
+    - When multiple requests from the same client arrive before processing,
+      only the LATEST request is processed (others receive the same result)
+    - This prevents stale obs from being processed and saves compute
+    """
+
+    def __init__(self, policy, batch_wait_ms: float = 1.0):
+        """
+        Args:
+            policy: The MetaPolicy to use for inference.
+            batch_wait_ms: Time to wait for collecting requests before batching (ms).
+        """
+        self.policy = policy
+        self.batch_wait_ms = batch_wait_ms
+        
+        # Per-client latest request: client_id -> (mobs, payload, result_event, result_container, seq_num)
+        # Using dict ensures only latest request per client is kept
+        self._client_requests: Dict[str, Tuple] = {}
+        # List of (result_event, result_container) for superseded requests (they share result with latest)
+        self._superseded_requests: Dict[str, List[Tuple]] = {}
+        self._queue_lock = threading.Lock()
+        
+        # Sequence number for ordering requests
+        self._seq_counter = 0
+        
+        # Inference thread
+        self._running = True
+        self._inference_thread = threading.Thread(target=self._inference_loop, daemon=True)
+        self._inference_thread.start()
+        
+        self._request_count = 0
+        self._batch_count = 0
+        self._superseded_count = 0  # Count of requests that were superseded
+
+    def submit_request(
+        self, 
+        mobs: MetaObs, 
+        payload: Dict[str, Any], 
+        client_id: Optional[str] = None,
+        timeout: float = 30.0,
+    ) -> list:
+        """
+        Submit a request and wait for the result.
+        
+        Args:
+            mobs: MetaObs to infer.
+            payload: Original request payload (for metadata).
+            client_id: Unique client identifier. If provided, only the latest request
+                       from this client will be processed; earlier requests will receive
+                       the same result as the latest one.
+            timeout: Maximum time to wait for result (seconds).
+            
+        Returns:
+            mact_list: List of action arrays.
+            
+        Raises:
+            TimeoutError: If inference takes too long.
+            RuntimeError: If inference fails.
+        """
+        result_event = threading.Event()
+        result_container = {"result": None, "error": None}
+        
+        # Use client_id from parameter or payload, fallback to unique request_id
+        if client_id is None:
+            client_id = payload.get("client_id")
+        if client_id is None:
+            # No client_id means no deduplication for this request
+            client_id = f"__anon_{uuid.uuid4()}"
+        
+        with self._queue_lock:
+            self._seq_counter += 1
+            seq_num = self._seq_counter
+            
+            # Check if there's already a pending request from this client
+            if client_id in self._client_requests:
+                # Move the old request to superseded list (it will share result with latest)
+                old_req = self._client_requests[client_id]
+                old_event, old_container = old_req[2], old_req[3]
+                
+                if client_id not in self._superseded_requests:
+                    self._superseded_requests[client_id] = []
+                self._superseded_requests[client_id].append((old_event, old_container))
+                self._superseded_count += 1
+            
+            # Store as the latest request for this client
+            self._client_requests[client_id] = (mobs, payload, result_event, result_container, seq_num)
+        
+        # Wait for result
+        if not result_event.wait(timeout=timeout):
+            # Cleanup on timeout
+            with self._queue_lock:
+                if client_id in self._client_requests:
+                    req = self._client_requests[client_id]
+                    if req[4] == seq_num:  # Still our request
+                        del self._client_requests[client_id]
+            raise TimeoutError(f"Inference timeout after {timeout}s")
+        
+        if result_container["error"] is not None:
+            raise RuntimeError(f"Inference failed: {result_container['error']}")
+        
+        return result_container["result"]
+
+    def _inference_loop(self) -> None:
+        """Background thread that processes batched requests."""
+        with torch.no_grad():
+            while self._running:
+                try:
+                    # Collect requests
+                    batch_data = self._collect_batch()
+                    
+                    if not batch_data:
+                        time.sleep(0.0001)  # 0.1ms idle sleep
+                        continue
+                    
+                    # Run batched inference
+                    self._process_batch(batch_data)
+                    
+                except Exception as e:
+                    logger.error(f"Inference loop error: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+    def _collect_batch(self) -> List[Tuple]:
+        """
+        Collect pending requests into a batch.
+        
+        Returns list of (client_id, mobs, payload, result_event, result_container, superseded_list)
+        """
+        batch = []
+        
+        with self._queue_lock:
+            if not self._client_requests:
+                return batch
+        
+        # Wait a bit to collect more requests (allows newer requests to supersede older ones)
+        if self.batch_wait_ms > 0:
+            time.sleep(self.batch_wait_ms / 1000.0)
+        
+        with self._queue_lock:
+            if not self._client_requests:
+                return batch
+            
+            # Take all current requests
+            for client_id, req in self._client_requests.items():
+                mobs, payload, event, container, seq_num = req
+                superseded = self._superseded_requests.pop(client_id, [])
+                batch.append((client_id, mobs, payload, event, container, superseded))
+            
+            self._client_requests.clear()
+        
+        return batch
+
+    def _process_batch(self, batch: List[Tuple]) -> None:
+        """Process a batch of requests."""
+        if not batch:
+            return
+        
+        n_requests = len(batch)
+        client_ids = [b[0] for b in batch]
+        mobs_list = [b[1] for b in batch]
+        payloads = [b[2] for b in batch]
+        events = [b[3] for b in batch]
+        containers = [b[4] for b in batch]
+        superseded_lists = [b[5] for b in batch]
+        
+        try:
+            if n_requests == 1:
+                # Single request - no batching needed
+                mact_list = _infer_via_standard_samples(self.policy, mobs_list[0], payloads[0])
+                containers[0]["result"] = mact_list
+            else:
+                # Multiple requests - batch inference
+                results = self._batch_inference(mobs_list, payloads)
+                
+                for i, result in enumerate(results):
+                    containers[i]["result"] = result
+            
+            self._request_count += n_requests
+            self._batch_count += 1
+            
+            if self._batch_count % 100 == 0:
+                logger.debug(f"  Processed {self._request_count} requests in {self._batch_count} batches, "
+                           f"avg batch size: {self._request_count / self._batch_count:.1f}, "
+                           f"superseded: {self._superseded_count}")
+                
+        except Exception as e:
+            # Set error for all requests in batch
+            error_msg = str(e)
+            for container in containers:
+                container["error"] = error_msg
+        
+        finally:
+            # Signal all waiting requests (including superseded ones)
+            for i, event in enumerate(events):
+                # Copy result to superseded requests
+                for sup_event, sup_container in superseded_lists[i]:
+                    sup_container["result"] = containers[i]["result"]
+                    sup_container["error"] = containers[i]["error"]
+                    sup_event.set()
+                
+                event.set()
+
+    def _batch_inference(self, mobs_list: List[MetaObs], payloads: List[Dict]) -> List[list]:
+        """
+        Run batched inference on multiple MetaObs.
+        
+        Args:
+            mobs_list: List of MetaObs to infer.
+            payloads: List of request payloads (for metadata).
+            
+        Returns:
+            List of mact_list, one per input MetaObs.
+        """
+        n_clients = len(mobs_list)
+        
+        # Batch the MetaObs
+        batched_mobs = self._batch_metaobs(mobs_list)
+        
+        # Normalize state
+        normed_mobs = self.policy.state_normalizer.normalize_metaobs(batched_mobs, self.policy.ctrl_space)
+        samples = self.policy.normed_mobs_to_samples(normed_mobs)
+        
+        # Enrich samples with metadata from first payload (best-effort)
+        _enrich_samples(samples, payloads[0])
+        
+        # Convert samples to model input
+        policy_obs = self.policy.meta2obs(samples)
+        
+        # Inference action chunk using underlying model
+        action_chunk = self.policy.policy.select_action(policy_obs)
+        
+        # Convert to MetaAction and denormalize action
+        macts = self.policy.act2meta(action_chunk, ctrl_space=self.policy.ctrl_space, ctrl_type=self.policy.ctrl_type)
+        action_chunk = macts.action
+        
+        is_chunked = (len(action_chunk.shape) == 3)
+        bs = action_chunk.shape[0] if is_chunked else 1
+        ac_dim = action_chunk.shape[-1]
+        
+        if is_chunked:
+            macts.action = action_chunk.reshape(-1, ac_dim)
+        
+        macts = self.policy.action_normalizer.denormalize_metaact(macts)
+        
+        if is_chunked:
+            macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
+        else:
+            macts.action = macts.action[np.newaxis, :]
+        
+        from benchmark.base import MetaAction
+        
+        # Build full mact_list (batched)
+        mact_list = [
+            np.array(
+                [asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai],
+                dtype=object,
+            )
+            for ai in macts.action
+        ]
+        
+        if self.policy.chunk_size is not None and self.policy.chunk_size > 0:
+            mact_list = mact_list[: self.policy.chunk_size]
+        
+        # Unbatch results
+        return self._unbatch_mact_list(mact_list, n_clients)
+
+    def _batch_metaobs(self, mobs_list: List[MetaObs]) -> MetaObs:
+        """Batch multiple MetaObs into one."""
+        if len(mobs_list) == 1:
+            return mobs_list[0]
+        
+        # Helper to safely concatenate arrays
+        def safe_concat(attr_name):
+            arrays = [getattr(m, attr_name) for m in mobs_list if getattr(m, attr_name, None) is not None]
+            if not arrays:
+                return None
+            return np.concatenate(arrays, axis=0)
+        
+        # Stack all fields along batch dimension
+        batched = MetaObs(
+            state=safe_concat('state'),
+            state_ee=safe_concat('state_ee'),
+            state_joint=safe_concat('state_joint'),
+            state_obj=safe_concat('state_obj'),
+            image=safe_concat('image'),
+            depth=safe_concat('depth'),
+            pc=safe_concat('pc'),
+            timestep=safe_concat('timestep'),
+            raw_lang=mobs_list[0].raw_lang if mobs_list[0].raw_lang else '',
+        )
+        return batched
+
+    def _unbatch_mact_list(self, mact_list: list, n_clients: int) -> List[list]:
+        """
+        Unbatch mact_list back to per-client results.
+        
+        Args:
+            mact_list: Batched action list from inference
+            n_clients: Number of clients in the batch
+            
+        Returns:
+            List of mact_list, one per client.
+        """
+        if n_clients == 1:
+            return [mact_list]
+        
+        # mact_list is List[np.ndarray(dtype=object)] where each array has batch_size elements
+        results = [[] for _ in range(n_clients)]
+        
+        for step_arr in mact_list:
+            if isinstance(step_arr, np.ndarray) and len(step_arr) == n_clients:
+                # Split by client
+                for i in range(n_clients):
+                    results[i].append(np.array([step_arr[i]], dtype=object))
+            else:
+                # Can't unbatch properly, give same result to all
+                for i in range(n_clients):
+                    results[i].append(step_arr)
+        
+        return results
+
+    def stop(self) -> None:
+        """Stop the inference thread."""
+        self._running = False
+        if self._inference_thread.is_alive():
+            self._inference_thread.join(timeout=2.0)
+
+
+def create_app(policy, batch_wait_ms: float = 1.0) -> FastAPI:
+    """
+    Create FastAPI app with batched inference support.
+    
+    Args:
+        policy: The MetaPolicy to serve.
+        batch_wait_ms: Time to wait for collecting requests before batching (ms).
+    """
     app = FastAPI(title="ILStudio Policy Server (FastAPI)")
     app.state.policy = policy
+    app.state.batch_manager = BatchedInferenceManager(policy, batch_wait_ms=batch_wait_ms)
 
     @app.get("/health")
     async def health():
-        return {"status": "ok"}
+        manager = app.state.batch_manager
+        return {
+            "status": "ok",
+            "requests_processed": manager._request_count,
+            "batches_processed": manager._batch_count,
+            "superseded_requests": manager._superseded_count,
+        }
 
     @app.post("/inference")
     async def inference(payload: Dict[str, Any] = Body(...)):
@@ -197,11 +561,18 @@ def create_app(policy) -> FastAPI:
         Expected payload shape:
         {
           "meta_obs": { ... serialized MetaObs ... },
+          "client_id": optional str (for request deduplication - only latest request per client is processed),
           "episode_id": optional int,
           "__index__": optional int,
           "reasoning": optional any,
           "timestamp": optional float|int (if you want to override MetaObs.timestep)
         }
+        
+        Note on client_id:
+        - If provided, when multiple requests from the same client arrive before processing,
+          only the LATEST observation will be used for inference.
+        - Earlier requests will receive the same action result as the latest one.
+        - This prevents stale observations from consuming compute and ensures actions match current state.
         """
         try:
             if "meta_obs" not in payload:
@@ -213,22 +584,33 @@ def create_app(policy) -> FastAPI:
             if "timestamp" in payload and payload["timestamp"] is not None:
                 mobs.timestep = _from_jsonable(payload["timestamp"])
 
-            # Run inference
-            with torch.no_grad():
-                mact_list = _infer_via_standard_samples(app.state.policy, mobs, payload)
+            # Extract client_id for deduplication
+            client_id = payload.get("client_id")
+
+            # Submit to batch manager and wait for result
+            mact_list = app.state.batch_manager.submit_request(mobs, payload, client_id=client_id)
 
             # Return actions (JSON-encoded)
             return {"mact_list": _to_jsonable(mact_list)}
+        except TimeoutError as e:
+            logger.error(f"FastAPI inference timeout: {e}")
+            raise HTTPException(status_code=504, detail=str(e)) from e
         except Exception as e:
             logger.exception("FastAPI inference failed")
             raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Cleanup on server shutdown."""
+        if hasattr(app.state, "batch_manager"):
+            app.state.batch_manager.stop()
 
     return app
 
 
 class FastAPIPolicyServer(BaseServer):
     """
-    HTTP/JSON policy server using FastAPI + uvicorn.
+    HTTP/JSON policy server using FastAPI + uvicorn with batched inference.
 
     Inherits from BaseServer for a unified interface.
 
@@ -238,6 +620,7 @@ class FastAPIPolicyServer(BaseServer):
         port: Port number.
         ssl_keyfile: Path to SSL private key file (for HTTPS).
         ssl_certfile: Path to SSL certificate file (for HTTPS).
+        batch_wait_ms: Time to wait for collecting requests before batching (ms).
     """
 
     def __init__(
@@ -247,20 +630,23 @@ class FastAPIPolicyServer(BaseServer):
         port: int = 8000,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
+        batch_wait_ms: float = 1.0,
     ):
         self.policy = policy
         self.host = host
         self.port = port
         self.ssl_keyfile = ssl_keyfile
         self.ssl_certfile = ssl_certfile
+        self.batch_wait_ms = batch_wait_ms
         self._app: Optional[FastAPI] = None
         self._server = None
 
     def start(self) -> None:
         """Start the server (blocking)."""
-        self._app = create_app(self.policy)
+        self._app = create_app(self.policy, batch_wait_ms=self.batch_wait_ms)
         scheme = "https" if self.ssl_certfile else "http"
         logger.info(f"🚀 FastAPI Policy Server started on {scheme}://{self.host}:{self.port}")
+        logger.info(f"   Batch wait: {self.batch_wait_ms}ms")
         uvicorn.run(
             self._app,
             host=self.host,
@@ -271,6 +657,8 @@ class FastAPIPolicyServer(BaseServer):
 
     def stop(self) -> None:
         """Stop the server gracefully (no-op for uvicorn.run blocking mode)."""
+        if self._app and hasattr(self._app.state, "batch_manager"):
+            self._app.state.batch_manager.stop()
         logger.info("✓ FastAPI Policy Server stopped")
 
 
@@ -286,6 +674,8 @@ def _parse_args():
     )
     p.add_argument("--host", type=str, default="0.0.0.0")
     p.add_argument("-p", "--port", type=int, default=8000)
+    p.add_argument("--batch_wait_ms", type=float, default=1.0,
+                   help="Time to wait for collecting requests before batching (ms)")
 
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument(
@@ -323,6 +713,7 @@ def main():
     logger.info(f"   Model path: {args.model_name_or_path}")
     logger.info(f"   Dataset ID: {args.dataset_id if args.dataset_id else '(first dataset)'}")
     logger.info(f"   Device: {args.device}")
+    logger.info(f"   Batch wait: {args.batch_wait_ms}ms")
 
     # Load normalizers
     normalizers, ctrl_space, ctrl_type = load_normalizers(args)
@@ -372,6 +763,7 @@ def main():
         port=args.port,
         ssl_keyfile=ssl_keyfile,
         ssl_certfile=ssl_certfile,
+        batch_wait_ms=args.batch_wait_ms,
     )
     try:
         server.start()
