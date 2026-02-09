@@ -125,51 +125,49 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
         
         self.is_running = True
         rate_limiter = RateLimiter()
-        
+        data = self.get_data()
+        if data is not None:
+            self.write_data(data)
         while self.is_running:
-            # 1. Get and publish observation
-            data = self.get_data()
-            if data is not None:
-                self.write_data(data)
-            
-            # 2. Process and execute action (MUST be fast!)
             action = self.read_action()
             if action is not None:
                 action = self.process_action(action)
                 action_array = action.get('action', None)
                 if action_array is not None:
                     self.publish_action(action_array)
-            
+            data = self.get_data()
+            if data is not None:
+                self.write_data(data)
             rate_limiter.sleep(self.fps)
 
 
-def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
-    """
-    Factory function to create a robot instance from a config dictionary.
+# def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
+#     """
+#     Factory function to create a robot instance from a config dictionary.
 
-    Args:
-        robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
-        args: Command line arguments (not used by robots).
-        max_connect_retry (int): Maximum number of connection retries. Defaults to 5.
-    """
-    full_path = robot_cfg['type']
-    module_path, class_name = full_path.rsplit('.', 1)
-    module = importlib.import_module(module_path)
-    RobotCls = getattr(module, class_name)
-    print(f"Creating robot: {full_path}")
+#     Args:
+#         robot_cfg (Dict): A dictionary loaded from the robot's YAML config file.
+#         args: Command line arguments (not used by robots).
+#         max_connect_retry (int): Maximum number of connection retries. Defaults to 5.
+#     """
+#     full_path = robot_cfg['type']
+#     module_path, class_name = full_path.rsplit('.', 1)
+#     module = importlib.import_module(module_path)
+#     RobotCls = getattr(module, class_name)
+#     print(f"Creating robot: {full_path}")
 
-    # Create a copy of robot_cfg without the 'target' key for passing as kwargs
-    if 'args' in robot_cfg:
-        robot_kwargs = {k: v for k, v in robot_cfg['args'].items()}
-    else:
-        robot_kwargs = {}
-    robot = RobotCls(**robot_kwargs)
-    # connect to robot
-    retry_counts = 1
-    while not robot.connect():
-        print(f"Retrying for {retry_counts} time...")
-        retry_counts += 1
-        if retry_counts > max_connect_retry:
-            exit(0)
-        time.sleep(1)
-    return robot
+#     # Create a copy of robot_cfg without the 'target' key for passing as kwargs
+#     if 'args' in robot_cfg:
+#         robot_kwargs = {k: v for k, v in robot_cfg['args'].items()}
+#     else:
+#         robot_kwargs = {}
+#     robot = RobotCls(**robot_kwargs)
+#     # connect to robot
+#     retry_counts = 1
+#     while not robot.connect():
+#         print(f"Retrying for {retry_counts} time...")
+#         retry_counts += 1
+#         if retry_counts > max_connect_retry:
+#             exit(0)
+#         time.sleep(1)
+#     return robot

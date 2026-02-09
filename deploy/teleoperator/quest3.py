@@ -50,11 +50,15 @@ class Quest3Teleop(BaseTeleopDevice):
                    right_dx, right_dy, right_dz, right_droll, right_dpitch, right_dyaw, right_gripper] (14D)
     """
     
+    # Supported teleop modes
+    TELEOP_MODES = ("delta_ee", "rel_ee")
+    
     def __init__(
         self,
         name: str = "quest3_teleop",
         max_size_mb: int = 1,
         fps: float = 50.0,
+        mode: str = 'delta_ee',
         arm_mode: Literal["left", "right", "dual"] = "dual",
         position_scale: float = 1.0,
         rotation_scale: float = 1.0,
@@ -74,6 +78,12 @@ class Quest3Teleop(BaseTeleopDevice):
             name: Name for shared memory
             max_size_mb: Max shared memory size in MB
             fps: Control frequency in Hz
+            mode: Teleop mode:
+                  - "delta_ee": Frame-to-frame delta mode. Each action is the pose change 
+                                between consecutive frames.
+                  - "rel_ee": Relative to anchor mode. When unsqueeze is activated, the VR 
+                              pose at that moment becomes the anchor. All subsequent actions 
+                              are relative poses from the anchor until re-freeze.
             arm_mode: "left", "right", or "dual" for which arm(s) to control
             position_scale: Scale factor for position delta
             rotation_scale: Scale factor for rotation delta
@@ -98,6 +108,11 @@ class Quest3Teleop(BaseTeleopDevice):
             debug: Enable debug output
         """
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps)
+        
+        # Validate and store teleop mode
+        if mode not in self.TELEOP_MODES:
+            raise ValueError(f"Invalid mode '{mode}'. Must be one of {self.TELEOP_MODES}")
+        self.mode = mode
         
         self.arm_mode = arm_mode
         self.position_scale = position_scale
@@ -125,7 +140,7 @@ class Quest3Teleop(BaseTeleopDevice):
         self._vr_thread = None
         self._async_loop = None
         
-        # State tracking for delta calculation
+        # State tracking for delta calculation (delta_ee mode: prev frame, rel_ee mode: anchor)
         self._left_prev_position = None
         self._left_prev_quaternion = None
         self._left_unsqueeze_active = False  # VR side grip state - enables pose transmission
@@ -135,6 +150,12 @@ class Quest3Teleop(BaseTeleopDevice):
         self._right_prev_quaternion = None
         self._right_unsqueeze_active = False  # VR side grip state - enables pose transmission
         self._right_last_goal_id = None  # Track if goal changed
+        
+        # Anchor positions for rel_ee mode (set when unsqueeze is first activated)
+        self._left_anchor_position = None
+        self._left_anchor_quaternion = None
+        self._right_anchor_position = None
+        self._right_anchor_quaternion = None
         
         # Robot GRIPPER states (0.0 = open, 1.0 = closed) - controlled by VR TRIGGER
         self._left_gripper = 0.0
@@ -226,20 +247,30 @@ class Quest3Teleop(BaseTeleopDevice):
         prev_position: Optional[np.ndarray],
         prev_quaternion: Optional[np.ndarray],
         unsqueeze_was_active: bool,
-        is_right_hand: bool = True
+        is_right_hand: bool = True,
+        anchor_position: Optional[np.ndarray] = None,
+        anchor_quaternion: Optional[np.ndarray] = None,
     ) -> tuple:
         """
         Compute pose delta for one arm.
         
         Args:
+            prev_position: Previous frame position (for delta_ee mode reference tracking)
+            prev_quaternion: Previous frame quaternion (for delta_ee mode reference tracking)
             unsqueeze_was_active: Whether VR side grip was active last frame
             is_right_hand: True for right hand (A button), False for left hand (X button)
+            anchor_position: Anchor position for rel_ee mode (set when unsqueeze first activated)
+            anchor_quaternion: Anchor quaternion for rel_ee mode
         
         Returns:
-            (delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value)
-            - delta_pose: [dx, dy, dz, droll, dpitch, dyaw] (6D) - only non-zero when unsqueeze active
+            (delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value, new_anchor_pos, new_anchor_quat)
+            
+            - delta_pose/rel_pose: [dx, dy, dz, droll, dpitch, dyaw] (6D)
+              - delta_ee mode: Frame-to-frame change, only non-zero when unsqueeze active
+              - rel_ee mode: Relative to anchor pose, only non-zero when unsqueeze active
             - new_unsqueeze_active: VR side grip state (for pose transmission)
             - gripper_value: Robot GRIPPER control value
+            - new_anchor_pos/quat: Updated anchor for rel_ee mode (only set on unsqueeze activation)
         """
         delta_pose = np.zeros(6)
         # Default gripper value: no change in button control mode
@@ -247,9 +278,11 @@ class Quest3Teleop(BaseTeleopDevice):
         new_position = prev_position
         new_quaternion = prev_quaternion
         new_unsqueeze_active = unsqueeze_was_active
+        new_anchor_position = anchor_position
+        new_anchor_quaternion = anchor_quaternion
         
         if goal is None:
-            return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
+            return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value, new_anchor_position, new_anchor_quaternion
         
         # Get current position (use vr_position for raw VR coordinates)
         current_position = None
@@ -323,26 +356,6 @@ class Quest3Teleop(BaseTeleopDevice):
                 else:
                     gripper_value = 0.0  # No change when no button pressed
                 
-                if self.debug:
-                    hand_name = 'Right' if is_right_hand else 'Left'
-                    btn_name = 'A' if is_right_hand else 'X'
-                    close_btn_name = 'B/Trigger' if is_right_hand else 'Y/Trigger'
-                    print(f"[Quest3Teleop] {hand_name} hand: open({btn_name})={open_button}, close({close_btn_name})={close_button} (btn={close_button_btn}, trigger={trigger_active}), gripper_value={gripper_value}")
-                    if buttons:
-                        print(f"[Quest3Teleop]   Available buttons: {list(buttons.keys())}")
-                        # Print all button states for debugging
-                        btn_states = {k: v for k, v in buttons.items() if v}
-                        if btn_states:
-                            print(f"[Quest3Teleop]   Active buttons: {btn_states}")
-                        # Check specific button names
-                        if is_right_hand:
-                            print(f"[Quest3Teleop]   Button 'b' value: {buttons.get('b', 'NOT_FOUND')}")
-                            print(f"[Quest3Teleop]   Button 'B' value: {buttons.get('B', 'NOT_FOUND')}")
-                            print(f"[Quest3Teleop]   Button 'button_b' value: {buttons.get('button_b', 'NOT_FOUND')}")
-                        else:
-                            print(f"[Quest3Teleop]   Button 'y' value: {buttons.get('y', 'NOT_FOUND')}")
-                            print(f"[Quest3Teleop]   Button 'Y' value: {buttons.get('Y', 'NOT_FOUND')}")
-                            print(f"[Quest3Teleop]   Button 'button_y' value: {buttons.get('button_y', 'NOT_FOUND')}")
             else:
                 # Trigger control mode (original behavior)
                 trigger_active = goal.metadata.get("trigger_active", False)
@@ -393,85 +406,132 @@ class Quest3Teleop(BaseTeleopDevice):
         if current_position is not None:
             if is_unsqueeze_pressed:
                 if not unsqueeze_was_active:
-                    # unsqueeze just activated - set current position as reference
+                    # unsqueeze just activated - set current position as reference/anchor
                     # Don't send delta on first frame
                     new_position = current_position.copy()
                     new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
                     new_unsqueeze_active = True
-                    if self.debug:
-                        print(f"[Quest3Teleop] unsqueeze activated")
-                    return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
+                    
+                    # For rel_ee mode: set anchor position
+                    if self.mode == "rel_ee":
+                        new_anchor_position = current_position.copy()
+                        new_anchor_quaternion = current_quaternion.copy() if current_quaternion is not None else None
+                    return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value, new_anchor_position, new_anchor_quaternion
                 else:
-                    # unsqueeze held - compute delta from reference
-                    if prev_position is not None:
-                        """
-                        # 1. 位置增量转换
-                        pos_delta_vr = current_position - prev_position
-                        pos_delta_robot = T @ pos_delta_vr * self.position_scale
-
-                        # 2. 旋转增量转换 (更稳健的方法)
-                        r_curr = R.from_quat(current_quaternion)
-                        r_prev = R.from_quat(prev_quaternion)
-
-                        # 计算在机器人参考系下的相对旋转
-                        # 这种方法避免了手动处理左/右手系的复杂性
-                        # 它是把“VR里的姿态变化”映射到“机器人空间”
-                        rot_delta_mat = T @ (r_curr * r_prev.inv()).as_matrix() @ T.T
-                        euler_delta = R.from_matrix(rot_delta_mat).as_euler('xyz')
-                        """
-                        # Position delta in VR frame
-                        pos_delta_vr = (current_position - prev_position) * self.position_scale
+                    # unsqueeze held - compute delta/relative pose based on mode
+                    if self.mode == "delta_ee" and prev_position is not None:
+                        # delta_ee mode: compute delta from previous frame in PREVIOUS FRAME'S LOCAL FRAME
+                        # This ensures consistent movement direction relative to hand orientation
                         
-                        # Apply coordinate transform to position (linear transform)
-                        pos_delta_robot = self.calibration_transform @ pos_delta_vr
+                        # Get previous frame rotation matrix (VR world -> prev local)
+                        if prev_quaternion is not None:
+                            R_prev_world = R.from_quat(prev_quaternion).as_matrix()
+                        else:
+                            R_prev_world = np.eye(3)
+                        
+                        # Position delta in VR world frame
+                        pos_diff_world = current_position - prev_position
+                        
+                        # Transform to previous frame's LOCAL frame
+                        pos_delta_local = R_prev_world.T @ pos_diff_world
+                        pos_delta_local = pos_delta_local * self.position_scale
+                        
+                        # Apply calibration transform
+                        pos_delta_robot = self.calibration_transform @ pos_delta_local
                         delta_pose[:3] = pos_delta_robot
                         
-                        # Rotation delta - use rotation matrix as intermediate representation
-                        # Euler angles cannot be directly transformed with matrices
+                        # Rotation delta in local frame
                         if current_quaternion is not None and prev_quaternion is not None:
                             try:
+                                R_current_world = R.from_quat(current_quaternion).as_matrix()
+                                
+                                # Relative rotation in prev frame's local:
+                                # R_rel_local = R_prev^T @ R_current
+                                R_rel_local = R_prev_world.T @ R_current_world
+                                
+                                # Apply calibration transform
                                 T = self.calibration_transform
-                                # 推荐做法：鲁棒性更高，自动处理所有坐标系不对齐问题
-                                curr_abs_robot = T @ R.from_quat(current_quaternion).as_matrix() @ T.T
-                                prev_abs_robot = T @ R.from_quat(prev_quaternion).as_matrix() @ T.T
-
-                                # 在机器人坐标系这个“静止参考系”下计算真实的旋转差
-                                rel_rot_robot = curr_abs_robot @ prev_abs_robot.T
-                                euler_delta_robot = R.from_matrix(rel_rot_robot).as_euler('xyz', degrees=False)
-
-                                # Compute relative rotation in VR frame
-                                # prev_rot = R.from_quat(prev_quaternion)
-                                # curr_rot = R.from_quat(current_quaternion)
-                                # relative_rot_vr = curr_rot * prev_rot.inv()
+                                R_rel_robot = T @ R_rel_local @ T.T
                                 
-                                # # Convert to rotation matrix
-                                # rot_matrix_vr = relative_rot_vr.as_matrix()
-                                
-                                # # Apply coordinate transform (similarity transform)
-                                # # R_robot = T @ R_vr @ T^T (for orthogonal T, T^(-1) = T^T)
-                                # T = self.calibration_transform
-                                # rot_matrix_robot = T @ rot_matrix_vr @ T.T
-                                
-                                # # Convert back to euler angles in robot frame
-                                # rot_robot = R.from_matrix(rot_matrix_robot)
-                                # euler_delta_robot = rot_robot.as_euler('xyz', degrees=False)
-                                
+                                euler_delta_robot = R.from_matrix(R_rel_robot).as_euler('xyz', degrees=False)
                                 delta_pose[3:6] = euler_delta_robot * self.rotation_scale
                             except Exception as e:
                                 if self.debug:
                                     print(f"[Quest3Teleop] Rotation delta error: {e}")
+                        
+                        # Update reference for next frame
+                        new_position = current_position.copy()
+                        new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
                     
-                    # Update reference for next frame
-                    new_position = current_position.copy()
-                    new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
+                    elif self.mode == "rel_ee" and anchor_position is not None:
+                        # rel_ee mode: compute relative pose from anchor in ANCHOR'S LOCAL FRAME
+                        # This ensures that hand movement "forward" always maps to robot "forward"
+                        # regardless of how the user rotates during freeze
+                        
+                        # Get anchor rotation matrix (VR world -> anchor local)
+                        if anchor_quaternion is not None:
+                            R_anchor_world = R.from_quat(anchor_quaternion).as_matrix()
+                        else:
+                            R_anchor_world = np.eye(3)
+                        
+                        # Position difference in VR world frame
+                        pos_diff_world = current_position - anchor_position
+                        
+                        # Transform position difference to anchor's LOCAL frame
+                        # R_anchor_world.T rotates from world to anchor-local
+                        pos_rel_local = R_anchor_world.T @ pos_diff_world
+                        pos_rel_local = pos_rel_local * self.position_scale
+                        
+                        # Apply calibration transform (anchor-local VR -> robot frame)
+                        pos_rel_robot = self.calibration_transform @ pos_rel_local
+                        delta_pose[:3] = pos_rel_robot
+                        
+                        # Rotation relative to anchor in anchor's local frame
+                        if current_quaternion is not None and anchor_quaternion is not None:
+                            try:
+                                R_current_world = R.from_quat(current_quaternion).as_matrix()
+                                
+                                # Relative rotation in anchor's local frame:
+                                # R_rel_local = R_anchor^T @ R_current
+                                # This represents how the hand has rotated relative to its initial orientation
+                                R_rel_local = R_anchor_world.T @ R_current_world
+                                
+                                # Apply calibration transform to convert to robot frame
+                                T = self.calibration_transform
+                                R_rel_robot = T @ R_rel_local @ T.T
+                                
+                                euler_rel_robot = R.from_matrix(R_rel_robot).as_euler('xyz', degrees=False)
+                                delta_pose[3:6] = euler_rel_robot * self.rotation_scale
+                            except Exception as e:
+                                if self.debug:
+                                    print(f"[Quest3Teleop] Rotation rel error: {e}")
+                        
+                        # Update prev position for tracking (but anchor stays fixed)
+                        new_position = current_position.copy()
+                        new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
+                        # Anchor remains unchanged until next unsqueeze activation
+                    
                     new_unsqueeze_active = True
             else:
                 # unsqueeze not pressed - pose frozen, update reference for next activation
                 new_position = current_position.copy()
                 new_quaternion = current_quaternion.copy() if current_quaternion is not None else None
                 new_unsqueeze_active = False
+                # In rel_ee mode, clear anchor when unsqueeze is released (will be reset on next activation)
+                if self.mode == "rel_ee":
+                    new_anchor_position = None
+                    new_anchor_quaternion = None
         
-        return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value
+        return delta_pose, new_position, new_quaternion, new_unsqueeze_active, gripper_value, new_anchor_position, new_anchor_quaternion
+
+    def _get_unsqueeze_pressed(self, goal) -> bool:
+        """Extract current unsqueeze (side grip) state from goal metadata."""
+        if goal is None or not goal.metadata:
+            return False
+        if goal.metadata.get("grip_active", False):
+            return True
+        buttons = goal.metadata.get("buttons", {})
+        return bool(buttons and buttons.get("unsqueeze", False))
     
     def convert_data_to_action(self, data: dict) -> tuple:
         """
@@ -481,7 +541,11 @@ class Quest3Teleop(BaseTeleopDevice):
             data: Dictionary containing VR pose data
             
         Returns:
-            (action, should_write): Action array and whether to write to shm
+            (action_dict, should_write): Action dict and whether to write to shm
+            action_dict contains:
+                - action: The action array
+                - unsqueeze_active: Whether VR is currently transmitting (side grip pressed)
+                - anchor_just_set: Whether anchor was just set this frame (first frame of unsqueeze)
             should_write is True whenever there's new VR data
             
         Note:
@@ -490,6 +554,11 @@ class Quest3Teleop(BaseTeleopDevice):
         """
         should_write = False
         has_new_data = False
+        anchor_just_set = False  # True on first frame of unsqueeze activation
+        
+        # Track previous unsqueeze states to detect transitions
+        left_was_active = self._left_unsqueeze_active
+        right_was_active = self._right_unsqueeze_active
         
         if self.arm_mode == "dual":
             # Initialize with default gripper values
@@ -501,46 +570,69 @@ class Quest3Teleop(BaseTeleopDevice):
             action[6] = default_gripper   # Left gripper default
             action[13] = default_gripper  # Right gripper default
             
-            # Left arm - check if new goal
+            # Left arm - check if new goal OR unsqueeze state change
             left_goal = data.get("left")
             left_goal_id = id(left_goal) if left_goal else None
             left_is_new = (left_goal_id != self._left_last_goal_id) and (left_goal is not None)
             self._left_last_goal_id = left_goal_id
+            left_unsqueeze_now = self._get_unsqueeze_pressed(left_goal)
+            left_should_update = left_is_new or (left_unsqueeze_now != left_was_active)
             
-            if left_is_new:
+            if left_should_update:
                 (left_delta, self._left_prev_position, self._left_prev_quaternion, 
-                 self._left_unsqueeze_active, left_gripper) = self._compute_arm_delta(
+                 self._left_unsqueeze_active, left_gripper,
+                 self._left_anchor_position, self._left_anchor_quaternion) = self._compute_arm_delta(
                     left_goal, 
                     self._left_prev_position, 
                     self._left_prev_quaternion,
                     self._left_unsqueeze_active,
-                    is_right_hand=False  # Left hand: X button
+                    is_right_hand=False,  # Left hand: X button
+                    anchor_position=self._left_anchor_position,
+                    anchor_quaternion=self._left_anchor_quaternion,
                 )
                 action[0:6] = left_delta
                 action[6] = left_gripper
                 has_new_data = True
+                
+                # Detect anchor just set (unsqueeze just activated)
+                if self._left_unsqueeze_active and not left_was_active:
+                    anchor_just_set = True
             
-            # Right arm - check if new goal
+            # Right arm - check if new goal OR unsqueeze state change
             right_goal = data.get("right")
             right_goal_id = id(right_goal) if right_goal else None
             right_is_new = (right_goal_id != self._right_last_goal_id) and (right_goal is not None)
             self._right_last_goal_id = right_goal_id
+            right_unsqueeze_now = self._get_unsqueeze_pressed(right_goal)
+            right_should_update = right_is_new or (right_unsqueeze_now != right_was_active)
             
-            if right_is_new:
+            if right_should_update:
                 (right_delta, self._right_prev_position, self._right_prev_quaternion,
-                 self._right_unsqueeze_active, right_gripper) = self._compute_arm_delta(
+                 self._right_unsqueeze_active, right_gripper,
+                 self._right_anchor_position, self._right_anchor_quaternion) = self._compute_arm_delta(
                     right_goal,
                     self._right_prev_position,
                     self._right_prev_quaternion,
                     self._right_unsqueeze_active,
-                    is_right_hand=True  # Right hand: A button
+                    is_right_hand=True,  # Right hand: A button
+                    anchor_position=self._right_anchor_position,
+                    anchor_quaternion=self._right_anchor_quaternion,
                 )
                 action[7:13] = right_delta
                 action[13] = right_gripper
                 has_new_data = True
+                
+                # Detect anchor just set (unsqueeze just activated)
+                if self._right_unsqueeze_active and not right_was_active:
+                    anchor_just_set = True
             
             # Only write when VR unsqueeze is active AND there's new data
-            should_write = has_new_data and (self._left_unsqueeze_active or self._right_unsqueeze_active)
+            # OR if unsqueeze just turned off (send one last frame to signal robot)
+            unsqueeze_active = self._left_unsqueeze_active or self._right_unsqueeze_active
+            just_released = (left_was_active and not self._left_unsqueeze_active) or \
+                          (right_was_active and not self._right_unsqueeze_active)
+                          
+            should_write = (has_new_data and unsqueeze_active) or just_released
             
         elif self.arm_mode == "left":
             # Initialize with default gripper value
@@ -556,20 +648,31 @@ class Quest3Teleop(BaseTeleopDevice):
             left_is_new = (left_goal_id != self._left_last_goal_id) and (left_goal is not None)
             self._left_last_goal_id = left_goal_id
             
-            if left_is_new:
+            left_unsqueeze_now = self._get_unsqueeze_pressed(left_goal)
+            left_should_update = left_is_new or (left_unsqueeze_now != left_was_active)
+            if left_should_update:
                 (left_delta, self._left_prev_position, self._left_prev_quaternion,
-                 self._left_unsqueeze_active, left_gripper) = self._compute_arm_delta(
+                 self._left_unsqueeze_active, left_gripper,
+                 self._left_anchor_position, self._left_anchor_quaternion) = self._compute_arm_delta(
                     left_goal,
                     self._left_prev_position,
                     self._left_prev_quaternion,
                     self._left_unsqueeze_active,
-                    is_right_hand=False  # Left hand: X button
+                    is_right_hand=False,  # Left hand: X button
+                    anchor_position=self._left_anchor_position,
+                    anchor_quaternion=self._left_anchor_quaternion,
                 )
                 action[0:6] = left_delta
                 action[6] = left_gripper
                 has_new_data = True
+                
+                # Detect anchor just set (unsqueeze just activated)
+                if self._left_unsqueeze_active and not left_was_active:
+                    anchor_just_set = True
             
-            should_write = has_new_data and self._left_unsqueeze_active
+            unsqueeze_active = self._left_unsqueeze_active
+            just_released = left_was_active and not self._left_unsqueeze_active
+            should_write = (has_new_data and unsqueeze_active) or just_released
             
         else:  # right
             # Initialize with default gripper value
@@ -584,33 +687,40 @@ class Quest3Teleop(BaseTeleopDevice):
             right_is_new = (right_goal_id != self._right_last_goal_id) and (right_goal is not None)
             self._right_last_goal_id = right_goal_id
             
-            if right_is_new:
+            right_unsqueeze_now = self._get_unsqueeze_pressed(right_goal)
+            right_should_update = right_is_new or (right_unsqueeze_now != right_was_active)
+            if right_should_update:
                 (right_delta, self._right_prev_position, self._right_prev_quaternion,
-                 self._right_unsqueeze_active, right_gripper) = self._compute_arm_delta(
+                 self._right_unsqueeze_active, right_gripper,
+                 self._right_anchor_position, self._right_anchor_quaternion) = self._compute_arm_delta(
                     right_goal,
                     self._right_prev_position,
                     self._right_prev_quaternion,
                     self._right_unsqueeze_active,
-                    is_right_hand=True  # Right hand: A button
+                    is_right_hand=True,  # Right hand: A button
+                    anchor_position=self._right_anchor_position,
+                    anchor_quaternion=self._right_anchor_quaternion,
                 )
                 action[0:6] = right_delta
                 action[6] = right_gripper
                 has_new_data = True
+                
+                # Detect anchor just set (unsqueeze just activated)
+                if self._right_unsqueeze_active and not right_was_active:
+                    anchor_just_set = True
             
-            should_write = has_new_data and self._right_unsqueeze_active
+            unsqueeze_active = self._right_unsqueeze_active
+            just_released = right_was_active and not self._right_unsqueeze_active
+            should_write = (has_new_data and unsqueeze_active) or just_released
         
-        if self.debug and should_write:
-            # Print action only when writing
-            if self.arm_mode == "dual":
-                print(f"[Quest3Teleop] L: pos=[{action[0]:.3f},{action[1]:.3f},{action[2]:.3f}] "
-                      f"rot=[{action[3]:.3f},{action[4]:.3f},{action[5]:.3f}] grip={action[6]:.1f} | "
-                      f"R: pos=[{action[7]:.3f},{action[8]:.3f},{action[9]:.3f}] "
-                      f"rot=[{action[10]:.3f},{action[11]:.3f},{action[12]:.3f}] grip={action[13]:.1f}")
-            else:
-                print(f"[Quest3Teleop] pos=[{action[0]:.3f},{action[1]:.3f},{action[2]:.3f}] "
-                      f"rot=[{action[3]:.3f},{action[4]:.3f},{action[5]:.3f}] grip={action[6]:.1f}")
+        # Return action dict with state information for robot side anchor management
+        action_dict = {
+            "action": action,
+            "unsqueeze_active": unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active),
+            "anchor_just_set": anchor_just_set,
+        }
         
-        return action, should_write
+        return action_dict, should_write
     
     def start(self):
         """Start the Quest3 teleoperator."""
@@ -643,10 +753,11 @@ class Quest3Teleop(BaseTeleopDevice):
                 data = self.get_data()
                 
                 if data is not None:
-                    action, should_write = self.convert_data_to_action(data)
+                    action_dict, should_write = self.convert_data_to_action(data)
                     # Only write to shm when unsqueeze button is pressed AND there's new VR data
                     if should_write:
-                        self.write_data_to_shm({"action": action})
+                        # Write action dict with state info (action, unsqueeze_active, anchor_just_set)
+                        self.write_data_to_shm(action_dict)
                         self._write_count += 1
                         
                 rate_limiter.sleep(self.fps)

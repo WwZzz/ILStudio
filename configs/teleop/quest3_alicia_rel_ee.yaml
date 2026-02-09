@@ -1,0 +1,61 @@
+# Quest3 VR Teleoperator - Relative EE (Anchor) Mode for AliciaD
+#
+# Control mode: Single right hand with RELATIVE pose (7D actions)
+# Action format: [rel_x, rel_y, rel_z, rel_roll, rel_pitch, rel_yaw, gripper]
+# Compatible with: alicia_d_rel_ee.yaml (rel_ee mode)
+#
+# VR side (Quest3):
+#   - When side grip (unsqueeze) is pressed: VR sets anchor (position + rotation)
+#   - Position delta = R_anchor.T @ (current_pos - anchor_pos)  [in anchor's local frame]
+#   - Rotation delta = R_anchor.T @ R_current  [relative to anchor orientation]
+#   - VR sends state info: unsqueeze_active, anchor_just_set
+#
+# Robot side (AliciaD):
+#   - When VR's unsqueeze is activated (first action with anchor_just_set=True):
+#     Robot sets its anchor to current EE pose (computed via FK from actual joints)
+#   - All relative poses from VR are applied to robot's anchor
+#   - When VR's unsqueeze is released (squeeze):
+#     Robot UPDATES its anchor to the last actual EE pose
+#   - Anchor uses FK from actual observed joints (not IK solver's internal state)
+#
+# Usage:
+#   - Press and hold SQUEEZE button (side grip) to send RELATIVE poses
+#   - First frame after squeeze sets anchor point on BOTH VR and robot side
+#   - All subsequent frames send pose relative to VR anchor (in local frame)
+#   - Robot applies relative pose to its own anchor (from FK of actual joints)
+#   - Release SQUEEZE to freeze; next squeeze will reset both anchors
+#
+# Advantages over delta_ee:
+#   - No drift accumulation (always relative to anchor)
+#   - More intuitive for precise positioning tasks
+#   - Better for repetitive motions (return to anchor)
+#   - Anchor uses actual joint observations, not IK internal state
+
+type: deploy.teleoperator.quest3.Quest3Teleop
+name: quest3_teleop
+args:
+  name: quest3_teleop
+  max_size_mb: 1
+  fps: 100.0               # Match VR update rate (~72Hz)
+  arm_mode: right          # Single right hand mode (7D output)
+  mode: rel_ee             # Relative EE mode (anchor-based)
+  position_scale: 1.0      # VR outputs meters, scale for robot workspace
+  rotation_scale: 1.0      # VR outputs radians, scale for responsiveness
+  connect_timeout: 60.0    # VR connection timeout in seconds
+  gripper_default_closed: true  # Gripper closed by default
+  gripper_delta_mode: true      # Use delta mode (incremental gripper control)
+  gripper_delta_value: 0.1     # Delta value per frame (adjust for gripper speed)
+  gripper_button_control: true  # Use A/B buttons (right) or X/Y buttons (left) instead of trigger
+                                # Right hand: A=open, B=close
+                                # Left hand: X=open, Y=close
+  
+  # Single 3x3 transform matrix: Quest (LHS) -> AliciaD (RHS)
+  # Handles both LHS->RHS conversion and axis remapping
+  # Quest (LHS): X=front/back, Y=up/down, Z=left/right
+  # AliciaD (RHS): X=left/right, Y=front/back, Z=up/down
+  calibration_transform:
+    - [0, 0, -1]   # AliciaD_X (left/right) = -Quest_Z
+    - [-1, 0, 0]   # AliciaD_Y (front/back) = -Quest_X
+    - [0, 1, 0]    # AliciaD_Z (up/down) = Quest_Y
+  
+  debug: false              # Set to true for debugging

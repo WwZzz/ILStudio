@@ -4,18 +4,19 @@
 type: deploy.robot.alicia_d.AliciaD
 args:
   name: alicia_d
-  port: /dev/ttyACM2
+  port: /dev/ttyACM0
   fps: 200.0
   control_mode: delta_ee  # IK-based end-effector control
   
   # Speed settings
-  speed_deg_s: 100.0      # Higher speed for responsive control
+  speed_deg_s: 500.0      # Higher speed for responsive control
   gripper_speed_deg_s: 483.4
   
   # IK settings (optimized for real-time VR teleoperation)
   ik_eps: 0.001          # 1mm tolerance
   ik_max_iter: 20        # ~0.3ms per solve
   ik_dt: 1.0             # Large step for fast convergence
+  ik_rotation_weight: 0.7  # 旋转权重 (< 1.0 优先保证位置精度，抑制甩腕)
   
   # Delta EE scaling (tune based on your teleop device)
   position_scale: 1.0    # meters -> meters
@@ -26,7 +27,10 @@ args:
   # are converted to rotation matrix and LEFT multiplied to current EE pose.
   # Coordinate alignment is done in teleop's calibration_transform (see configs/teleop/*.yaml).
   
+  # Smoothing: exponential low-pass filter on joint trajectory
+  smoothing_tau: 0.04  # 时间常数(秒)。0.02=轻度, 0.04=适中, 0.08=重度, 0=禁用
+  
   # Safety settings
-  max_joint_delta_deg: 30.0  # Max allowed joint change per action (degrees)
+  max_joint_delta_deg: 270.0  # Max allowed joint change per action (degrees)
   
   debug: false

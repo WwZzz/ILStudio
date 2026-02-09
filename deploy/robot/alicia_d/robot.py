@@ -2,29 +2,24 @@
 Alicia-D Robot for ILStudio
 
 Integrates Alicia-D robot arm with ILStudio framework using:
+- Official alicia_d_sdk for hardware communication (via pip install)
 - Custom Pinocchio-based real-time IK solver (fast, ~0.3ms per solve)
-- Direct ServoDriver for hardware control
 - SharedMemory for observation/action communication
 
 Control modes:
 1. qpos: Direct joint position control (6D arm joints + 1D gripper)
 2. delta_ee: 7D delta end-effector control with IK (dx, dy, dz, drx, dry, drz, dgripper)
+3. rel_ee: 7D relative end-effector control with IK (relative to anchor pose)
 """
 
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import sys
 import numpy as np
 import time
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
-
-# Add alicia_d_sdk to path for its internal imports
-_sdk_path = Path(__file__).parent / "alicia_d_sdk"
-if str(_sdk_path.parent) not in sys.path:
-    sys.path.insert(0, str(_sdk_path.parent))
+from typing import Optional, Dict, Any, Tuple
 
 from deploy.robot.base import BaseRobot
 from benchmark.base import MetaObs
@@ -57,6 +52,7 @@ class RealtimeIKSolver:
         max_iter: int = 20,
         dt: float = 1.0,
         damp: float = 1e-6,
+        rotation_weight: float = 1.0,
     ):
         import pinocchio as pin
         
@@ -70,6 +66,19 @@ class RealtimeIKSolver:
         self.max_iter = max_iter
         self.dt = dt
         self.damp = damp
+        
+        # Task-space weighting: position vs rotation priority.
+        #
+        # Pinocchio LOCAL frame convention for 6D spatial vectors:
+        #   pin.log(SE3).vector  = [angular(3), linear(3)]
+        #   computeFrameJacobian = [angular(3); linear(3)]  (row order)
+        #
+        # rotation_weight < 1.0 makes IK prioritize position accuracy over rotation,
+        # reducing "wrist whipping" when precise rotation alignment would require
+        # large joint movements.
+        self.rotation_weight = rotation_weight
+        # Pre-compute diagonal weight vector: [w_rot, w_rot, w_rot, 1, 1, 1]
+        self._task_weight = np.array([rotation_weight] * 3 + [1.0] * 3)
         
         # Warm start state
         self._q_current = pin.neutral(self.model)
@@ -92,10 +101,37 @@ class RealtimeIKSolver:
             self._q_current = self.pin.neutral(self.model)
     
     def get_current_pose(self) -> np.ndarray:
-        """Get current end-effector pose as 4x4 matrix."""
+        """Get current end-effector pose as 4x4 matrix (from internal IK state)."""
         self.pin.forwardKinematics(self.model, self.data, self._q_current)
         self.pin.updateFramePlacements(self.model, self.data)
         pose = self.data.oMf[self.frame_id]
+        T = np.eye(4)
+        T[:3, :3] = pose.rotation
+        T[:3, 3] = pose.translation
+        return T
+    
+    def compute_fk(self, joint_angles: np.ndarray) -> np.ndarray:
+        """
+        Compute forward kinematics for given joint angles.
+        
+        This is used to get the actual EE pose from observed joint angles,
+        independent of the IK solver's internal state.
+        
+        Args:
+            joint_angles: Joint angles in radians (6D for arm)
+            
+        Returns:
+            4x4 transformation matrix of end-effector pose
+        """
+        # Pad joint angles to full DOF if needed
+        q = self.pin.neutral(self.model)
+        q[:len(joint_angles)] = joint_angles
+        
+        # Compute FK
+        self.pin.forwardKinematics(self.model, self.data, q)
+        self.pin.updateFramePlacements(self.model, self.data)
+        pose = self.data.oMf[self.frame_id]
+        
         T = np.eye(4)
         T[:3, :3] = pose.rotation
         T[:3, 3] = pose.translation
@@ -107,7 +143,11 @@ class RealtimeIKSolver:
     
     def solve(self, target_pose: np.ndarray) -> Tuple[bool, np.ndarray, int, float]:
         """
-        Solve IK for target pose using warm start.
+        Solve IK for target pose using warm start with weighted damped least squares.
+        
+        Position and rotation are weighted differently via self._task_weight,
+        so that rotation_weight < 1.0 makes the solver prioritize position accuracy
+        and avoids large joint movements just to align rotation precisely.
         
         Args:
             target_pose: 4x4 transformation matrix
@@ -120,6 +160,7 @@ class RealtimeIKSolver:
         pin = self.pin
         target = pin.SE3(target_pose[:3, :3], target_pose[:3, 3])
         q = self._q_current.copy()
+        w = self._task_weight  # [w_rot, w_rot, w_rot, 1, 1, 1]
         
         for i in range(self.max_iter):
             pin.forwardKinematics(self.model, self.data, q)
@@ -127,7 +168,10 @@ class RealtimeIKSolver:
             
             dMi = self.data.oMf[self.frame_id].actInv(target)
             err = pin.log(dMi).vector
-            err_norm = np.linalg.norm(err)
+            
+            # Weighted error: scale rotation components down
+            err_w = w * err
+            err_norm = np.linalg.norm(err_w)
             
             if err_norm < self.eps:
                 # SUCCESS: update state and return
@@ -140,8 +184,14 @@ class RealtimeIKSolver:
                 pin.ReferenceFrame.LOCAL
             )[:, :self.arm_dof]
             
-            # Damped least squares
-            v_arm = np.linalg.solve(J.T @ J + self._eye * self.damp, J.T @ err)
+            # Weighted Jacobian: scale rotation rows down
+            # This is equivalent to: J_w = diag(w) @ J
+            J_w = w[:, None] * J
+            
+            # Weighted damped least squares:
+            # min ||W(J*v - e)||^2 + damp*||v||^2
+            # => v = (J_w^T J_w + damp*I)^{-1} J_w^T e_w
+            v_arm = np.linalg.solve(J_w.T @ J_w + self._eye * self.damp, J_w.T @ err_w)
             
             # Update
             self._v[:self.arm_dof] = v_arm
@@ -178,6 +228,100 @@ class RealtimeIKSolver:
 
 
 # ============================================================================
+# Action Smoother (Joint-space Low-pass Filter)
+# ============================================================================
+
+class ActionSmoother:
+    """
+    Time-aware exponential low-pass filter for joint-space trajectories.
+    
+    Produces smooth, continuous motion at the robot's full control rate (e.g. 200Hz),
+    even when IK targets arrive at a much lower rate (e.g. teleop at 50Hz).
+    
+    Uses first-order exponential smoothing with a configurable time constant (tau):
+        q_smooth += alpha * (q_target - q_smooth)
+        alpha = 1 - exp(-dt / tau)
+    
+    Properties:
+    - Frame-rate independent: same physical behavior regardless of loop frequency
+    - Zero overshoot: always converges monotonically toward target
+    - 63% convergence in tau seconds, 95% in ~3*tau seconds
+    - Negligible computational cost (~1us per call)
+    
+    Recommended tau values:
+    - 0.02s: Light smoothing, very responsive (good for skilled teleop)
+    - 0.04s: Medium smoothing, balanced (recommended starting point)
+    - 0.08s: Heavy smoothing, very smooth but noticeable lag
+    """
+    
+    def __init__(self, ndof: int = 7, tau: float = 0.04):
+        """
+        Args:
+            ndof: Number of degrees of freedom (6 joints + 1 gripper)
+            tau: Smoothing time constant in seconds. Larger = smoother but laggier.
+                 Set to 0 to disable smoothing (pass-through).
+        """
+        self.ndof = ndof
+        self.tau = tau
+        self._target = None    # Latest IK target
+        self._current = None   # Current smoothed output
+        self._last_time = None
+    
+    def set_target(self, target: np.ndarray):
+        """Set a new target from IK solution."""
+        target = np.asarray(target, dtype=np.float64)
+        if self._current is None:
+            # First target ever: snap to it immediately (no smoothing)
+            self._current = target.copy()
+            self._last_time = time.perf_counter()
+        self._target = target.copy()
+    
+    def hold(self):
+        """
+        Hold at current smoothed position.
+        Call when control is paused (e.g. unsqueeze released) to prevent
+        the smoother from continuing to drift toward a stale target.
+        """
+        if self._current is not None:
+            self._target = self._current.copy()
+    
+    def reset(self):
+        """Reset all state. Next set_target() will snap."""
+        self._target = None
+        self._current = None
+        self._last_time = None
+    
+    def step(self) -> Optional[np.ndarray]:
+        """
+        Advance one smoothing step. Call every loop iteration.
+        
+        Returns:
+            Smoothed action array, or None if no target has been set.
+        """
+        if self._target is None or self._current is None:
+            return None
+        
+        now = time.perf_counter()
+        dt = now - self._last_time if self._last_time is not None else 0.0
+        self._last_time = now
+        
+        # Bypass smoothing if tau is zero or negligible
+        if self.tau <= 1e-6 or dt <= 0:
+            self._current = self._target.copy()
+            return self._current.copy()
+        
+        # Exponential smoothing: alpha = 1 - exp(-dt / tau)
+        # At 200Hz (dt=5ms) with tau=0.04: alpha ≈ 0.118 → smooth convergence
+        alpha = 1.0 - np.exp(-dt / self.tau)
+        self._current += alpha * (self._target - self._current)
+        return self._current.copy()
+    
+    @property
+    def has_target(self) -> bool:
+        return self._target is not None
+
+
+# ============================================================================
 # Alicia-D Robot Class
 # ============================================================================
 
@@ -185,13 +329,16 @@ class AliciaD(BaseRobot):
     """
     Alicia-D Robot for ILStudio
     
-    Supports two control modes:
+    Uses alicia_d_sdk.hardware for low-level communication.
+    
+    Supports three control modes:
     1. "qpos" (default): Direct joint position control (7D: 6 arm + 1 gripper)
     2. "delta_ee": 7D delta EE control with fast Pinocchio IK
+    3. "rel_ee": 7D relative EE control with IK (relative to anchor pose)
     """
     
     # Control modes
-    CONTROL_MODES = ("qpos", "delta_ee")
+    CONTROL_MODES = ("qpos", "delta_ee", "rel_ee")
     
     def __init__(
         self,
@@ -199,22 +346,27 @@ class AliciaD(BaseRobot):
         max_size_mb: int = 64,
         fps: float = 200.0,
         control_shm_name: Optional[str] = None,
-        port: str = "/dev/ttyACM0",
+        port: str = "",
         urdf_path: Optional[str] = None,
         control_mode: str = "qpos",
+        gripper_type: str = "50mm",
         # IK settings
-        ik_eps: float = 1e-3,
-        ik_max_iter: int = 20,
-        ik_dt: float = 1.0,
+        ik_eps: float = 2e-3,    # Relaxed to 2mm for better stability
+        ik_max_iter: int = 100,  # Increased from 20 to 100
+        ik_dt: float = 0.5,      # Reduced from 1.0 to reduce oscillation
+        ik_damp: float = 2e-2,   # Increased damping (0.02) to prevent wrist whipping near singularities
+        ik_rotation_weight: float = 0.3,  # Rotation weight in IK (< 1.0 prioritizes position over rotation)
         # Delta EE scaling
         position_scale: float = 1.0,
         rotation_scale: float = 1.0,
         gripper_scale: float = 1.0,
         # Speed settings
-        speed_deg_s: float = 50.0,
+        speed_deg_s: float = 30.0,
         gripper_speed_deg_s: float = 483.4,
+        # Smoothing
+        smoothing_tau: float = 0.04,  # Joint trajectory smoothing time constant (seconds). 0 = disabled.
         # Safety settings
-        max_joint_delta_deg: float = 30.0,  # Max allowed joint change per action (degrees)
+        max_joint_delta_deg: float = 5.0,
         debug: bool = False,
         **kwargs
     ):
@@ -226,15 +378,16 @@ class AliciaD(BaseRobot):
             max_size_mb: Maximum shared memory size in MB
             fps: Control frequency in Hz
             control_shm_name: Name of control shared memory (for receiving actions)
-            port: Serial port for robot
+            port: Serial port for robot (empty string for auto-detect)
             urdf_path: Path to URDF file (auto-detected if None)
-            control_mode: "qpos" for joint control, "delta_ee" for IK-based EE control
+            control_mode: "qpos" for joint control, "delta_ee" or "rel_ee" for IK-based EE control
+            gripper_type: Gripper type ("50mm" or "100mm")
             ik_eps: IK convergence tolerance (meters)
             ik_max_iter: Maximum IK iterations
             ik_dt: IK step size
-            position_scale: Scale for position deltas in delta_ee mode
-            rotation_scale: Scale for rotation deltas in delta_ee mode
-            gripper_scale: Scale for gripper deltas in delta_ee mode
+            position_scale: Scale for position deltas in delta_ee/rel_ee mode
+            rotation_scale: Scale for rotation deltas in delta_ee/rel_ee mode
+            gripper_scale: Scale for gripper deltas in delta_ee/rel_ee mode
             speed_deg_s: Default arm speed in deg/s
             gripper_speed_deg_s: Default gripper speed in deg/s
             max_joint_delta_deg: Safety limit - max joint change per action in degrees
@@ -244,6 +397,7 @@ class AliciaD(BaseRobot):
         
         self.port = port
         self.debug = debug
+        self.gripper_type = gripper_type
         
         # Control mode
         if control_mode not in self.CONTROL_MODES:
@@ -260,19 +414,22 @@ class AliciaD(BaseRobot):
         self.gripper_speed_deg_s = gripper_speed_deg_s
         
         # Safety settings
-        self.max_joint_delta_rad = np.deg2rad(max_joint_delta_deg)  # Convert to radians
+        self.max_joint_delta_rad = np.deg2rad(max_joint_delta_deg)
         
-        # Find URDF path - default to local file, no external dependency needed
+        # Smoothing
+        self.smoothing_tau = smoothing_tau
+        
+        # Find URDF path
         if urdf_path is None:
             # Use local URDF file (bundled with this module)
-            local_urdf = Path(__file__).parent / "urdf" / "Alicia_D_v5_6_gripper_50mm.urdf"
+            local_urdf = Path(__file__).parent / "urdf" / f"Alicia_D_v5_6_gripper_{gripper_type}.urdf"
             if local_urdf.exists():
                 urdf_path = str(local_urdf)
             else:
-                # Fallback: try synriard if available (optional dependency)
+                # Fallback: try synriard if available
                 try:
                     from synriard import get_model_path
-                    urdf_path = str(get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm", model_format="urdf"))
+                    urdf_path = str(get_model_path("Alicia_D", version="v5_6", variant=f"gripper_{gripper_type}", model_format="urdf"))
                 except ImportError:
                     raise FileNotFoundError(
                         f"URDF file not found at {local_urdf}. "
@@ -280,9 +437,8 @@ class AliciaD(BaseRobot):
                     )
         self.urdf_path = urdf_path
         
-        # Initialize hardware driver
-        from alicia_d_sdk.hardware import ServoDriver
-        self.servo_driver = ServoDriver(port=port, debug_mode=debug)
+        # Robot driver instance (initialized in connect())
+        self._driver = None
         
         # IK solver (lazy initialized)
         self._ik_solver: Optional[RealtimeIKSolver] = None
@@ -290,21 +446,29 @@ class AliciaD(BaseRobot):
             'eps': ik_eps,
             'max_iter': ik_max_iter,
             'dt': ik_dt,
+            'damp': ik_damp,
+            'rotation_weight': ik_rotation_weight,
         }
         
-        # State tracking (for IK warm-start, not for caching obs)
+        # State tracking
         self._current_joint_angles: Optional[np.ndarray] = None
         self._current_gripper: Optional[float] = None
-        self._target_qpos: Optional[np.ndarray] = None  # Target joint positions for IK
+        self._target_qpos: Optional[np.ndarray] = None
         self._target_gripper: float = 500.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use RLock to allow reentrant acquisition (process_action -> refresh_anchor)
+        
+        # rel_ee mode: anchor pose tracking
+        self._rel_ee_anchor_pose: Optional[np.ndarray] = None
+        self._rel_ee_anchor_gripper: float = 500.0
+        self._rel_ee_vr_unsqueeze_active: bool = False
+        self._rel_ee_anchor_initialized: bool = False
         
         # Connection state
         self._connected = False
         self.is_running = False
         
         logger.info(f"[AliciaD] Initialized with control_mode={control_mode}, fps={fps}")
-        if control_mode == "delta_ee":
+        if control_mode in ("delta_ee", "rel_ee"):
             logger.info(f"[AliciaD] Delta EE scales: pos={position_scale}, rot={rotation_scale}, gripper={gripper_scale}")
     
     @property
@@ -313,67 +477,81 @@ class AliciaD(BaseRobot):
         if self._ik_solver is None:
             self._ik_solver = RealtimeIKSolver(
                 urdf_path=self.urdf_path,
-                end_frame="tool0",
+                end_frame="link6",
                 arm_dof=6,
                 eps=self._ik_settings['eps'],
                 max_iter=self._ik_settings['max_iter'],
                 dt=self._ik_settings['dt'],
+                rotation_weight=self._ik_settings['rotation_weight'],
             )
-            logger.info(f"[AliciaD] IK solver initialized: eps={self._ik_settings['eps']}, max_iter={self._ik_settings['max_iter']}")
+            logger.info(
+                f"[AliciaD] IK solver initialized: eps={self._ik_settings['eps']}, "
+                f"max_iter={self._ik_settings['max_iter']}, rotation_weight={self._ik_settings['rotation_weight']}"
+            )
         return self._ik_solver
     
     def connect(self) -> bool:
-        """Connect to robot."""
+        """Connect to robot using low-level hardware SDK."""
         if self._connected:
             return True
         
         try:
-            # connect() starts the background serial read thread
-            result = self.servo_driver.connect()
-            if result:
-                time.sleep(0.05)
+            # Import low-level hardware SDK
+            import sys
+            # Ensure sdk path is in sys.path
+            sdk_path = os.path.join(os.path.dirname(__file__))
+            if sdk_path not in sys.path:
+                sys.path.insert(0, sdk_path)
                 
-                # Get initial state (blocking)
-                state = self._get_fresh_state(timeout=1.0)
-                if state is None:
-                    logger.warning("[AliciaD] Initial state read failed")
-                else:
-                    self._current_joint_angles = np.array(state.angles, dtype=np.float64)
-                    self._current_gripper = state.gripper
-                    self._target_qpos = self._current_joint_angles.copy()
-                    self._target_gripper = self._current_gripper
-                
-                # Initialize IK solver with current joint angles
-                if self.control_mode == "delta_ee" and self._current_joint_angles is not None:
-                    self.ik_solver.reset(self._current_joint_angles)
-                
-                self._connected = True
-                logger.info(f"[AliciaD] Connected to robot on {self.port}")
-                
-                # Warning: first key press will move robot to zero position
-                logger.info(
-                    "[AliciaD] Press any key to move robot to ZERO position"
-                    "Make sure the robot has clear space before starting."
-                )
-                
-                return True
-            else:
-                logger.error(f"[AliciaD] Failed to connect to robot on {self.port}")
+            from alicia_d_sdk.hardware import ServoDriver
+            
+            # Create driver instance
+            logger.info(f"[AliciaD] Connecting via low-level SDK on port '{self.port}'...")
+            self._driver = ServoDriver(
+                port=self.port,
+                debug_mode=self.debug
+            )
+            
+            # Connect
+            if not self._driver.connect():
+                logger.error("[AliciaD] Failed to connect to robot hardware")
                 return False
+            self.set_home(speed_deg_s=self.speed_deg_s)
+            # Wait for valid state
+            logger.info("[AliciaD] Waiting for valid state...")
+            if not self._driver.wait_for_valid_state(timeout=2.0):
+                 logger.warning("[AliciaD] Initial state read timeout, but continuing...")
+
+            # Get initial state
+            # Try to acquire info explicitly to ensure we have data
+            self._driver.acquire_info("joint_gripper", wait=True, timeout=1.0)
+            state = self._driver.data_parser.get_joint_state()
+            
+            if state is None or state.angles is None:
+                logger.warning("[AliciaD] Initial state read failed")
+            else:
+                self._current_joint_angles = np.array(state.angles, dtype=np.float64)
+                self._current_gripper = state.gripper
+                self._target_qpos = self._current_joint_angles.copy()
+                self._target_gripper = self._current_gripper
+            
+            # Initialize IK solver with current joint angles
+            if self.control_mode in ("delta_ee", "rel_ee") and self._current_joint_angles is not None:
+                self.ik_solver.reset(self._current_joint_angles)
+                logger.info(f"[AliciaD] IK solver initialized with joints (deg): {np.rad2deg(self._current_joint_angles)}")
+            
+            self._connected = True
+            logger.info(f"[AliciaD] Connected to robot successfully")
+            if self._current_joint_angles is not None:
+                logger.info(f"[AliciaD] Current joints (deg): {np.rad2deg(self._current_joint_angles)}")
+            
+            return True
+            
         except Exception as e:
             logger.error(f"[AliciaD] Connection error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
-    def _get_fresh_state(self, timeout: float = 0.1):
-        """
-        Get FRESH robot state (synchronous, blocking).
-        
-        This is the ONLY way to get observation - no caching allowed.
-        For imitation learning, we need real-time ground truth.
-        """
-        if not self.servo_driver.acquire_info("joint_gripper", wait=True, timeout=timeout):
-            return None
-        return self.servo_driver.data_parser.get_info("joint_gripper")
     
     def get_observation(self) -> Optional[Dict[str, Any]]:
         """
@@ -382,10 +560,25 @@ class AliciaD(BaseRobot):
         For imitation learning data collection, observations must be
         real-time ground truth, not cached values.
         """
+        if not self._connected or self._driver is None:
+            return None
+        
         try:
-            # Always get fresh state - blocking but with short timeout
-            state = self._get_fresh_state(timeout=0.1)
-            if state is None:
+            # Actively request joint data from hardware (rate-limited to avoid serial flooding)
+            # This ensures we get fresh data, not stale cache from connect() time.
+            now = time.time()
+            if not hasattr(self, '_last_joint_query_time'):
+                self._last_joint_query_time = 0.0
+            # Query at most ~50Hz (every 20ms) to avoid flooding serial
+            if now - self._last_joint_query_time >= 0.02:
+                self._driver.acquire_info("joint_gripper", wait=False)
+                self._last_joint_query_time = now
+            
+            # Get fresh state from SDK (non-blocking read from parser, updated by thread)
+            # The ServoDriver has a background thread that updates state
+            state = self._driver.data_parser.get_joint_state()
+            
+            if state is None or state.angles is None:
                 return None
             
             joint_angles = np.array(state.angles, dtype=np.float64)
@@ -396,13 +589,14 @@ class AliciaD(BaseRobot):
             self._current_gripper = gripper
             
             # Combine arm joints and gripper (normalized to 0-1)
+            # Hardware gripper is 0-1000
             qpos = np.concatenate([joint_angles, [gripper / 1000.0]])
             
             return {
                 'qpos': qpos,
                 'joint_angles': joint_angles.copy(),
                 'gripper': gripper,
-                'timestamp': time.time(),
+                'timestamp': state.timestamp,
             }
         except Exception as e:
             logger.error(f"[AliciaD] get_observation error: {e}")
@@ -414,26 +608,12 @@ class AliciaD(BaseRobot):
         
         For qpos mode: pass through (7D: 6 joint angles in rad + gripper 0-1)
         For delta_ee mode: convert 7D delta to joint positions using IK
-        
-        NOTE: IK uses warm-start from previous target, not current obs.
-        This allows IK to run independently of obs frequency.
-        
-        Rotation handling:
-        - Input: xyz euler angles in robot base frame (from Quest3 after calibration_transform)
-        - These are converted to a rotation matrix and applied as LEFT multiplication
-        - target_R = R_delta_base @ current_R (rotation in base frame)
-        
-        Gripper control:
-        - qpos mode: ABSOLUTE control, action[6] is normalized 0-1 (0=open, 1=closed)
-                     Converted to hardware range 0-1000 (0=open, 1000=closed)
-        - delta_ee mode: RELATIVE control, action[6] is delta value
-                        Accumulated: new_gripper = clip(current + delta * 1000, 0, 1000)
-                        Hardware range: 0-1000 (0=open, 1000=closed)
+        For rel_ee mode: convert 7D relative pose (from anchor) to joint positions using IK
         """
         if self.control_mode == "qpos":
             return action_dict
         
-        # delta_ee mode
+        # delta_ee and rel_ee modes
         action = action_dict.get('action', None)
         if action is None:
             return action_dict
@@ -441,65 +621,205 @@ class AliciaD(BaseRobot):
         action = np.array(action, dtype=np.float64)
         
         if len(action) != 7:
-            logger.warning(f"[AliciaD] delta_ee expects 7D action, got {len(action)}D")
+            logger.warning(f"[AliciaD] {self.control_mode} expects 7D action, got {len(action)}D")
             return action_dict
         
         # Parse action: [dx, dy, dz, droll, dpitch, dyaw, dgripper]
-        # Teleop (Quest3) outputs xyz euler angles in BASE frame after calibration_transform
-        delta_pos = action[:3] * self.position_scale
-        euler_delta = action[3:6] * self.rotation_scale  # xyz euler angles in base frame
-        delta_gripper = action[6] * self.gripper_scale
+        pos_component = action[:3] * self.position_scale
+        euler_component = action[3:6] * self.rotation_scale
+        gripper_component = action[6] * self.gripper_scale
         
         # Check if action is essentially zero
         if np.allclose(action, 0, atol=1e-6):
-            action_dict['action'] = None
-            return action_dict
+            # In rel_ee mode, we MUST process zero actions if they signal a state change
+            # (start or stop) to keep the robot's anchor state synchronized with the teleop.
+            if self.control_mode == "rel_ee":
+                input_unsqueeze = action_dict.get('unsqueeze_active', True)
+                anchor_set = action_dict.get('anchor_just_set', False)
+                internal_unsqueeze = self._rel_ee_vr_unsqueeze_active
+                
+                # Pass through if:
+                # 1. Anchor just set (Start of movement)
+                # 2. Falling edge: Internal True -> Input False (End of movement)
+                if anchor_set or (internal_unsqueeze and not input_unsqueeze):
+                    pass # Continue to process_action logic (state change frame)
+                else:
+                    action_dict['action'] = None
+                    return action_dict
+            else:
+                # For delta_ee/qpos, zero action means nothing to do
+                action_dict['action'] = None
+                return action_dict
         
         with self._lock:
-            # Get current end-effector pose from IK solver's internal state
-            current_T = self.ik_solver.get_current_pose()
+            if self.control_mode == "delta_ee":
+                # delta_ee mode: apply delta to IK solver's INTERNAL state (not actual joints)
+                # This allows accumulation of deltas for smooth motion
+                # Only sync with actual joints on first action or when explicitly requested
+                
+                # Initialize IK state if this is the first action
+                if not hasattr(self, '_ik_initialized') or not self._ik_initialized:
+                    if self._current_joint_angles is not None:
+                        self.ik_solver.reset(self._current_joint_angles)
+                        self._ik_initialized = True
+                        logger.info(f"[AliciaD] delta_ee: IK initialized with actual joints (deg): {np.rad2deg(self._current_joint_angles)}")
+                        logger.info(f"[AliciaD] delta_ee: initial EE pos: {self.ik_solver.get_current_pose()[:3, 3]}")
+                    else:
+                        logger.warning("[AliciaD] delta_ee: No current joint angles for IK init")
+                        action_dict['action'] = None
+                        return action_dict
+                
+                # Get current EE from IK solver's INTERNAL state (accumulated)
+                current_T = self.ik_solver.get_current_pose()
+                
+                # Build target pose by applying delta to accumulated position
+                target_T = current_T.copy()
+                target_T[:3, 3] += pos_component
+                
+                # Convert euler delta to rotation matrix (base frame delta rotation)
+                if np.linalg.norm(euler_component) > 1e-10:
+                    from scipy.spatial.transform import Rotation as R
+                    R_delta_base = R.from_euler('xyz', euler_component).as_matrix()
+                    target_T[:3, :3] = R_delta_base @ current_T[:3, :3]
+                
+                # Gripper: accumulate delta
+                new_gripper = np.clip(self._target_gripper + gripper_component * 1000, 0, 1000)
+                
+            elif self.control_mode == "rel_ee":
+                try:
+                    # rel_ee mode: apply relative pose to ANCHOR
+                    vr_unsqueeze_active = action_dict.get('unsqueeze_active', True)
+                    anchor_just_set = action_dict.get('anchor_just_set', False)
+                    
+                    # Detect VR unsqueeze state transitions
+                    vr_was_active = self._rel_ee_vr_unsqueeze_active
+                    self._rel_ee_vr_unsqueeze_active = vr_unsqueeze_active
+                    
+                    if vr_unsqueeze_active and not vr_was_active and not anchor_just_set:
+                        logger.warning("[AliciaD] rel_ee: unsqueeze rising edge but anchor_just_set=False (teleop may be missing press frame).")
+
+                    if not vr_unsqueeze_active:
+                        # If unsqueeze is released, just update state and hold position.
+                        action_dict['action'] = None
+                        return action_dict
+
+                    # Determine trigger reason
+                    trigger_reason = ""
+                    if anchor_just_set: 
+                        trigger_reason = "anchor_just_set"
+                    elif (vr_unsqueeze_active and not vr_was_active): 
+                        trigger_reason = "unsqueeze_edge"
+
+                    # Set anchor when triggered
+                    if trigger_reason:
+                        success = self.refresh_rel_ee_anchor(use_actual_joints=True)
+                        if not success:
+                            logger.warning("[AliciaD] rel_ee: Failed to refresh anchor. Aborting action.")
+                            action_dict['action'] = None
+                            return action_dict
+                        # Safety: do not publish motion on the press frame (zero action).
+                        if anchor_just_set and np.allclose(pos_component, 0, atol=1e-8) and np.allclose(euler_component, 0, atol=1e-8):
+                            action_dict['action'] = None
+                            return action_dict
+                    
+                    # If no anchor yet, try to set it now
+                    if self._rel_ee_anchor_pose is None:
+                        success = self.refresh_rel_ee_anchor(use_actual_joints=True)
+                        if not success:
+                            logger.warning("[AliciaD] rel_ee: Failed to set initial anchor")
+                            action_dict['action'] = None
+                            return action_dict
+                    
+                    # Build target pose by applying relative transform to anchor
+                    target_T = self._rel_ee_anchor_pose.copy()
+                    target_T[:3, 3] += pos_component
+                    
+                    # Apply relative rotation (in base frame)
+                    if np.linalg.norm(euler_component) > 1e-10:
+                        from scipy.spatial.transform import Rotation as R
+                        R_rel_base = R.from_euler('xyz', euler_component).as_matrix()
+                        target_T[:3, :3] = R_rel_base @ self._rel_ee_anchor_pose[:3, :3]
+                    
+                    # Gripper: accumulate delta (same as delta_ee mode)
+                    new_gripper = np.clip(self._target_gripper + gripper_component * 1000, 0, 1000)
+                    
+                except Exception as e:
+                    logger.error(f"[AliciaD] rel_ee process error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    action_dict['action'] = None
+                    return action_dict
             
-            # Build target pose
-            target_T = current_T.copy()
-            target_T[:3, 3] += delta_pos  # Apply position delta
-            
-            # Convert euler delta to rotation matrix (base frame delta rotation)
-            # Then LEFT multiply to current rotation (rotation in base/world frame)
-            if np.linalg.norm(euler_delta) > 1e-10:
-                from scipy.spatial.transform import Rotation as R
-                R_delta_base = R.from_euler('xyz', euler_delta).as_matrix()
-                # Left multiply: delta rotation is in base frame
-                # target_R = R_delta_base @ current_R
-                target_T[:3, :3] = R_delta_base @ current_T[:3, :3]
-            
-            # Solve IK with target pose (uses warm-start from previous solve)
-            success, q_arm, iters, err = self.ik_solver.solve(target_T)
-            
-            # SAFETY: If IK failed, reject the action entirely
-            # This prevents dangerous movements when target is unreachable
-            if not success:
-                if self.debug:
-                    logger.warning(f"[AliciaD] IK failed (unreachable target): err={err:.4e}, iters={iters}")
-                action_dict['action'] = None  # Reject action
+            else:
                 return action_dict
             
-            # Update gripper target (only if IK succeeded)
-            # RELATIVE control: delta_gripper is accumulated into current target
-            # Range: 0-1000 (0=open, 1000=closed)
-            new_gripper = np.clip(self._target_gripper + delta_gripper * 1000, 0, 1000)
+            # Solve IK with target pose
+            success, q_arm, iters, err = self.ik_solver.solve(target_T)
             
-            # Store targets for next iteration (only if IK succeeded)
+            # IK Recovery: If failed, try resetting to actual joints and solve again
+            if not success and self._current_joint_angles is not None:
+                self.ik_solver.reset(self._current_joint_angles)
+                success, q_arm, iters, err = self.ik_solver.solve(target_T)
+            
+            # SAFETY: If IK failed, reject the action entirely
+            if not success:
+                logger.warning(f"[AliciaD] IK failed (unreachable target): err={err:.4e}, iters={iters}, target_pos={target_T[:3,3]}")
+                action_dict['action'] = None
+                return action_dict
+            
+            # Store targets for next iteration
             self._target_qpos = q_arm.copy()
             self._target_gripper = new_gripper
             
             # Build output action: [6 joint angles, gripper_normalized]
             output_action = np.concatenate([q_arm, [new_gripper / 1000.0]])
             action_dict['action'] = output_action
-            
-            if self.debug:
-                logger.debug(f"[AliciaD] IK: iters={iters}, err={err:.4e}, q={np.rad2deg(q_arm)}")
         
         return action_dict
+    
+    def refresh_rel_ee_anchor(self, use_actual_joints: bool = True) -> bool:
+        """
+        Refresh the rel_ee anchor to current EE pose.
+        
+        The anchor is computed using forward kinematics from actual joint observations.
+        """
+        if self.control_mode != "rel_ee":
+            return False
+        
+        with self._lock:
+            # FORCE UPDATE: Get fresh observation immediately
+            self.get_observation()
+            
+            # Determine which joint source to use for anchor FK calculation.
+            #
+            # IMPORTANT: This robot's hardware encoder does NOT reliably track 
+            # commanded positions - it often reports near-zero (home) values 
+            # even after the robot has moved. Therefore we PREFER _target_qpos 
+            # (the last successfully commanded joints) over _current_joint_angles 
+            # (hardware encoder readout).
+            #
+            # Priority:
+            # 1. _target_qpos (last commanded) - most reliable
+            # 2. _current_joint_angles (hardware encoder) - fallback only
+            joints_to_use = None
+            
+            if self._target_qpos is not None:
+                joints_to_use = self._target_qpos
+            elif self._current_joint_angles is not None:
+                joints_to_use = self._current_joint_angles
+            
+            if joints_to_use is not None:
+                fk_pose = self.ik_solver.compute_fk(joints_to_use)
+                self._rel_ee_anchor_pose = fk_pose.copy()
+                self.ik_solver.reset(joints_to_use)
+            else:
+                logger.warning("[AliciaD] refresh_anchor failed: No joints available")
+                return False
+            
+            self._rel_ee_anchor_gripper = self._current_gripper if self._current_gripper is not None else self._target_gripper
+            self._rel_ee_anchor_initialized = True
+            
+            return True
     
     def publish_action(self, action: np.ndarray):
         """
@@ -507,18 +827,19 @@ class AliciaD(BaseRobot):
         
         Args:
             action: 7D array [6 joint angles in rad, gripper normalized 0-1]
-        
-        Safety: Rejects action if joint delta exceeds max_joint_delta_rad
         """
+        if not self._connected or self._driver is None:
+            logger.error("[AliciaD] Not connected")
+            return
+        
         try:
             if len(action) < 7:
                 logger.error(f"[AliciaD] Invalid action dimension: {len(action)}")
                 return
             
             target_joints = np.array(action[:6], dtype=np.float64)
-            # ABSOLUTE control: action[6] is normalized 0-1, convert to hardware range 0-1000
-            # Hardware range: 0=open, 1000=closed
-            gripper_value = int(action[6] * 1000)  # Convert from 0-1 to 0-1000
+            # Convert gripper from 0-1 to 0-1000
+            gripper_value = int(action[6] * 1000)
             gripper_value = np.clip(gripper_value, 0, 1000)
             
             # Safety check: reject if joint delta is too large
@@ -527,15 +848,17 @@ class AliciaD(BaseRobot):
                 max_delta = np.max(joint_delta)
                 
                 if max_delta > self.max_joint_delta_rad:
-                    if self.debug:
-                        logger.warning(
-                            f"[AliciaD] Action rejected: max joint delta {np.rad2deg(max_delta):.1f}° "
-                            f"exceeds limit {np.rad2deg(self.max_joint_delta_rad):.1f}°"
-                        )
-                    return  # Reject action
+                    logger.warning(
+                        f"[AliciaD] Action REJECTED: max joint delta {np.rad2deg(max_delta):.1f}° "
+                        f"exceeds limit {np.rad2deg(self.max_joint_delta_rad):.1f}°"
+                    )
+                    return
+            else:
+                logger.warning("[AliciaD] No current joint angles available for safety check")
             
-            # Send to hardware
-            self.servo_driver.set_joint_and_gripper(
+            # Send to hardware via driver
+            # The driver.set_joint_and_gripper method is unified and non-blocking by default unless wait_for_completion=True
+            self._driver.set_joint_and_gripper(
                 joint_angles=target_joints.tolist(),
                 gripper_value=gripper_value,
                 speed_deg_s=self.speed_deg_s,
@@ -555,17 +878,105 @@ class AliciaD(BaseRobot):
     
     def is_running(self) -> bool:
         """Check if robot is running."""
-        return self._connected and self.servo_driver.serial_comm.is_connected()
+        # Check if driver is connected and update thread is running
+        if self._driver is None:
+            return False
+        return self._connected and self._driver.serial_comm.is_connected()
     
     def shutdown(self):
         """Shutdown robot."""
         try:
-            self.servo_driver.stop_update_thread()
-            self.servo_driver.disconnect()
+            if self._driver is not None:
+                self._driver.disconnect()
+                self._driver = None
             self._connected = False
             logger.info("[AliciaD] Shutdown complete")
         except Exception as e:
             logger.error(f"[AliciaD] Shutdown error: {e}")
+    
+    def start(self):
+        """
+        Start the robot in subprocess.
+        
+        IMPORTANT: Connection must be established in the subprocess, not in the main process.
+        This is because serial connections cannot be inherited across process boundaries
+        (especially with 'spawn' start method).
+        """
+        from deploy.utils import RateLimiter
+        
+        # Create shared memory for observations
+        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
+        
+        # Connect to control shm (teleop) with retry - it may not be ready yet
+        if self.control_shm_name is not None and self.control_shm is None:
+            max_retries = 10
+            for i in range(max_retries):
+                try:
+                    self.control_shm = self.connect_to_existing_shm(self.control_shm_name)
+                    logger.info(f"Connected to control SHM: {self.control_shm_name}")
+                    break
+                except ValueError as e:
+                    if i < max_retries - 1:
+                        logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
+                        time.sleep(0.5)
+                    else:
+                        logger.error(f"Failed to connect to control SHM: {e}")
+        
+        # IMPORTANT: Connect to robot hardware in subprocess
+        # Serial connections cannot be inherited from main process
+        if not self._connected:
+            logger.info("[AliciaD] Connecting to robot in subprocess...")
+            if not self.connect():
+                logger.error("[AliciaD] Failed to connect to robot in subprocess")
+                return
+        
+        self.is_running = True
+        rate_limiter = RateLimiter()
+        
+        # Action smoother: smooths IK output for continuous, jerk-free motion
+        smoother = ActionSmoother(ndof=7, tau=self.smoothing_tau)
+        
+        logger.info(
+            f"[AliciaD] Starting main loop (mode={self.control_mode}, fps={self.fps}, "
+            f"smoothing_tau={self.smoothing_tau}s)"
+        )
+        
+        # Idle counter for auto-resetting unsqueeze state
+        _action_idle_count = 0
+        
+        while self.is_running:
+            # Read and process action from teleop (arrives at teleop rate, e.g. 50Hz)
+            action = self.read_action()
+            if action is not None:
+                _action_idle_count = 0
+                action = self.process_action(action)
+                action_array = action.get('action', None)
+                if action_array is not None:
+                    # New IK target: feed to smoother
+                    smoother.set_target(action_array)
+                else:
+                    # process_action returned None (e.g. unsqueeze released, zero action)
+                    # Hold smoother at current position to prevent drift
+                    smoother.hold()
+            else:
+                _action_idle_count += 1
+                # If idle for >0.1s (20 frames at 200Hz), assume teleop stopped sending
+                if _action_idle_count > 20 and self._rel_ee_vr_unsqueeze_active:
+                    self._rel_ee_vr_unsqueeze_active = False
+            
+            # Advance smoother and publish on EVERY iteration (200Hz),
+            # even when no new IK target arrived. This interpolates between
+            # sparse teleop frames for smooth, continuous motion.
+            smoothed = smoother.step()
+            if smoothed is not None:
+                self.publish_action(smoothed)
+            
+            # Get observation and write to shm
+            data = self.get_data()
+            if data is not None:
+                self.write_data(data)
+            
+            rate_limiter.sleep(self.fps)
     
     def obs2meta(self, obs: dict) -> MetaObs:
         """Convert observations to MetaObs format."""
@@ -581,7 +992,7 @@ class AliciaD(BaseRobot):
             if isinstance(images, dict):
                 images = np.stack([images[k] for k in sorted(images.keys())], axis=0)
             if images.ndim == 3:
-                images = images[None]  # Add batch dimension
+                images = images[None]
             images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
         else:
             images = np.zeros((1, 3, 480, 640), dtype=np.uint8)
@@ -596,8 +1007,14 @@ class AliciaD(BaseRobot):
     
     def set_home(self, speed_deg_s: float = 10.0):
         """Move robot to home position (all zeros)."""
-        home_action = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])  # Gripper open
-        self.publish_action(home_action)
+        if self._driver is not None:
+            home_joints = [0.0] * 6
+            # Use default gripper value (1000)
+            self._driver.set_joint_and_gripper(
+                joint_angles=home_joints, 
+                gripper_value=1000,
+                speed_deg_s=speed_deg_s
+            )
     
     def set_joints(self, joint_angles: np.ndarray, gripper: Optional[float] = None):
         """
@@ -637,262 +1054,8 @@ class AliciaD(BaseRobot):
     def get_pose(self) -> np.ndarray:
         """Get current end-effector pose as 4x4 matrix."""
         if self._current_joint_angles is not None:
-            self.ik_solver.reset(self._current_joint_angles)
+            return self.ik_solver.compute_fk(self._current_joint_angles)
         return self.ik_solver.get_current_pose()
-    
-    # ==================== Async Start (like SO101) ====================
-    
-    def start(self):
-        """
-        Start the robot with async architecture.
-        
-        Key design for imitation learning:
-        - Observation is ALWAYS fresh (synchronous blocking read)
-        - IK computation runs in separate process (never blocks obs)
-        - Action execution is non-blocking
-        """
-        import multiprocessing as mp
-        from deploy.utils import RateLimiter
-        
-        # Create shared memory for observations
-        self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
-        
-        # Connect to control shm (teleop)
-        if self.control_shm_name is not None and self.control_shm is None:
-            max_retries = 10
-            for i in range(max_retries):
-                try:
-                    self.control_shm = self.connect_to_existing_shm(self.control_shm_name)
-                    logger.info(f"Connected to control SHM: {self.control_shm_name}")
-                    break
-                except ValueError as e:
-                    if i < max_retries - 1:
-                        logger.warning(f"Waiting for control SHM '{self.control_shm_name}'... ({i+1}/{max_retries})")
-                        time.sleep(0.5)
-                    else:
-                        logger.error(f"Failed to connect to control SHM: {e}")
-        
-        # Choose start mode based on control mode
-        if self.control_mode == "delta_ee":
-            self._start_async_ik()
-        else:
-            self._start_sync()
-    
-    def _start_sync(self):
-        """Synchronous start (for qpos mode - no IK needed)."""
-        from deploy.utils import RateLimiter
-        
-        self.is_running = True
-        rate_limiter = RateLimiter()
-        
-        while self.is_running:
-            # 1. Get fresh observation (blocking)
-            data = self.get_data()
-            if data is not None:
-                self.write_data(data)
-            
-            # 2. Process and execute action
-            action = self.read_action()
-            if action is not None:
-                action = self.process_action(action)
-                action_array = action.get('action', None)
-                if action_array is not None:
-                    self.publish_action(action_array)
-            
-            rate_limiter.sleep(self.fps)
-    
-    def _start_async_ik(self):
-        """
-        Async start with IK in separate process.
-        
-        Architecture (like SO101):
-        - Main loop: obs acquisition (blocking) + action execution (non-blocking)
-        - IK process: delta_ee → joint angles conversion
-        - Queues: decouple obs rate from IK rate
-        """
-        import multiprocessing as mp
-        from deploy.utils import RateLimiter
-        
-        # Create queues for IK process communication
-        action_in_queue = mp.Queue(maxsize=2)
-        action_out_queue = mp.Queue(maxsize=2)
-        
-        # Start IK worker process
-        ik_process = mp.Process(
-            target=self._ik_worker,
-            args=(action_in_queue, action_out_queue),
-            daemon=True
-        )
-        ik_process.start()
-        logger.info(f"[AliciaD] Started async IK process")
-        
-        self.is_running = True
-        rate_limiter = RateLimiter()
-        pending_result = None
-        
-        try:
-            while self.is_running:
-                # 1. Get FRESH observation (blocking, ~50-100ms)
-                #    This is the ground truth for imitation learning
-                data = self.get_data()
-                if data is not None:
-                    self.write_data(data)
-                
-                # 2. Check for processed IK result (non-blocking)
-                try:
-                    while not action_out_queue.empty():
-                        pending_result = action_out_queue.get_nowait()
-                except:
-                    pass
-                
-                # 3. Execute pending action (non-blocking serial write)
-                if pending_result is not None:
-                    action_array = pending_result.get('action', None)
-                    if action_array is not None:
-                        self.publish_action(action_array)
-                    
-                    # Update IK state tracking
-                    with self._lock:
-                        if pending_result.get('target_qpos') is not None:
-                            self._target_qpos = np.array(pending_result['target_qpos'])
-                            self._target_gripper = pending_result['target_gripper']
-                    
-                    pending_result = None
-                
-                # 4. Send new raw action to IK process (non-blocking)
-                raw_action = self.read_action()
-                if raw_action is not None:
-                    with self._lock:
-                        msg = {
-                            'action': raw_action,
-                            'target_qpos': self._target_qpos.copy() if self._target_qpos is not None else None,
-                            'target_gripper': self._target_gripper,
-                        }
-                    try:
-                        # Drop old messages to avoid lag
-                        while not action_in_queue.empty():
-                            try:
-                                action_in_queue.get_nowait()
-                            except:
-                                break
-                        action_in_queue.put_nowait(msg)
-                    except:
-                        pass
-                
-                rate_limiter.sleep(self.fps)
-        finally:
-            # Cleanup
-            action_in_queue.put(None)  # Signal to stop
-            ik_process.join(timeout=1.0)
-            if ik_process.is_alive():
-                ik_process.terminate()
-            logger.info(f"[AliciaD] Stopped async IK process")
-    
-    def _ik_worker(self, action_in_queue, action_out_queue):
-        """
-        IK worker process.
-        
-        Runs independently of main loop, converts delta_ee actions to joint angles.
-        """
-        # Create local IK solver (each process needs its own)
-        local_solver = RealtimeIKSolver(
-            urdf_path=self.urdf_path,
-            end_frame="tool0",
-            arm_dof=6,
-            eps=self._ik_settings['eps'],
-            max_iter=self._ik_settings['max_iter'],
-            dt=self._ik_settings['dt'],
-        )
-        
-        target_gripper = 500.0
-        
-        while True:
-            try:
-                msg = action_in_queue.get(timeout=1.0)
-                if msg is None:
-                    break
-                
-                raw_action = msg['action']
-                action = raw_action.get('action', None)
-                if action is None:
-                    continue
-                
-                action = np.array(action, dtype=np.float64)
-                if len(action) != 7:
-                    continue
-                
-                # Initialize solver state from message
-                if msg.get('target_qpos') is not None:
-                    local_solver.reset(msg['target_qpos'])
-                    target_gripper = msg['target_gripper']
-                
-                # Parse delta action
-                # Input: [dx, dy, dz, droll, dpitch, dyaw, dgripper]
-                # Teleop (Quest3) outputs xyz euler angles in BASE frame after calibration_transform
-                delta_pos = action[:3] * self.position_scale
-                euler_delta = action[3:6] * self.rotation_scale  # xyz euler angles in base frame
-                delta_gripper = action[6] * self.gripper_scale
-                
-                # Skip if essentially zero
-                if np.allclose(action, 0, atol=1e-6):
-                    continue
-                
-                # Get current end-effector pose from solver's internal state
-                current_T = local_solver.get_current_pose()
-                
-                # Build target pose
-                target_T = current_T.copy()
-                target_T[:3, 3] += delta_pos  # Apply position delta
-                
-                # Convert euler delta to rotation matrix (base frame delta rotation)
-                # Then LEFT multiply to current rotation (rotation in base/world frame)
-                if np.linalg.norm(euler_delta) > 1e-10:
-                    from scipy.spatial.transform import Rotation as R
-                    R_delta_base = R.from_euler('xyz', euler_delta).as_matrix()
-                    # Left multiply: delta rotation is in base frame
-                    # target_R = R_delta_base @ current_R
-                    target_T[:3, :3] = R_delta_base @ current_T[:3, :3]
-                
-                # Solve IK with target pose
-                success, q_arm, iters, err = local_solver.solve(target_T)
-                
-                # SAFETY: If IK failed, skip this action entirely
-                # Do NOT update gripper or send result - target is unreachable
-                if not success:
-                    # Don't update target_gripper or solver state
-                    continue
-                
-                # IK succeeded - update gripper and send result
-                new_gripper = np.clip(target_gripper + delta_gripper * 1000, 0, 1000)
-                target_gripper = new_gripper
-                
-                # Build output
-                output_action = np.concatenate([q_arm, [new_gripper / 1000.0]])
-                
-                result = {
-                    'action': output_action,
-                    'target_qpos': q_arm.copy(),
-                    'target_gripper': new_gripper,
-                    'ik_success': success,
-                    'ik_iters': iters,
-                    'ik_err': err,
-                }
-                
-                # Send result (drop old if queue full)
-                try:
-                    while not action_out_queue.empty():
-                        try:
-                            action_out_queue.get_nowait()
-                        except:
-                            break
-                    action_out_queue.put_nowait(result)
-                except:
-                    pass
-                    
-            except Exception as e:
-                if "Empty" not in str(type(e).__name__):
-                    logger.error(f"[AliciaD IK Worker] Error: {e}")
-                continue
 
 
 # ============================================================================
@@ -903,12 +1066,12 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Test Alicia-D Robot")
-    parser.add_argument('--port', type=str, default='/dev/ttyACM0', help='Serial port')
-    parser.add_argument('--mode', type=str, default='qpos', choices=['qpos', 'delta_ee'], help='Control mode')
+    parser.add_argument('--port', type=str, default='', help='Serial port (empty for auto-detect)')
+    parser.add_argument('--mode', type=str, default='qpos', choices=['qpos', 'delta_ee', 'rel_ee'], help='Control mode')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     args = parser.parse_args()
     
-    print(f"Creating Alicia-D robot on {args.port} with mode={args.mode}")
+    print(f"Creating Alicia-D robot on port '{args.port}' with mode={args.mode}")
     
     robot = AliciaD(
         port=args.port,

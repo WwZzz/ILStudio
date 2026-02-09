@@ -6,7 +6,6 @@
 type: deploy.robot.alicia_d.AliciaD
 args:
   name: alicia_d
-  port: /dev/ttyACM2
   fps: 200.0
   control_mode: qpos  # "qpos" for direct joint control, "delta_ee" for IK-based EE control
   

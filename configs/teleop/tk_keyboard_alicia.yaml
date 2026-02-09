@@ -38,10 +38,10 @@ args:
   
   # Custom key mappings
   key_mappings:
-    - {name: "X (forward/back)", key_positive: "q", key_negative: "e", scale: 0.01}
-    - {name: "Y (left/right)", key_positive: "d", key_negative: "a", scale: 0.01}
-    - {name: "Z (up/down)", key_positive: "w", key_negative: "s", scale: 0.01}
-    - {name: "Roll", key_positive: "r", key_negative: "f", scale: 0.05}
-    - {name: "Pitch", key_positive: "1", key_negative: "3", scale: 0.05}
-    - {name: "Yaw", key_positive: "z", key_negative: "c", scale: 0.05}
+    - {name: "X (forward/back)", key_positive: "q", key_negative: "e", scale: 0.002}
+    - {name: "Y (left/right)", key_positive: "a", key_negative: "d", scale: 0.002}
+    - {name: "Z (up/down)", key_positive: "w", key_negative: "s", scale: 0.002}
+    - {name: "Roll", key_positive: "r", key_negative: "f", scale: 0.005}
+    - {name: "Pitch", key_positive: "1", key_negative: "3", scale: 0.005}
+    - {name: "Yaw", key_positive: "z", key_negative: "c", scale: 0.005}
     - {name: "Gripper", key_positive: "v", key_negative: "b", scale: 0.05}

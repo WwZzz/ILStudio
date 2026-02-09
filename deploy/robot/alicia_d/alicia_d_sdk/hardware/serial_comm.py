@@ -200,7 +200,7 @@ class SerialComm:
                     return False
 
                 if self.debug_mode:
-                    self._print_hex_frame(data, 0)
+                    self._hex_print("Send", data)
 
                 return True
 
