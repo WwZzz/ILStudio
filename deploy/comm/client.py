@@ -198,7 +198,10 @@ class PolicyClient(BaseClient):
             
             # Add actions to queue
             # If chunk_size > 0, limit to chunk_size; if chunk_size <= 0, use all actions
-            actions_to_add = mact_list[:self.chunk_size] if self.chunk_size > 0 else mact_list
+            if self.chunk_size is not None and self.chunk_size > 0:
+                actions_to_add = mact_list[:self.chunk_size]
+            else:
+                actions_to_add = mact_list
             for mact in actions_to_add:
                 self.action_queue.append(mact)
         

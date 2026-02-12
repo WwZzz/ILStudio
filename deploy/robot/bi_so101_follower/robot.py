@@ -662,20 +662,20 @@ class BiSo101Follower(BaseRobot):
         if obs is None:
             return None
         
-        left_qpos = np.array([obs[mname+'.pos'] for mname in cls._left_motors], dtype=np.float32)
-        right_qpos = np.array([obs[mname+'.pos'] for mname in cls._right_motors], dtype=np.float32)
+        left_qpos = np.array([obs['bi_so101_follower'][mname+'.pos'] for mname in cls._left_motors], dtype=np.float32)
+        right_qpos = np.array([obs['bi_so101_follower'][mname+'.pos'] for mname in cls._right_motors], dtype=np.float32)
         qpos = np.concatenate([left_qpos, right_qpos])
         images = []
         if 'head_camera' in obs:
-            image = obs['head_camera']
+            image = obs['head_camera']['image']
             images.append(image)
         else:
-            images.append(np.zeros((1, 3, 480, 640), dtype=np.uint8))
+            images.append(np.zeros((3, 480, 640), dtype=np.uint8))
         if 'left_wrist_camera' in obs:
-            image = obs['left_wrist_camera']
+            image = obs['left_wrist_camera']['image']
             images.append(image)
         if 'right_wrist_camera' in obs:
-            image = obs['right_wrist_camera']
+            image = obs['right_wrist_camera']['image']
             images.append(image)
         images = np.stack(images).transpose(0, 3, 1, 2)
         return MetaObs(state=qpos,  image=images)

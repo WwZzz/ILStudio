@@ -1,0 +1,8 @@
+type: deploy.action_manager.truncated.TruncatedManager
+name: sync_with_interval
+args:
+  module_path: deploy.action_manager.truncated
+  class_name: TruncatedManager
+  start_ratio: 0.0   # Don't drop beginning
+  end_ratio: 0.5     # Don't drop end (keep all actions)
+  older_coef: 1.0    # Wait until 100% of chunk executed before accepting new

@@ -440,6 +440,10 @@ class BaseNormalizer:
         if os.path.exists(cache_path):
             return True
         else:
+            cache_path=os.path.join(self.dataset_dir, self.stats_filename)
+            if os.path.exists(cache_path):
+                self.cache_dir = self.dataset_dir
+                return True
             return False
         
         # # Backward compatibility: check in dataset_dir if it exists

@@ -12,7 +12,7 @@ datasets:
     chunk_size: 50
     ctrl_space: joint
     ctrl_type: abs
-    preload_data: true
+    preload_data: false
 
 # Task metadata
 meta:

@@ -89,6 +89,12 @@ def load_action_manager(manager_name_or_path: str = None, config: Union[Dict, Si
         module_path = manager_config.get('module_path')
         class_name = manager_config.get('class_name') or manager_config.get('manager_name') or manager_config.get('name')
         
+        # Auto-detect module_path if class_name is a full path
+        if class_name and '.' in class_name and not module_path:
+            parts = class_name.rsplit('.', 1)
+            module_path = parts[0]
+            class_name = parts[1]
+            
         if module_path and class_name:
             # Dynamic import from config
             try:
@@ -118,6 +124,12 @@ def load_action_manager(manager_name_or_path: str = None, config: Union[Dict, Si
         module_path = manager_config.get('module_path')
         class_name = manager_config.get('class_name') or manager_config.get('manager_name') or manager_config.get('name')
         
+        # Auto-detect module_path if class_name is a full path
+        if class_name and '.' in class_name and not module_path:
+            parts = class_name.rsplit('.', 1)
+            module_path = parts[0]
+            class_name = parts[1]
+            
         if module_path and class_name:
             try:
                 module = importlib.import_module(module_path)
@@ -134,6 +146,17 @@ def load_action_manager(manager_name_or_path: str = None, config: Union[Dict, Si
         manager_class_name = manager_name_or_path
         manager_class = BUILTIN_MANAGER_MAP.get(manager_class_name)
         
+        if manager_class is None and '.' in manager_class_name:
+            # Try to load as full path
+            try:
+                parts = manager_class_name.rsplit('.', 1)
+                module_path = parts[0]
+                class_name = parts[1]
+                module = importlib.import_module(module_path)
+                manager_class = getattr(module, class_name)
+            except Exception:
+                pass
+
         if manager_class is None:
             # Try eval as last resort fallback
             try:

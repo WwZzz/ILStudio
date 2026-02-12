@@ -15,13 +15,20 @@ def load_config(path: str) -> List[dict]:
     return [raw]
 
 
-def start_devices(configs: List[dict]) -> List[mp.Process]:
-    """Start each device config in a separate process."""
+def start_devices(configs: List[dict], daemon: bool = True) -> List[mp.Process]:
+    """Start each device config in a separate process.
+    
+    Args:
+        configs: List of device configurations
+        daemon: If True, processes will be terminated when main process exits
+                (including crashes/segfaults). Default True for safety.
+    """
     from deploy.base import start_device
 
     procs = []
     for cfg in configs:
         p = mp.Process(target=start_device, args=(cfg,))
+        p.daemon = daemon
         p.start()
         procs.append(p)
     return procs

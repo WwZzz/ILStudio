@@ -19,6 +19,7 @@ from data_utils.normalize import load_normalizers
 from data_utils.utils import set_seed
 from benchmark.base import MetaPolicy
 from deploy.comm import create_server, is_http_address
+from transformers.trainer import Trainer
 
 def parse_param():
     """
