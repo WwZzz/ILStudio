@@ -1,2 +1,2 @@
-type: deploy.action_manager.basic.BasicActionManager
+type: deploy.action_manager.base.BasicActionManager
 name: basic

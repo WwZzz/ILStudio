@@ -4,8 +4,28 @@ eval_real.py
 
 Real robot evaluation with policy inference:
 1. Start robot/camera devices in subprocesses (like collect_data.py)
-2. Run inference process to produce action chunks
-3. Use action manager to select and publish actions
+2. Start unified inference_worker (REAL mode) - reads device SHMs directly
+3. Use action_manager to trigger inference and select actions
+
+Architecture:
+    ┌──────────────┐             ┌───────────────────┐
+    │ Device SHMs   │──(direct)──>│ inference_worker   │
+    │ (device procs)│             │  (REAL mode)       │
+    └──────────────┘             │ sync+obs2meta+infer│
+                                  └────────┬──────────┘
+                                           │ action_shm
+                                           ▼
+    ┌──────────────┐  ctrl_shm   ┌───────────────────┐
+    │ action_manager│──(trigger)─>│                   │
+    │  (main proc)  │<───────────│                   │
+    └──────┬───────┘             └───────────────────┘
+           │ single-step action
+           ▼
+    ┌──────────────┐
+    │ control_shm   │──> Robot
+    └──────────────┘
+
+Key: Main process does NOT touch obs. Inference worker reads device SHMs directly.
 
 Usage:
     # Local model evaluation
@@ -29,16 +49,15 @@ import multiprocessing as mp
 from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
 from loguru import logger
 
 from data_utils.utils import set_seed
 from deploy.base import start_device, is_robot_config, is_camera_config
-from deploy.shm_utils import SharedMemoryDataSynchronizer, SharedMemoryChannel, cleanup_all_shm
+from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
 from deploy.utils import RateLimiter
 from deploy.action_manager import load_action_manager
+from deploy.inference import start_inference_process, stop_inference_process
 from deploy.visualizer.base import start_all_visualizers, stop_all_visualizers
-from policy.utils import load_policy
 from configs.loader import ConfigLoader
 
 
@@ -171,8 +190,6 @@ def get_robot_module_info(robot_configs: List[dict]) -> Tuple[Optional[str], Opt
     Returns:
         Tuple of (module_name, class_name) or (None, None) if not found
     """
-    import importlib
-    
     for cfg in robot_configs:
         try:
             if is_robot_config(cfg):
@@ -187,166 +204,38 @@ def get_robot_module_info(robot_configs: List[dict]) -> Tuple[Optional[str], Opt
     return None, None
 
 
-def inference_process(args, shm_names: List[str], robot_module_name: Optional[str], robot_class_name: Optional[str]):
+def _extract_action_array(mact_step):
     """
-    Inference producer process.
-    Consumes observation data from SHM and produces action chunks.
+    Extract a raw numpy action array from a mact_list element.
+    
+    mact_step is np.array([{"action": np.ndarray, ...}, ...], dtype=object).
+    For real robot, we extract and return the first action array.
     """
-    from deploy.shm_utils import _fix_resource_tracker
-    _fix_resource_tracker()
-    from deploy.base import default_obs2meta
-    import importlib
-    from benchmark.base import MetaObs
-    
-    # Load policy
-    policy = load_policy(args)
-    logger.info("[Inference Process] Policy loaded.")
-    
-    # Connect to device SHM channels
-    shm_channels: List[Tuple[str, SharedMemoryChannel]] = []
-    for name in shm_names:
-        try:
-            ch = SharedMemoryChannel(name, is_writer=False, timeout=30.0)
-            shm_channels.append((name, ch))
-            logger.info("[Inference Process] Connected to SHM: {}", name)
-        except Exception as e:
-            logger.warning("[Inference Process] Failed to connect to {}: {}", name, e)
-    
-    if not shm_channels:
-        logger.error("[Inference Process] No SHM channels connected. Exiting.")
-        return
-    
-    # Create synchronizer
-    shm_synchronizer = SharedMemoryDataSynchronizer(
-        shm_channels=shm_channels,
-        buffer_maxlen=100,
-        max_tolerance_s=0.05,
-    ) 
-    
-    # Create chunk_shm for outputting action chunks
-    chunk_shm = SharedMemoryChannel(name='chunk_shm', max_size_mb=10, is_writer=True)
-    
-    # Get obs2meta function
-    # Try to import the robot module and get obs2meta
-    obs2meta_func = None
-    if robot_module_name:
-        try:
-            robot_module = importlib.import_module(robot_module_name)
-            if hasattr(robot_module, 'obs2meta'):
-                obs2meta_func = robot_module.obs2meta
-        except Exception as e:
-            logger.warning("[Inference Process] Could not load obs2meta from module: {}", e)
-    if obs2meta_func is None:
-        obs2meta_func = default_obs2meta
-        logger.info("[Inference Process] Using default obs2meta function")
-    
-    logger.info("[Inference Process] Starting inference loop...")
-    rate_limiter = RateLimiter()
-    
-    with torch.no_grad():
-        try:
-            while True:
-                # Read and buffer data
-                shm_synchronizer.read_and_buffer()
-                
-                # Get synced frame
-                synced_data = shm_synchronizer.get_synced_frame_blocking(debug=True)
-                if synced_data is None:
-                    time.sleep(0.001)
-                    continue
-                
-                # Convert to policy observation format
-                policy_obs = obs2meta_func(synced_data)
-                
-                # Run policy inference
-                action = policy.select_action(policy_obs, t=0, return_all=True)
-                action = np.stack([ai['action'] for ai in action])
-                # Write action chunk to SHM
-                if action is not None:
-                    # Ensure action is a proper numpy array
-                    if isinstance(action, np.ndarray):
-                        action_arr = action
-                    elif isinstance(action, (list, tuple)):
-                        action_arr = np.array(action, dtype=np.float32)
-                    else:
-                        action_arr = np.array(action)
-                    
-                    # Skip if action is empty or invalid
-                    if action_arr.size == 0:
-                        logger.warning("[Inference] Received empty action, skipping")
-                        continue
-                    
-                    # Ensure proper dtype (not object)
-                    if action_arr.dtype == object:
-                        logger.warning("[Inference] Action has object dtype, attempting conversion")
-                        try:
-                            action_arr = np.array(action_arr.tolist(), dtype=np.float32)
-                        except Exception as e:
-                            logger.error("[Inference] Failed to convert action: {}", e)
-                            continue
-                    
-                    action_data = {
-                        'action': action_arr,
-                        'timestamp': time.perf_counter(),
-                    }
-                    chunk_shm.write(action_data)
-                
-                rate_limiter.sleep(args.infer_rate)
-                
-        except KeyboardInterrupt:
-            logger.info("[Inference Process] Exit by KeyboardInterrupt")
-        except Exception as e:
-            logger.error("[Inference Process] Error: {}", e)
-            traceback.print_exc()
-        finally:
-            # Cleanup
-            for _, ch in shm_channels:
-                try:
-                    ch.destroy()
-                except Exception:
-                    pass
-            try:
-                chunk_shm.destroy()
-            except Exception:
-                pass
+    if mact_step is None:
+        return None
+    if isinstance(mact_step, np.ndarray) and mact_step.dtype == object:
+        # mact_list element: array of dicts
+        if len(mact_step) > 0 and isinstance(mact_step[0], dict):
+            return mact_step[0].get('action', None)
+    # Already a raw array
+    if isinstance(mact_step, np.ndarray):
+        return mact_step
+    return None
 
 
 def main():
     import signal
     import atexit
-    import subprocess
-    import os
-    
-    # Kill any residual processes from previous runs that might be holding serial ports
-    # This handles the case where the previous run crashed (e.g., segfault)
-    # current_pid = os.getpid()
-    # try:
-    #     # Find and kill old eval_real processes (excluding current)
-    #     result = subprocess.run(
-    #         ["pgrep", "-f", "python.*eval_real"],
-    #         capture_output=True, text=True
-    #     )
-    #     if result.stdout:
-    #         for pid_str in result.stdout.strip().split('\n'):
-    #             pid = int(pid_str)
-    #             if pid != current_pid:
-    #                 try:
-    #                     os.kill(pid, signal.SIGKILL)
-    #                     logger.info("Killed residual process: {}", pid)
-    #                 except ProcessLookupError:
-    #                     pass
-    #         time.sleep(0.5)  # Give time for ports to be released
-    # except Exception as e:
-    #     logger.warning("Could not cleanup residual processes: {}", e)
     
     set_seed(0)
     args = parse_param()
     args.is_training = False
     
-    # Global process tracking for cleanup
+    # Global tracking for cleanup
     _all_procs = []
     _all_shm = []
     _cleanup_done = False
+    inference_ctx = None
     
     def cleanup_all():
         """Cleanup function to be called on exit."""
@@ -356,6 +245,13 @@ def main():
         _cleanup_done = True
         
         logger.info("Running cleanup...")
+        
+        # Stop inference process
+        if inference_ctx is not None:
+            try:
+                stop_inference_process(inference_ctx)
+            except Exception as e:
+                logger.warning("Error stopping inference process: {}", e)
         
         # Terminate all tracked processes
         for p in _all_procs:
@@ -394,17 +290,19 @@ def main():
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'unknown_args', []))
     
     # Load device configs
-    robot_configs, all_shm_names = load_device_configs(args, getattr(args, 'unknown_args', []), cfg_loader=cfg_loader)
+    robot_configs, all_shm_names = load_device_configs(
+        args, getattr(args, 'unknown_args', []), cfg_loader=cfg_loader
+    )
     
     # Get robot module info for obs2meta function in inference process
     robot_module_name, robot_class_name = get_robot_module_info(robot_configs)
     
     # Clean orphaned SHM
-    shm_to_clean = all_shm_names + ['policy_control_shm', 'chunk_shm']
+    shm_to_clean = all_shm_names + ['policy_control_shm']
     cleanup_all_shm(shm_to_clean)
     logger.info("Cleaned up orphaned SHM segments.")
     
-    # Create policy control SHM (main process writes actions here)
+    # Create policy control SHM (main process writes actions here for robot)
     control_shm = SharedMemoryChannel(name='policy_control_shm', max_size_mb=1, is_writer=True)
     _all_shm.append(control_shm)
     logger.info("Created policy_control_shm for action publishing.")
@@ -416,7 +314,6 @@ def main():
     time.sleep(2.0)
     
     # Start visualizer subprocesses if requested
-    viz_procs = []
     if args.visualize:
         viz_procs = start_all_visualizers(
             device_configs=robot_configs,
@@ -425,53 +322,41 @@ def main():
         )
         _all_procs.extend(viz_procs)
     
-    # Start inference process
-    logger.info("Starting inference process...")
-    inference_proc = mp.Process(
-        target=inference_process,
-        args=(args, all_shm_names, robot_module_name, robot_class_name),
-        daemon=True
+    # Start unified inference process (REAL mode)
+    # Worker reads device SHMs directly → no obs relay through main process
+    logger.info("Starting inference process (REAL mode)...")
+    inference_ctx = start_inference_process(
+        model_name_or_path=args.model_name_or_path,
+        device=args.device,
+        device_shm_names=all_shm_names,
+        robot_module_name=robot_module_name,
+        sync_buffer_maxlen=100,
+        sync_max_tolerance_s=0.05,
     )
-    inference_proc.start()
-    _all_procs.append(inference_proc)
-    time.sleep(1.0)
-
-    # Connect to chunk_shm (read action chunks from inference process)
-    try:
-        chunk_shm = SharedMemoryChannel(name='chunk_shm', is_writer=False, timeout=30.0)
-        _all_shm.append(chunk_shm)
-        logger.info("Connected to chunk_shm for reading action chunks.")
-    except Exception as e:
-        logger.error("Failed to connect to chunk_shm: {}", e)
-        # Cleanup and exit - will be handled by atexit/signal handler
-        return
     
-    # Load action manager configuration
+    # Load action manager
     logger.info("Loading action manager: {}", args.action_manager)
     try:
         manager_cfg, manager_cfg_path = cfg_loader.load_manager(args.action_manager)
         logger.info("✓ Loaded config from: {}", manager_cfg_path)
-        logger.info("  Manager: {}", manager_cfg.get('manager_name', manager_cfg.get('name')))
-        params_str = ', '.join(f'{k}={v}' for k, v in manager_cfg.items() 
-                               if k not in ['name', 'manager_name', 'module_path', 'class_name'])
-        if params_str:
-            logger.info("  Parameters: {}", params_str)
-    except Exception as e:
-        # Fallback for legacy class names
-        logger.info("Using legacy loading for: {}", args.action_manager)
-        manager_cfg = {'manager_name': args.action_manager}
+        action_manager = load_action_manager(config=manager_cfg)
+    except Exception:
+        logger.info("Using direct loading for: {}", args.action_manager)
+        action_manager = load_action_manager(args.action_manager)
     
-    action_manager = load_action_manager(config=manager_cfg)
+    # Connect action_manager to inference process
+    action_manager.set_inference_context(inference_ctx)
+    logger.info("ActionManager: {} (config: {})", action_manager.__class__.__name__, args.action_manager)
     
     # Press Enter to start the control loop
     input("Press Enter to start the control loop...")
     
     # Main control loop
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info("[Main Control Loop] Started. Press Ctrl+C to stop.")
     logger.info("  Publish rate: {} Hz", args.publish_rate)
-    logger.info("  Inference rate: {} Hz", args.infer_rate)
-    logger.info("="*60)
+    logger.info("  Action manager: {}", action_manager.__class__.__name__)
+    logger.info("=" * 60)
     
     rate_limiter = RateLimiter()
     action_count = 0
@@ -481,34 +366,17 @@ def main():
         while True:
             t = time.perf_counter()
             
-            # Read action chunk from inference process
-            action_chunk = chunk_shm.read(skip_unchanged=True, blocking=False)
-            if action_chunk is not None:
-                # Put new chunk into action manager
-                chunk_action = action_chunk.get('action')
-                if chunk_action is not None:
-                    # Validate chunk_action
-                    if not isinstance(chunk_action, np.ndarray):
-                        logger.warning("[Main] chunk_action is not ndarray: {}", type(chunk_action))
-                        continue
-                    if chunk_action.dtype == object:
-                        logger.warning("[Main] chunk_action has object dtype, skipping")
-                        continue
-                    if chunk_action.size == 0:
-                        logger.warning("[Main] chunk_action is empty, skipping")
-                        continue
-                    
-                    print(f"[DEBUG] chunk_action shape={chunk_action.shape}, dtype={chunk_action.dtype}")
-                    action_manager.put(chunk_action)
+            # Get action from action_manager (triggers inference as needed)
+            # Main process does NOT handle obs — worker reads device SHMs directly
+            # Step counter is managed internally by action_manager (action_manager.t)
+            mact_step = action_manager.select_action()
             
-            # Get next action from action manager
-            action = action_manager.get(t)
+            # Extract raw action array from mact_list element
+            action_arr = _extract_action_array(mact_step)
             
             # Write action to control_shm for robot to read
-            if action is not None:
-                action_arr = action if isinstance(action, np.ndarray) else np.array(action)
-                
-                # Validate action before writing to SHM
+            if action_arr is not None:
+                # Validate
                 if action_arr.size == 0:
                     continue
                 if action_arr.dtype == object:
@@ -526,21 +394,19 @@ def main():
             
             # Log stats periodically
             if t - last_log_time > 5.0:
-                logger.info("[Control Loop] Published {} actions in last 5s ({:.1f} Hz)", 
+                logger.info("[Control Loop] Published {} actions in last 5s ({:.1f} Hz)",
                            action_count, action_count / 5.0)
                 action_count = 0
                 last_log_time = t
             
             rate_limiter.sleep(args.publish_rate)
-            
+    
     except KeyboardInterrupt:
         logger.info("[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
     except Exception as e:
-        logger.info("[Main Control Loop] Error: {}", e)
+        logger.error("[Main Control Loop] Error: {}", e)
         traceback.print_exc()
     finally:
-        # Cleanup is handled by cleanup_all() via atexit/signal handlers
-        # But also call it explicitly here in case we reach finally normally
         cleanup_all()
         cleanup_all_shm(shm_to_clean)
 

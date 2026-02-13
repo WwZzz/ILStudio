@@ -31,7 +31,7 @@ def count_success(results):
     return [c / len(results) for c in count]
 
 
-def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
+def evaluate(args, action_manager, env, inference_ctx=None, video_writer=None, save_example_dir=None):
     """
     CALVIN-specific evaluate function.
     
@@ -40,8 +40,9 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
     
     Args:
         args: Configuration args
-        policy: Policy wrapped in MetaPolicy
+        action_manager: ActionManager with InferenceContext set.
         env: Vector environment (SequentialVectorEnv or SubprocVectorEnv)
+        inference_ctx: InferenceContext for writing obs to SHM (sim mode).
         video_writer: Optional video writer
         save_example_dir: Optional directory to save example data
         
@@ -62,7 +63,7 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
     
     with torch.inference_mode():
         obs = env.reset()
-        obs = organize_obs(obs, args.ctrl_space)
+        obs = organize_obs(obs)
         
         # Save first observation and action for debugging
         first_obs_saved = False
@@ -78,8 +79,12 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
                     if not done_flags[env_i]:
                         video_frames[env_i].append(frames[env_i])
             
-            # Get action
-            act = policy.select_action(obs, t)
+            # Write obs to SHM for inference worker (sim mode)
+            if inference_ctx is not None:
+                inference_ctx.update_obs(obs, t)
+            
+            # Get action from action_manager
+            act = action_manager.select_action()
             
             # Save first obs and action
             if not first_obs_saved and save_example_dir is not None:
@@ -89,7 +94,7 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
             
             # Step environment
             obs, reward, done, info = env.step(act, id=None)
-            obs = organize_obs(obs, args.ctrl_space)
+            obs = organize_obs(obs)
             
             # Update completion tracking for each environment
             for env_i in range(num_envs):

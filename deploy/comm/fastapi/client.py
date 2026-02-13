@@ -19,7 +19,6 @@ from __future__ import annotations
 import base64
 import os
 import uuid
-from collections import deque
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
@@ -115,11 +114,11 @@ def _normalize_mact_list(decoded: Any) -> List[np.ndarray]:
 
 class FastAPIPolicyClient(BaseClient):
     """
-    HTTP/JSON policy client using FastAPI server (drop-in for TCP PolicyClient).
+    HTTP/JSON policy client using FastAPI server.
 
-    `select_action` follows the same chunked-action semantics:
-    - when queue is empty OR (t % chunk_size == 0), request a new chunk
-    - otherwise pop from queue
+    Provides `send_meta_obs` / `inference` interface for sending observations
+    and receiving the full action chunk list from the server.
+    Action queue management is delegated to the action_manager.
     
     Each client instance has a unique `client_id` for server-side request deduplication:
     - When requests arrive faster than the server can process, only the LATEST
@@ -131,18 +130,15 @@ class FastAPIPolicyClient(BaseClient):
     def __init__(
         self,
         base_url: str,
-        chunk_size: Optional[int] = None,
         timeout_s: float = 30.0,
         ctrl_space: str = "ee",
         ctrl_type: str = "delta",
         client_id: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip("/")
-        self.chunk_size = chunk_size
         self.timeout_s = timeout_s
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
-        self.action_queue = deque(maxlen=chunk_size) if (chunk_size is not None and chunk_size > 0) else deque(maxlen=1000)
         
         # Generate unique client_id for request deduplication
         if client_id is None:
@@ -190,43 +186,9 @@ class FastAPIPolicyClient(BaseClient):
         decoded = _from_jsonable(data.get("mact_list"))
         return _normalize_mact_list(decoded)
 
-    def is_action_queue_empty(self) -> bool:
-        return len(self.action_queue) == 0
-
-    def select_action(self, mobs: MetaObs, t: int, return_all: bool = False):
-        should_infer = len(self.action_queue) == 0
-        if self.chunk_size is not None and self.chunk_size > 0:
-            should_infer = should_infer or (t % self.chunk_size == 0)
-
-        if should_infer:
-            # Match MetaPolicy behavior: timestep is shaped (B, 1) when batching is used.
-            if hasattr(mobs, "state") and mobs.state is not None and isinstance(mobs.state, np.ndarray):
-                batch_size = mobs.state.shape[0] if (mobs.state.ndim > 1) else 1
-            else:
-                batch_size = 1
-            mobs.timestep = np.array([[t] for _ in range(batch_size)])
-
-            mact_list = self.send_meta_obs(mobs)
-            if not mact_list:
-                raise RuntimeError("Server returned empty action list")
-
-            self.action_queue.clear()
-            actions_to_add = mact_list[: self.chunk_size] if (self.chunk_size is not None and self.chunk_size > 0) else mact_list
-            for mact in actions_to_add:
-                self.action_queue.append(mact)
-
-        if return_all:
-            all_macts = []
-            while len(self.action_queue) > 0:
-                all_macts.append(self.action_queue.popleft())
-            return np.concatenate(all_macts) if all_macts else np.array([])
-
-        if len(self.action_queue) == 0:
-            raise RuntimeError("Action queue is empty and server request failed")
-        return self.action_queue.popleft()
-
     def reset(self):
-        self.action_queue.clear()
+        """Reset internal state (no-op for FastAPI client)."""
+        pass
 
     def close(self):
         try:

@@ -1,8 +1,6 @@
 type: deploy.action_manager.truncated.TruncatedManager
 name: truncated
 args:
-  module_path: deploy.action_manager.truncated
-  class_name: TruncatedManager
   start_ratio: 0.0
   end_ratio: 0.0
   older_coef: 1.0

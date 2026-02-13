@@ -104,13 +104,12 @@ if __name__=='__main__':
     
     policy = MetaPolicy(
         policy=model, 
-        chunk_size=args.chunk_size, 
         action_normalizer=normalizers['action'], 
         state_normalizer=normalizers['state'], 
         ctrl_space=ctrl_space, 
         ctrl_type=ctrl_type
     )
-    logger.info(f"Policy created with chunk_size={args.chunk_size}")
+    logger.info(f"Policy created")
     
     server = create_server(policy, address=args.host, port=args.port)
     

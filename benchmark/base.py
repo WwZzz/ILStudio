@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 from dataclasses import dataclass, field, fields, asdict
-from collections import deque
 from typing import Optional
 import torch
 from loguru import logger
@@ -88,7 +87,7 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, chunk_size:Optional[int] = None, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
+    def __init__(self, policy, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
         """
         MetaPolicy wrapper for policy inference.
         
@@ -98,17 +97,14 @@ class MetaPolicy:
         
         Args:
             policy: The policy model
-            chunk_size: Action chunk size for chunked action prediction
             action_normalizer: Normalizer for actions
             state_normalizer: Normalizer for states  
             ctrl_space: Control space ('ee' or 'joint')
             ctrl_type: Control type ('delta' or 'abs')
         """
         self.policy = policy
-        self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
-        self.action_queue = deque(maxlen=chunk_size) if (chunk_size is not None and chunk_size>0) else deque(maxlen=1000)
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
 
@@ -193,9 +189,6 @@ class MetaPolicy:
             mact = MetaAction(action=action, ctrl_space=ctrl_space, ctrl_type=ctrl_type) # (B, chunk_size, dim) or (chunk_size, dim)
         return mact 
     
-    def is_action_queue_empty(self):
-        return len(self.action_queue)==0
-
     def normed_mobs_to_samples(self, normed_mobs: MetaObs):
         """
         Convert normalized MetaObs to samples in ILStudio standard format.
@@ -250,16 +243,20 @@ class MetaPolicy:
 
     def inference(self, mobs: MetaObs):
         """
-        Prepare observation data in ILStudio standard format for policy inference.
+        Run policy inference and return the full action chunk list.
         
-        The standard format is a list of samples, where each sample is a dict containing:
-        - 'image': image data (N, C, H, W) or (N, num_cameras, C, H, W)
-        - 'state': state data (from ctrl_space: 'ee' or 'joint') - normalized
-        - 'raw_lang': language instruction
-        - 'timestamp': optional timestep information
+        Handles the complete pipeline:
+        1. Normalize state
+        2. Convert to ILStudio standard samples
+        3. Apply policy data processing (data_processor + data_collator)
+        4. Run underlying policy model inference
+        5. Convert output to MetaAction format
+        6. Denormalize actions
         
-        This format matches training data format, allowing policy to use the same
-        data_processor and collator for consistent data handling.
+        Returns:
+            List[np.ndarray]: Full mact_list — each element is an object-dtype array
+            of MetaAction dicts. Length equals the model's output chunk length.
+            No truncation is applied; chunk management is delegated to action_manager.
         """
         # Normalize state before preparing samples
         normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
@@ -284,42 +281,10 @@ class MetaPolicy:
             macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
         else:
             macts.action = macts.action[np.newaxis, :]
-        # print(macts.action)
         mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
-        # Only truncate if chunk_size is a positive number
-        # chunk_size=-1 means use all actions
-        if self.chunk_size is not None and self.chunk_size > 0:
-            mact_list = mact_list[:self.chunk_size]
         return mact_list
-
-    def select_action(self, mobs: MetaObs, t:int, return_all=False):
-        # normalizing Obs and Actions
-        # Determine if we need to infer new actions
-        should_infer = len(self.action_queue) == 0  # Always infer when queue is empty
-        
-        # If chunk_size is valid (>0), also check if it's time to infer based on timestep
-        if self.chunk_size is not None and self.chunk_size > 0:
-            should_infer = should_infer or (t % self.chunk_size == 0)
-        
-        if should_infer:
-            mobs.timestep = np.array([[t] for _ in range(mobs.state.shape[0])])
-            mact_list = self.inference(mobs)
-            while len(self.action_queue) > 0:
-                self.action_queue.popleft()
-            self.action_queue.extend(mact_list)
-        # get action from queue
-        if return_all:
-            all_macts = []
-            while len(self.action_queue) > 0:
-                all_macts.append(self.action_queue.popleft())
-            return np.concatenate(all_macts)
-        mact = self.action_queue.popleft()
-        return mact
     
     def reset(self):
         if hasattr(self.policy, 'reset'):
             self.policy.reset()
-        self.action_queue.clear()
-    
-    
-    
+

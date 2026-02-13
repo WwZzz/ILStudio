@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from collections import deque
 from dataclasses import asdict
 from typing import Any, List, Optional
 
@@ -50,7 +49,6 @@ class SHMPolicyClient(BaseClient):
         client_id: Optional[str] = None,
         com_shm_size_mb: int = 4,
         obs_shm_size_mb: int = 64,
-        chunk_size: Optional[int] = None,
         ctrl_space: str = "ee",
         ctrl_type: str = "delta",
         timeout_s: float = 30.0,
@@ -61,7 +59,6 @@ class SHMPolicyClient(BaseClient):
             client_id: Unique client identifier. If None, auto-generated.
             com_shm_size_mb: Size of communication SHM in MB.
             obs_shm_size_mb: Size of observation SHM in MB.
-            chunk_size: Action chunk size for queue management.
             ctrl_space: Control space ("ee" or "joint").
             ctrl_type: Control type ("delta" or "abs").
             timeout_s: Timeout for waiting on server response.
@@ -70,7 +67,6 @@ class SHMPolicyClient(BaseClient):
         self.client_id = client_id or _generate_client_id()
         self.com_shm_size_mb = com_shm_size_mb
         self.obs_shm_size_mb = obs_shm_size_mb
-        self.chunk_size = chunk_size
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
         self.timeout_s = timeout_s
@@ -80,9 +76,6 @@ class SHMPolicyClient(BaseClient):
         self.client_com_name = f"{self.client_id}_com"
         self.obs_shm_name = f"{self.client_id}_obs"
         self.action_shm_name = f"{self.client_id}_action"
-
-        # Action queue for chunked inference
-        self.action_queue = deque(maxlen=chunk_size) if (chunk_size is not None and chunk_size > 0) else deque(maxlen=1000)
 
         # SHM channels
         self._client_com_channel: Optional[SharedMemoryChannel] = None
@@ -244,53 +237,8 @@ class SHMPolicyClient(BaseClient):
 
         return result
 
-    def is_action_queue_empty(self) -> bool:
-        """Check if action queue is empty."""
-        return len(self.action_queue) == 0
-
-    def select_action(self, mobs: MetaObs, t: int, return_all: bool = False):
-        """
-        Select action(s) for timestep `t`.
-
-        Same chunked-action semantics as other clients:
-        - When queue is empty OR (t % chunk_size == 0), request new chunk from server
-        - Otherwise pop from queue
-        """
-        should_infer = len(self.action_queue) == 0
-        if self.chunk_size is not None and self.chunk_size > 0:
-            should_infer = should_infer or (t % self.chunk_size == 0)
-
-        if should_infer:
-            # Set timestep in observation
-            if hasattr(mobs, "state") and mobs.state is not None and isinstance(mobs.state, np.ndarray):
-                batch_size = mobs.state.shape[0] if (mobs.state.ndim > 1) else 1
-            else:
-                batch_size = 1
-            mobs.timestep = np.array([[t] for _ in range(batch_size)])
-
-            mact_list = self.send_meta_obs(mobs)
-            if not mact_list:
-                raise RuntimeError("Server returned empty action list")
-
-            self.action_queue.clear()
-            actions_to_add = mact_list[:self.chunk_size] if (self.chunk_size is not None and self.chunk_size > 0) else mact_list
-            for mact in actions_to_add:
-                self.action_queue.append(mact)
-
-        if return_all:
-            all_macts = []
-            while len(self.action_queue) > 0:
-                all_macts.append(self.action_queue.popleft())
-            return np.concatenate(all_macts) if all_macts else np.array([])
-
-        if len(self.action_queue) == 0:
-            raise RuntimeError("Action queue is empty and server request failed")
-
-        return self.action_queue.popleft()
-
     def reset(self) -> None:
-        """Reset internal state (clear action queue)."""
-        self.action_queue.clear()
+        """Reset internal state."""
         self._last_action_timestamp = 0.0
         logger.debug("  🔄 SHM policy client reset")
 
