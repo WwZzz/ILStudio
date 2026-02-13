@@ -97,15 +97,19 @@ class BasicActionManager(AbstractActionManager):
         self._inference_ctx: Optional["InferenceContext"] = None
         self._debug = debug
         
-        # Debug statistics
-        self._total_chunks_received = 0
-        self._total_chunks_discarded = 0  # Refused by put (e.g. OlderFirst)
-        self._total_triggers_sent = 0
-        self._total_waits = 0
-        self._cumulative_wait_time = 0.0
+        # Lightweight statistics — always tracked, printed on reset() if debug=True
+        self._stats = {
+            "chunks_received": 0,
+            "chunks_discarded": 0,
+            "triggers_sent": 0,
+            "waits": 0,
+            "cumulative_wait_ms": 0.0,
+            "total_remaining_on_replace": 0,   # sum of un-consumed steps when overwritten
+            "replace_count": 0,                 # how many times a non-empty buffer was replaced
+        }
         
         if self._debug:
-            logger.info(f"[ActionManager] {self.__class__.__name__} initialized in DEBUG mode")
+            logger.info(f"[ActionManager] {self.__class__.__name__} initialized (debug=True)")
 
     def set_inference_context(self, inference_ctx: "InferenceContext"):
         """Set inference context for SHM-based inference."""
@@ -125,43 +129,21 @@ class BasicActionManager(AbstractActionManager):
         if self._inference_ctx is None:
             raise RuntimeError("InferenceContext not set. Call set_inference_context() first.")
         
-        t_select_start = time.perf_counter() if self._debug else None
-        
         # Step 1: Poll for new action chunks (non-blocking)
         mact_list = self._inference_ctx.poll_action_chunks()
         if mact_list:
-            chunk_len = len(mact_list)
-            self._total_chunks_received += 1
-            if self._debug:
-                buf_before = self._buffer_status()
-                logger.debug(
-                    f"[ActionManager] t={self.t} | Chunk #{self._total_chunks_received} arrived | "
-                    f"chunk_len={chunk_len} | buffer_before: {buf_before}"
-                )
+            self._stats["chunks_received"] += 1
             self.put(mact_list, timestamp=time.perf_counter())
-            if self._debug:
-                buf_after = self._buffer_status()
-                logger.debug(
-                    f"[ActionManager] t={self.t} | After put: {buf_after}"
-                )
         
         # Step 2: Check if we need to trigger inference
         buffer_empty = self.is_empty()
         need_infer = self.should_infer()
         if buffer_empty or need_infer:
             self._inference_ctx.send_trigger(self.t)
-            self._total_triggers_sent += 1
-            if self._debug:
-                reason = "buffer_empty" if buffer_empty else "should_infer"
-                logger.debug(
-                    f"[ActionManager] t={self.t} | Trigger sent (reason={reason}) | "
-                    f"trigger_count={self._total_triggers_sent}"
-                )
+            self._stats["triggers_sent"] += 1
         
         # Step 3: If buffer empty, block-wait for inference result
         if buffer_empty:
-            if self._debug:
-                logger.debug(f"[ActionManager] t={self.t} | Buffer empty, waiting for chunk...")
             self._wait_for_action_chunk(timeout=360.0)
         
         # Step 4: Get single-step action
@@ -172,32 +154,19 @@ class BasicActionManager(AbstractActionManager):
         # Step 5: Auto-increment step counter
         self.t += 1
         
-        if self._debug:
-            elapsed_ms = (time.perf_counter() - t_select_start) * 1000
-            logger.debug(
-                f"[ActionManager] t={self.t - 1} → t={self.t} | "
-                f"select_action took {elapsed_ms:.2f}ms | {self._buffer_status()}"
-            )
-        
         return action
 
     def _wait_for_action_chunk(self, timeout: float = 30.0):
         """Block until a new action chunk is available."""
         t_start = time.perf_counter()
-        self._total_waits += 1
+        self._stats["waits"] += 1
         
         while self.is_empty():
             mact_list = self._inference_ctx.poll_action_chunks()
             if mact_list:
                 wait_ms = (time.perf_counter() - t_start) * 1000
-                self._cumulative_wait_time += wait_ms
-                self._total_chunks_received += 1
-                if self._debug:
-                    logger.debug(
-                        f"[ActionManager] t={self.t} | Wait done: {wait_ms:.2f}ms | "
-                        f"chunk #{self._total_chunks_received} len={len(mact_list)} | "
-                        f"avg_wait={self._cumulative_wait_time / self._total_waits:.2f}ms"
-                    )
+                self._stats["cumulative_wait_ms"] += wait_ms
+                self._stats["chunks_received"] += 1
                 self.put(mact_list, timestamp=time.perf_counter())
                 break
             
@@ -215,32 +184,22 @@ class BasicActionManager(AbstractActionManager):
 
     def put(self, chunk, timestamp: float = None):
         with self._lock:
-            old_len = len(self._chunk_buffer) if self._chunk_buffer is not None else 0
-            old_step = self.current_step
+            # Track how many steps were wasted in the replaced buffer
+            if self._chunk_buffer is not None:
+                old_len = len(self._chunk_buffer)
+                remained = max(0, old_len - self.current_step)
+                if remained > 0:
+                    self._stats["total_remaining_on_replace"] += remained
+                    self._stats["replace_count"] += 1
             self._chunk_buffer = chunk
             self.current_step = 0
-            if self._debug:
-                new_len = len(chunk) if chunk is not None else 0
-                remained = max(0, old_len - old_step) if old_len > 0 else 0
-                logger.debug(
-                    f"[ActionManager] t={self.t} | PUT: new_chunk_len={new_len} | "
-                    f"replaced_buffer (was {old_step}/{old_len}, {remained} remaining)"
-                )
 
     def get(self, timestamp: float = None):
         with self._lock:
             if self._chunk_buffer is None or self.current_step >= len(self._chunk_buffer):
-                if self._debug:
-                    logger.debug(f"[ActionManager] t={self.t} | GET: buffer exhausted → None")
                 return None
             action = self._chunk_buffer[self.current_step]
             self.current_step += 1
-            if self._debug:
-                remaining = len(self._chunk_buffer) - self.current_step
-                logger.debug(
-                    f"[ActionManager] t={self.t} | GET: step {self.current_step}/{len(self._chunk_buffer)} | "
-                    f"remaining={remaining}"
-                )
             return action
 
     def is_empty(self) -> bool:
@@ -253,16 +212,6 @@ class BasicActionManager(AbstractActionManager):
         """Default: always False → inference only when buffer is empty (synchronous)."""
         return False
 
-    def _buffer_status(self) -> str:
-        """Return a human-readable string describing current buffer state."""
-        with self._lock:
-            if self._chunk_buffer is None:
-                return "buffer=None"
-            total = len(self._chunk_buffer)
-            consumed = self.current_step
-            remaining = total - consumed
-            return f"buffer={consumed}/{total} (remaining={remaining})"
-
     def reset(self):
         with self._lock:
             self._chunk_buffer = None
@@ -270,22 +219,22 @@ class BasicActionManager(AbstractActionManager):
             self.current_step = 0
             self.t = 0
         if self._inference_ctx is not None:
-            epoch = self._inference_ctx._epoch + 1  # Will be incremented inside send_reset
             self._inference_ctx.send_reset()
-        else:
-            epoch = 0
         
         if self._debug:
-            logger.info(
-                f"[ActionManager] RESET | epoch→{epoch} | "
-                f"stats: chunks_received={self._total_chunks_received}, "
-                f"triggers_sent={self._total_triggers_sent}, "
-                f"waits={self._total_waits}, "
-                f"avg_wait={self._cumulative_wait_time / max(1, self._total_waits):.2f}ms"
+            s = self._stats
+            avg_wait = s["cumulative_wait_ms"] / max(1, s["waits"])
+            avg_wasted = (
+                s["total_remaining_on_replace"] / max(1, s["replace_count"])
+                if s["replace_count"] > 0 else 0.0
             )
-            # Reset per-rollout stats
-            self._total_chunks_received = 0
-            self._total_chunks_discarded = 0
-            self._total_triggers_sent = 0
-            self._total_waits = 0
-            self._cumulative_wait_time = 0.0
+            logger.info(
+                f"[ActionManager] RESET | "
+                f"chunks: recv={s['chunks_received']} discard={s['chunks_discarded']} | "
+                f"triggers={s['triggers_sent']} waits={s['waits']} avg_wait={avg_wait:.1f}ms | "
+                f"avg_unused_actions={avg_wasted:.1f}"
+            )
+        
+        # Reset per-rollout stats
+        for k in self._stats:
+            self._stats[k] = 0 if isinstance(self._stats[k], int) else 0.0

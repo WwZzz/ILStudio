@@ -1,4 +1,3 @@
-from loguru import logger
 from .base import BasicActionManager
 
 
@@ -22,12 +21,6 @@ class TruncatedManager(BasicActionManager):
         self.start_ratio = start_ratio
         self.end_ratio = end_ratio
         self.older_coef = older_coef
-        
-        if self._debug:
-            logger.info(
-                f"[TruncatedManager] start_ratio={self.start_ratio} "
-                f"end_ratio={self.end_ratio} older_coef={self.older_coef}"
-            )
 
     def put(self, chunk, timestamp: float = None):
         # Truncate the chunk first
@@ -42,54 +35,23 @@ class TruncatedManager(BasicActionManager):
             
             # Ensure we have at least one action
             if end_idx <= start_idx:
-                # If truncation would remove everything, keep at least the middle action
                 mid_idx = total_len // 2
                 chunk = [chunk[mid_idx]]
-                if self._debug:
-                    logger.warning(
-                        f"[TruncatedManager] t={self.t} | Truncation too aggressive, "
-                        f"keeping only middle action (original_len={total_len})"
-                    )
             else:
                 chunk = chunk[start_idx:end_idx]
-                if self._debug and (start_idx > 0 or end_idx < total_len):
-                    chunk_type = "first" if is_first_chunk else "subsequent"
-                    logger.debug(
-                        f"[TruncatedManager] t={self.t} | Truncated ({chunk_type}): "
-                        f"{total_len}→{len(chunk)} [{start_idx}:{end_idx}]"
-                    )
         
         # Now apply OlderFirst logic
         if self._chunk_buffer is None:
-            # First chunk, accept directly
             with self._lock:
                 self._chunk_buffer = chunk
                 self.current_step = 0
-                if self._debug:
-                    logger.debug(
-                        f"[TruncatedManager] t={self.t} | Accepted first chunk: len={len(chunk)}"
-                    )
         else:
-            # Check if current chunk is sufficiently executed
             with self._lock:
                 threshold = int(len(self._chunk_buffer) * self.older_coef)
                 if self.current_step < threshold:
-                    # Current chunk not done enough, refuse new chunk
-                    self._total_chunks_discarded += 1
-                    if self._debug:
-                        logger.debug(
-                            f"[TruncatedManager] t={self.t} | REFUSED chunk: "
-                            f"step {self.current_step}/{len(self._chunk_buffer)} "
-                            f"(need ≥{threshold} = {self.older_coef*100:.0f}%) | "
-                            f"discarded_total={self._total_chunks_discarded}"
-                        )
+                    self._stats["chunks_discarded"] += 1
                     return
             
-            # Accept new chunk
             with self._lock:
                 self._chunk_buffer = chunk
                 self.current_step = 0
-                if self._debug:
-                    logger.debug(
-                        f"[TruncatedManager] t={self.t} | Accepted new chunk: len={len(chunk)}"
-                    )

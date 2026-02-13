@@ -1,5 +1,4 @@
 import time
-from loguru import logger
 from .base import BasicActionManager
 
 
@@ -27,11 +26,6 @@ class InferWithFPSManager(BasicActionManager):
         self.fps = fps
         self._min_interval = 1.0 / self.fps if self.fps > 0 else float('inf')
         self._last_infer_time: float = 0.0
-        if self._debug:
-            logger.info(
-                f"[InferWithFPSManager] fps={self.fps} "
-                f"(min_interval={self._min_interval*1000:.1f}ms)"
-            )
 
     def should_infer(self) -> bool:
         """
@@ -43,18 +37,11 @@ class InferWithFPSManager(BasicActionManager):
         """
         now = time.perf_counter()
         elapsed = now - self._last_infer_time
-        result = elapsed >= self._min_interval
-        if self._debug and result:
-            logger.debug(
-                f"[InferWithFPSManager] t={self.t} | should_infer=True | "
-                f"elapsed={elapsed*1000:.1f}ms ≥ interval={self._min_interval*1000:.1f}ms"
-            )
-        return result
+        return elapsed >= self._min_interval
 
     def put(self, chunk, timestamp: float = None):
         """Record inference time when new chunk arrives."""
         super().put(chunk, timestamp)
-        # Update last infer time when we receive a new chunk
         self._last_infer_time = time.perf_counter()
 
     def reset(self):
