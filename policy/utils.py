@@ -181,6 +181,7 @@ def load_policy(args):
         policy = create_client(
             address=address,
             chunk_size=getattr(args, 'chunk_size', None),
+            timeout_s=3600.0,  # Set timeout to 3600 seconds for long-running inference
         )
         
         # Set dummy values for compatibility

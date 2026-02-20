@@ -134,7 +134,7 @@ def create_client(
     chunk_size: Optional[int] = None,
     ctrl_space: str = "ee",
     ctrl_type: str = "delta",
-    timeout_s: float = 30.0,
+    timeout_s: float = 3600.0,
 ) -> BaseClient:
     """
     Create a policy client based on address format.
