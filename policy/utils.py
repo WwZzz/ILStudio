@@ -225,7 +225,6 @@ def load_policy(args):
         # Wrap in MetaPolicy
         policy = MetaPolicy(
             policy=dummy_model,
-            chunk_size=chunk_size,  # Use parsed chunk_size
             action_normalizer=identity_normalizer,
             state_normalizer=identity_normalizer,
             ctrl_space=args.ctrl_space,
@@ -262,12 +261,10 @@ def load_policy(args):
         # Always wrap model in MetaPolicy
         policy = MetaPolicy(
             policy=model, 
-            chunk_size=getattr(args, 'chunk_size', None), 
             action_normalizer=normalizers['action'], 
             state_normalizer=normalizers['state'], 
             ctrl_space=ctrl_space, 
             ctrl_type=ctrl_type,
-            # img_size = getattr(args, 'image_size', None)
         )
     return policy
 

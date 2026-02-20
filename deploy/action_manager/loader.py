@@ -2,182 +2,163 @@
 Action Manager Loader
 
 This module provides utilities to load action manager configurations from YAML files
-or direct config objects and instantiate the corresponding manager class.
+and instantiate the corresponding manager class.
 
-Supports dynamic class loading from config files without hardcoded registration.
+Supports dynamic class loading from config files via the 'type' field.
 """
 
 import yaml
 import os
 import importlib
 from pathlib import Path
-from typing import Dict, Any, Union
-from types import SimpleNamespace
+from typing import Dict, Any, Union, Optional
 
 
-def load_action_manager(manager_name_or_path: str = None, config: Union[Dict, SimpleNamespace, Any] = None):
+# Config search paths
+CONFIG_SEARCH_PATHS = [
+    Path(__file__).parent.parent.parent / "configs" / "action_manager",  # ILStudio/configs/action_manager
+]
+
+
+def _find_config_file(name: str) -> Optional[Path]:
+    """Find config file by name in search paths."""
+    # If it's already a path, return it
+    if name.endswith('.yaml') or name.endswith('.yml'):
+        path = Path(name)
+        if path.exists():
+            return path
+        # Try search paths
+        for search_path in CONFIG_SEARCH_PATHS:
+            full_path = search_path / name
+            if full_path.exists():
+                return full_path
+        return None
+    
+    # Try adding .yaml extension
+    for search_path in CONFIG_SEARCH_PATHS:
+        for ext in ['.yaml', '.yml']:
+            full_path = search_path / f"{name}{ext}"
+            if full_path.exists():
+                return full_path
+    return None
+
+
+def _load_class_from_path(type_path: str):
+    """
+    Dynamically import a class from a full module path.
+    
+    Args:
+        type_path: Full path like 'deploy.action_manager.base.BasicActionManager'
+        
+    Returns:
+        The class object
+    """
+    parts = type_path.rsplit('.', 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid type path: {type_path}. Expected format: 'module.path.ClassName'")
+    
+    module_path, class_name = parts
+    try:
+        module = importlib.import_module(module_path)
+        return getattr(module, class_name)
+    except ImportError as e:
+        raise ImportError(f"Failed to import module '{module_path}': {e}")
+    except AttributeError as e:
+        raise AttributeError(f"Class '{class_name}' not found in module '{module_path}': {e}")
+
+
+def load_action_manager(manager_name_or_path: str = None, config: Dict[str, Any] = None):
     """
     Load and instantiate an action manager.
     
     Args:
         manager_name_or_path: Can be:
-            - A manager class name (e.g., 'BasicActionManager')
-            - A config name (e.g., 'basic', 'older_first')
+            - A config name (e.g., 'basic', 'older_first') - looks up in configs/action_manager/
             - A path to a YAML config file
             - None (will use config parameter)
-        config: Configuration object/dict containing manager settings.
-                Can be command line args, a config dict, or SimpleNamespace.
+        config: Configuration dict containing manager settings.
+                Must have 'type' field with full class path.
     
     Returns:
         An instantiated action manager instance
     
     Examples:
-        # Load from ConfigLoader (recommended)
-        from configs.loader import ConfigLoader
-        cfg_loader = ConfigLoader(args=args, unknown_args=unknown)
-        manager_cfg, _ = cfg_loader.load_manager('truncated_conservative')
-        manager = load_action_manager(config=manager_cfg)
-        
-        # Load from config name (legacy, uses ConfigLoader internally)
+        # Load from config name (recommended)
         manager = load_action_manager('basic')
+        manager = load_action_manager('temporal_agg')
         
-        # Load from config dict with dynamic class loading
+        # Load from YAML file path
+        manager = load_action_manager('configs/action_manager/truncated.yaml')
+        
+        # Load from config dict
         config = {
-            'module_path': 'deploy.action_manager.truncated',
-            'class_name': 'TruncatedManager',
-            'start_ratio': 0.1,
-            'end_ratio': 0.2
+            'type': 'deploy.action_manager.truncated.TruncatedManager',
+            'args': {
+                'start_ratio': 0.1,
+                'end_ratio': 0.2
+            }
         }
         manager = load_action_manager(config=config)
     """
-    # Import built-in managers for fallback
-    from . import (
-        BasicActionManager,
-        OlderFirstManager,
-        TemporalAggManager,
-        TemporalOlderManager,
-        DelayFreeManager,
-        TruncatedManager
-    )
-    
-    # Built-in manager name to class mapping (fallback only)
-    BUILTIN_MANAGER_MAP = {
-        'BasicActionManager': BasicActionManager,
-        'basic': BasicActionManager,
-        'OlderFirstManager': OlderFirstManager,
-        'older_first': OlderFirstManager,
-        'TemporalAggManager': TemporalAggManager,
-        'temporal_agg': TemporalAggManager,
-        'TemporalOlderManager': TemporalOlderManager,
-        'temporal_older': TemporalOlderManager,
-        'DelayFreeManager': DelayFreeManager,
-        'delay_free': DelayFreeManager,
-        'TruncatedManager': TruncatedManager,
-        'truncated': TruncatedManager,
-    }
-    
-    # Store original config dict if provided
     manager_config = {}
     manager_class = None
-    manager_class_name = None
     
-    # Priority 1: If config is a dict (from ConfigLoader), use it directly
-    if isinstance(config, dict):
+    # Priority 1: Load from config dict
+    if config is not None:
         manager_config = config.copy()
-        
-        # Try to dynamically load class from config
-        module_path = manager_config.get('module_path')
-        class_name = manager_config.get('class_name') or manager_config.get('manager_name') or manager_config.get('name')
-        
-        if module_path and class_name:
-            # Dynamic import from config
-            try:
-                module = importlib.import_module(module_path)
-                manager_class = getattr(module, class_name)
-                print(f"Dynamically loaded {class_name} from {module_path}")
-            except (ImportError, AttributeError) as e:
-                raise ImportError(f"Failed to load {class_name} from {module_path}: {e}")
-        elif class_name:
-            # Try builtin map
-            manager_class = BUILTIN_MANAGER_MAP.get(class_name)
-            if manager_class is None:
-                raise ValueError(
-                    f"Unknown action manager: {class_name}. "
-                    f"Available built-in managers: {list(BUILTIN_MANAGER_MAP.keys())}\n"
-                    f"Or specify 'module_path' in config for dynamic loading."
-                )
     
-    # Priority 2: Load from YAML file if manager_name_or_path is a file
-    elif manager_name_or_path and (manager_name_or_path.endswith('.yaml') or manager_name_or_path.endswith('.yml')):
-        # Use ConfigLoader to load with proper override support
-        from configs.loader import ConfigLoader
-        cfg_loader = ConfigLoader()
-        manager_config, _ = cfg_loader.load_manager(manager_name_or_path)
+    # Priority 2: Load from name or path
+    elif manager_name_or_path is not None:
+        config_path = _find_config_file(manager_name_or_path)
+        if config_path is None:
+            raise FileNotFoundError(
+                f"Config file not found: {manager_name_or_path}\n"
+                f"Searched in: {[str(p) for p in CONFIG_SEARCH_PATHS]}"
+            )
         
-        # Dynamic import
-        module_path = manager_config.get('module_path')
-        class_name = manager_config.get('class_name') or manager_config.get('manager_name') or manager_config.get('name')
-        
-        if module_path and class_name:
-            try:
-                module = importlib.import_module(module_path)
-                manager_class = getattr(module, class_name)
-            except (ImportError, AttributeError) as e:
-                raise ImportError(f"Failed to load {class_name} from {module_path}: {e}")
-        elif class_name:
-            manager_class = BUILTIN_MANAGER_MAP.get(class_name)
-            if manager_class is None:
-                raise ValueError(f"Unknown action manager: {class_name}")
+        with open(config_path, 'r') as f:
+            manager_config = yaml.safe_load(f) or {}
+        print(f"Loaded action manager config from: {config_path}")
     
-    # Priority 3: Manager name/class provided directly (legacy support)
-    elif manager_name_or_path:
-        manager_class_name = manager_name_or_path
-        manager_class = BUILTIN_MANAGER_MAP.get(manager_class_name)
-        
-        if manager_class is None:
-            # Try eval as last resort fallback
-            try:
-                manager_class = eval(manager_class_name)
-            except Exception as e:
-                raise ValueError(
-                    f"Unknown action manager: {manager_class_name}. "
-                    f"Available managers: {list(BUILTIN_MANAGER_MAP.keys())}"
-                ) from e
-    
-    # Priority 4: Extract from config object (SimpleNamespace/args - legacy)
-    elif config:
-        if isinstance(config, SimpleNamespace) or hasattr(config, '__dict__'):
-            config_dict = vars(config)
-            manager_class_name = config_dict.get('action_manager') or config_dict.get('manager_name') or config_dict.get('manager')
-            
-            if manager_class_name:
-                manager_class = BUILTIN_MANAGER_MAP.get(manager_class_name)
-                if manager_class is None:
-                    raise ValueError(f"Unknown action manager: {manager_class_name}")
-            else:
-                # Default
-                manager_class = BasicActionManager
-                print("No action manager specified, using default: BasicActionManager")
-            
-            # Extract parameters
-            for key in ['coef', 'manager_coef', 'older_coef', 'duration', 'start_ratio', 'end_ratio']:
-                if key in config_dict and config_dict[key] is not None:
-                    manager_config[key] = config_dict[key]
     else:
-        # Default case
-        manager_class = BasicActionManager
-        print("No action manager specified, using default: BasicActionManager")
+        # Default to basic
+        manager_name_or_path = 'basic'
+        config_path = _find_config_file(manager_name_or_path)
+        if config_path:
+            with open(config_path, 'r') as f:
+                manager_config = yaml.safe_load(f) or {}
+            print(f"No action manager specified, using default: basic")
+        else:
+            # Fallback to hardcoded BasicActionManager
+            from .base import BasicActionManager
+            print("No action manager specified, using default: BasicActionManager")
+            return BasicActionManager()
     
-    # Convert config dict to namespace for manager initialization
-    final_config = SimpleNamespace(**manager_config) if manager_config else SimpleNamespace()
+    # Get the type field (required)
+    type_path = manager_config.get('type')
+    if not type_path:
+        raise ValueError(
+            f"Config must have 'type' field with full class path.\n"
+            f"Example: type: deploy.action_manager.base.BasicActionManager\n"
+            f"Config: {manager_config}"
+        )
     
-    # Instantiate manager
+    # Load the class
+    manager_class = _load_class_from_path(type_path)
+    
+    # Get args for initialization
+    args = manager_config.get('args', {})
+    
+    # Remove internal fields that shouldn't be passed to constructor
+    args.pop('module_path', None)
+    args.pop('class_name', None)
+    
+    # Instantiate manager with args as kwargs
     try:
-        manager = manager_class(final_config)
+        manager = manager_class(**args)
         print(f"Successfully loaded action manager: {manager_class.__name__}")
         return manager
     except Exception as e:
         raise RuntimeError(
-            f"Failed to instantiate {manager_class.__name__}: {e}"
+            f"Failed to instantiate {manager_class.__name__} with args {args}: {e}"
         ) from e
-

@@ -8,7 +8,7 @@ All concrete implementations (TCP pickle, FastAPI HTTP/JSON, etc.) should inheri
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, List
 
 import numpy as np
 
@@ -31,14 +31,17 @@ class BaseClient(ABC):
     """
     Abstract base class for policy clients.
 
-    Clients must implement `send_meta_obs` and provide a `select_action` helper
-    that manages an internal action queue (chunk semantics).
+    Clients must implement `send_meta_obs` which sends a MetaObs to the remote
+    server and returns the full action chunk list (same format as MetaPolicy.inference).
+    
+    The `inference` method is the primary interface used by `inference_worker`,
+    equivalent to MetaPolicy.inference(mobs).
     """
 
     @abstractmethod
     def send_meta_obs(self, meta_obs: Any, **kwargs) -> List[np.ndarray]:
         """
-        Send a MetaObs to the server and return the list of action arrays.
+        Send a MetaObs to the server and return the full list of action arrays.
 
         Returns:
             List[np.ndarray]: Each element is an object-dtype array where each
@@ -47,18 +50,8 @@ class BaseClient(ABC):
         ...
 
     @abstractmethod
-    def select_action(self, mobs: Any, t: int, return_all: bool = False) -> Any:
-        """
-        Select action(s) for timestep `t`.
-
-        Internally manages an action queue; requests new chunk from server when
-        the queue is empty or when chunk boundary is reached.
-        """
-        ...
-
-    @abstractmethod
     def reset(self) -> None:
-        """Reset internal state (e.g., clear action queue)."""
+        """Reset internal state."""
         ...
 
     def close(self) -> None:
@@ -84,11 +77,12 @@ class BaseClient(ABC):
     def ctrl_type(self, value: str) -> None:
         self._ctrl_type = value
 
-    @property
-    def chunk_size(self) -> Optional[int]:
-        return getattr(self, "_chunk_size", None)
-
-    @chunk_size.setter
-    def chunk_size(self, value: Optional[int]) -> None:
-        self._chunk_size = value
-
+    def inference(self, mobs) -> List[np.ndarray]:
+        """
+        Run inference on the remote server and return the full action chunk list.
+        
+        This is the primary interface used by inference_worker, equivalent to
+        MetaPolicy.inference(mobs). Returns all action steps without truncation;
+        chunk management is delegated to client-side action_manager.
+        """
+        return self.send_meta_obs(mobs)

@@ -192,8 +192,6 @@ def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
         for ai in macts.action
     ]
 
-    if policy.chunk_size is not None and policy.chunk_size > 0:
-        mact_list = mact_list[: policy.chunk_size]
     return mact_list
 
 
@@ -465,8 +463,7 @@ class BatchedInferenceManager:
             for ai in macts.action
         ]
         
-        if self.policy.chunk_size is not None and self.policy.chunk_size > 0:
-            mact_list = mact_list[: self.policy.chunk_size]
+        # No truncation — chunk management is delegated to client-side action_manager
         
         # Unbatch results
         return self._unbatch_mact_list(mact_list, n_clients)
@@ -729,7 +726,6 @@ def main():
 
     policy = MetaPolicy(
         policy=model,
-        chunk_size=args.chunk_size,
         action_normalizer=normalizers["action"],
         state_normalizer=normalizers["state"],
         ctrl_space=ctrl_space,

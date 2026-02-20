@@ -1,5 +1,4 @@
-from .base import AbstractActionManager
-from .basic import BasicActionManager
+from .base import AbstractActionManager, BasicActionManager
 from .older_first import OlderFirstManager
 from .temporal_agg import TemporalAggManager
 from .temporal_older import TemporalOlderManager

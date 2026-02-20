@@ -270,11 +270,19 @@ def main():
                     ch.destroy()
                 except Exception:
                     pass
+        # Stop all device processes - give them time to close serial ports gracefully
+        logger.info("Stopping {} device processes...", len(all_procs))
         for p in all_procs:
-            p.terminate()
-            p.join(timeout=2.0)
             if p.is_alive():
+                p.terminate()  # Send SIGTERM
+        
+        # Wait for all processes to finish gracefully
+        for p in all_procs:
+            p.join(timeout=3.0)  # Give more time for serial port cleanup
+            if p.is_alive():
+                logger.warning("Device process {} did not exit gracefully, killing...", p.pid)
                 p.kill()
+                p.join(timeout=1.0)
         
         # Finalize data saver (important for LeRobot to close parquet writers)
         if data_saver is not None:

@@ -2,6 +2,20 @@
 
 Action managers control how action chunks from the policy are buffered and executed in the real-world control loop.
 
+## Configuration Format
+
+All action manager configs use the following YAML format:
+
+```yaml
+type: deploy.action_manager.module_name.ClassName  # Full class path (required)
+name: config_name                                   # Config name (optional)
+args:                                               # Constructor arguments (optional)
+  param1: value1
+  param2: value2
+```
+
+The `type` field specifies the full Python module path to the manager class. The `args` field contains keyword arguments passed directly to the class constructor.
+
 ## Available Managers
 
 ### BasicActionManager (`basic.yaml`)
@@ -91,9 +105,22 @@ Truncates action chunks by dropping the first and last portions, then executes t
 1. **Conservative** (`truncated_conservative.yaml`): `start_ratio=0.1, end_ratio=0.2, older_coef=1.0`
    - Drop first 10% (warm-up) and last 20% (uncertain predictions)
    - Wait for full execution before accepting new chunk
-2. **Aggressive** (`truncated_aggressive.yaml`): `start_ratio=0.0, end_ratio=0.3, older_coef=0.7`
-   - Drop last 30% (very uncertain predictions)
-   - Accept new chunk after 70% execution (more responsive)
+2. **Aggressive** (`truncated_aggressive.yaml`): `start_ratio=0.05, end_ratio=0.25, older_coef=1.0`
+   - Drop first 5% and last 25% (very uncertain predictions)
+
+---
+
+### InferWithFPSManager (`infer_w_fps.yaml`)
+Triggers inference at a minimum FPS rate, enabling asynchronous/pipelined inference.
+
+**Use case:** When you want to:
+- Hide inference latency by overlapping inference with action execution
+- Maintain a consistent inference rate regardless of chunk consumption speed
+
+**Parameters:**
+- `fps` (default: 10.0): Minimum inference frequency (inferences per second)
+  - `fps=10` → inference triggered at least every 100ms
+  - `fps=50` → inference triggered at least every 20ms
 
 ---
 
@@ -122,19 +149,18 @@ python eval_real.py -am truncated_conservative \
 
 To use custom parameters, create a custom config file:
 
-```bash
-# Create custom config with your desired parameters
-cat > configs/action_manager/my_custom.yaml << EOF
+```yaml
+# configs/action_manager/my_custom.yaml
+type: deploy.action_manager.truncated.TruncatedManager
 name: my_custom
-manager_name: TruncatedManager
-module_path: deploy.action_manager.truncated
-class_name: TruncatedManager
+args:
+  start_ratio: 0.12
+  end_ratio: 0.22
+  older_coef: 0.88
+```
 
-start_ratio: 0.12
-end_ratio: 0.22
-older_coef: 0.88
-EOF
-
+Then use it:
+```bash
 # Use the custom config (by name)
 python eval_real.py -am my_custom
 
@@ -152,30 +178,34 @@ python eval_real.py -am my_custom --manager.older_coef 0.95
 ```python
 from deploy.action_manager import load_action_manager
 
-# Load from config name (uses default parameters from YAML)
-manager = load_action_manager('older_first', args)
+# Load from config name (recommended)
+manager = load_action_manager('basic')
+manager = load_action_manager('temporal_agg')
 
-# Load from custom config file
-manager = load_action_manager('configs/action_manager/my_custom.yaml', args)
+# Load from YAML file path
+manager = load_action_manager('configs/action_manager/my_custom.yaml')
 
-# Load from config name only
-from types import SimpleNamespace
-config = SimpleNamespace(action_manager='temporal_agg')
+# Load from config dict
+config = {
+    'type': 'deploy.action_manager.truncated.TruncatedManager',
+    'args': {
+        'start_ratio': 0.1,
+        'end_ratio': 0.2
+    }
+}
 manager = load_action_manager(config=config)
 ```
 
 ## Creating Custom Configurations
 
-**All action manager parameters must be defined in YAML config files.** Command-line parameter overrides are not supported.
-
 Create a new YAML file in `configs/action_manager/` with your custom parameters:
 
 ```yaml
 # my_custom.yaml
+type: deploy.action_manager.temporal_agg.TemporalAggManager
 name: my_custom
-manager_name: TemporalAggManager
-
-coef: 0.15  # Custom smoothing coefficient
+args:
+  coef: 0.15  # Custom smoothing coefficient
 ```
 
 Then use it:
@@ -198,6 +228,7 @@ python eval_real.py --action_manager /path/to/my_custom.yaml
 | Balanced | TemporalOlderManager | Smooth + stable |
 | Low Latency | DelayFreeManager | Compensates for delays |
 | Robustness | TruncatedManager | Filters unstable/uncertain actions |
+| Async Inference | InferWithFPSManager | Overlaps inference with execution |
 
 ## Parameter Configuration
 
@@ -211,7 +242,7 @@ python eval_real.py --action_manager /path/to/my_custom.yaml
 1. **Command-line overrides** (`--manager.xxx`)
 2. **Custom YAML config file** (if specified)
 3. **Default YAML config file** in `configs/action_manager/`
-4. **Default values in manager class**
+4. **Default values in manager class constructor**
 
 ### Example: Parameter Override
 
@@ -225,4 +256,3 @@ python eval_real.py -am truncated_conservative --manager.end_ratio 0.3
 ```
 
 For detailed information, see `CONFIGLOADER_INTEGRATION.md`.
-

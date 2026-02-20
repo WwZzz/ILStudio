@@ -5,7 +5,7 @@ from tianshou.env import SubprocVectorEnv
 import time
 import os
 from PIL import Image, ImageDraw, ImageFont
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 from collections import deque
 import cv2
@@ -251,7 +251,7 @@ def _save_example_batch(obs, act, save_dir):
             action_data = act
             # If it's a numpy array of dicts (dtype='object'), extract the 'action' field
             if isinstance(action_data, np.ndarray) and action_data.dtype == np.object_:
-                # This is likely an array of MetaAction dicts from policy.select_action
+                # This is likely an array of MetaAction dicts from policy.inference
                 try:
                     # Extract 'action' field from each dict
                     action_list = []
@@ -338,7 +338,7 @@ def _save_example_batch(obs, act, save_dir):
         logger.error(f"Failed to save example batch: {e}")
         logger.error(traceback.format_exc())
 
-def organize_obs(obs: np.ndarray, ctrl_space='ee'):
+def organize_obs(obs: np.ndarray):
     """Organize obs returned by SubprocVectorEnv into a dict"""
     # Lazy import to avoid circular dependency at module import time
     from .base import dict2meta
@@ -359,45 +359,80 @@ def organize_obs(obs: np.ndarray, ctrl_space='ee'):
     # Note: camera selection is now handled in each environment's obs2meta method
     return dict2meta(res)
 
-def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
+def _render_video_frames(obs, video_frames, success, env):
+    """Extract video frames from observation for recording."""
+    frames = obs['image']
+    # Handle multiple camera views: concatenate horizontally
+    if len(frames.shape) == 5:
+        # Shape: (batch, num_cameras, channels, height, width)
+        batch_size, num_cameras, channels, height, width = frames.shape
+        frames = frames.transpose(0, 1, 3, 4, 2)  # (batch, num_cameras, height, width, channels)
+        concatenated_frames = []
+        for b in range(batch_size):
+            batch_frames = frames[b].transpose(1, 0, 2, 3)  # (height, num_cameras, width, channels)
+            batch_frames = batch_frames.reshape(height, num_cameras * width, channels)
+            concatenated_frames.append(batch_frames)
+        frames = np.stack(concatenated_frames, axis=0)
+    else:
+        # Shape: (batch, channels, height, width)
+        frames = frames.transpose(0, 2, 3, 1)
+    for env_i in range(len(env)):
+        if not success[env_i]:
+            video_frames[env_i].append(frames[env_i])
+
+
+def evaluate(
+    args,
+    env,
+    action_manager,
+    inference_ctx=None,
+    video_writer=None,
+    save_example_dir=None,
+):
+    """
+    Run evaluation rollouts.
+    
+    Uses action_manager for action selection. The action_manager communicates
+    with an inference_worker subprocess via InferenceContext (SHM) to obtain
+    action chunks.
+    
+    Obs/trigger are decoupled:
+    - Obs is written to obs_shm by this function (sim mode, via inference_ctx.update_obs)
+    - action_manager only sends trigger signals (no obs handling)
+    
+    Args:
+        args: Evaluation arguments (must have max_timesteps).
+        env: Vectorized environment.
+        action_manager: ActionManager with InferenceContext set.
+        inference_ctx: InferenceContext for writing obs to SHM (sim mode).
+                       In real mode this is not used (obs comes from device SHMs).
+        video_writer: Optional video writer for recording.
+        save_example_dir: Optional directory to save example batch.
+    """
     video_frames = [[] for _ in range(len(env))]
-    horizons = np.ones(len(env))*args.max_timesteps
-    # 开始测试
+    horizons = np.ones(len(env)) * args.max_timesteps
+    
+    # Start evaluation
     with torch.inference_mode():
         time_start_eval = time.time()
-        success =  np.zeros(len(env)).astype(np.bool8)
+        success = np.zeros(len(env)).astype(np.bool8)
         obs = env.reset()
-        obs = organize_obs(obs, args.ctrl_space)
+        obs = organize_obs(obs)
         
         # Save first observation and action for debugging
         first_obs_saved = False
         
         for t in range(args.max_timesteps):
             if video_writer is not None:
-                frames = obs['image']
-                # Handle multiple camera views: concatenate horizontally
-                if len(frames.shape) == 5:
-                    # Shape: (batch, num_cameras, channels, height, width)
-                    # Concatenate cameras horizontally along width dimension
-                    batch_size, num_cameras, channels, height, width = frames.shape
-                    # Convert to (batch, num_cameras, height, width, channels) for concatenation
-                    frames = frames.transpose(0, 1, 3, 4, 2)  # (batch, num_cameras, height, width, channels)
-                    # Concatenate along width dimension for each batch
-                    concatenated_frames = []
-                    for b in range(batch_size):
-                        # frames[b] shape: (num_cameras, height, width, channels)
-                        # Reshape to (height, num_cameras, width, channels) then reshape to concatenate horizontally
-                        batch_frames = frames[b].transpose(1, 0, 2, 3)  # (height, num_cameras, width, channels)
-                        batch_frames = batch_frames.reshape(height, num_cameras * width, channels)  # (height, width*num_cameras, channels)
-                        concatenated_frames.append(batch_frames)
-                    frames = np.stack(concatenated_frames, axis=0)  # (batch, height, total_width, channels)
-                else:
-                    # Shape: (batch, channels, height, width) - single camera or already processed
-                    frames = frames.transpose(0, 2, 3, 1)  # (batch, height, width, channels)
-                for env_i in range(len(env)):
-                    if not success[env_i]:
-                        video_frames[env_i].append(frames[env_i])
-            act = policy.select_action(obs, t)
+                _render_video_frames(obs, video_frames, success, env)
+            
+            # Write obs to SHM for inference worker (sim mode)
+            if inference_ctx is not None:
+                inference_ctx.update_obs(obs, t)
+            
+            # Get action from action_manager (sends trigger, polls action_shm)
+            # Step counter is managed internally by action_manager
+            act = action_manager.select_action()
             
             # Save first obs and action
             if not first_obs_saved and save_example_dir is not None:
@@ -405,46 +440,41 @@ def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
                 first_obs_saved = True
             
             obs, reward, done, info = env.step(act)
-            obs = organize_obs(obs, args.ctrl_space)
+            obs = organize_obs(obs)
             # Decide if success
             success = success | done
             if success.all(): 
                 for sidx in range(success.shape[0]):
-                    if horizons[sidx]>t: horizons[sidx] = t
+                    if horizons[sidx] > t:
+                        horizons[sidx] = t
                 break
             elif success.any():
-                success_idx = np.where(success==True)[0]
+                success_idx = np.where(success == True)[0]
                 for sidx in success_idx: 
-                    if horizons[sidx]>t: horizons[sidx] = t
+                    if horizons[sidx] > t:
+                        horizons[sidx] = t
 
+    # Cleanup
     env.close()
+    
     # Compute metrics
     total_successes = int(success.sum().item())
     total = len(env)
-    success_rate = 1.0*total_successes/len(env)
+    success_rate = 1.0 * total_successes / len(env)
+    eval_time = time.time() - time_start_eval
+    
     # Save video
     if video_writer is not None:
         for env_i in range(len(env)):
             for frame in video_frames[env_i]:
                 video_writer.append_data(frame)
+    
     return {
         'success': success.tolist(),
         'total_success': total_successes,
         'total': total,
         'success_rate': success_rate,
         'horizon': horizons.tolist(),
-        'horizon_success': (success*horizons).sum()/(total_successes),
+        'horizon_success': (success * horizons).sum() / max(total_successes, 1),
+        'eval_time': eval_time,
     }
-
-# def absolute_action_to_delta(maction, mobs):
-#     # Convert absolute action into relative action
-#     if maction.ctrl_type=='delta': return maction
-#     if maction.ctrl_space=='ee':
-#         maction.ctrl_type = 'delta'
-#         assert mobs is not None and mobs.state_ee is not None, "failed to load state_ee from MetaObs"
-#         maction.action = maction.action - mobs.state_ee
-#     elif maction.ctrl_space=='joint':
-#         maction.ctrl_type = 'delta'
-#         assert mobs is not None and mobs.joint_state is not None, "failed to load state_ee from MetaObs"
-#         maction.action = maction.action - mobs.joint_state
-#     return maction

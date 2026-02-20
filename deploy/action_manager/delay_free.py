@@ -1,13 +1,13 @@
 import time
-from .basic import BasicActionManager
+from .base import BasicActionManager
 
 
 class DelayFreeManager(BasicActionManager):
     """Remove the outdated actions from each chunk"""
     
-    def __init__(self, config):
-        super().__init__(config)
-        self.duration = getattr(config, 'duration', 0.05)
+    def __init__(self, duration: float = 0.05, **kwargs):
+        super().__init__(**kwargs)
+        self.duration = duration
 
     def put(self, chunk, timestamp: float = None):
         if self._chunk_buffer is None: 
@@ -22,4 +22,5 @@ class DelayFreeManager(BasicActionManager):
                 with self._lock:
                     self._chunk_buffer = chunk
                     self.current_step = 0
-
+            else:
+                self._stats["chunks_discarded"] += 1

@@ -5,12 +5,15 @@ from deploy.shm_utils import SharedMemoryChannel, _fix_resource_tracker
 from loguru import logger
 import importlib
 import numpy as np
+import signal
+import sys
 from benchmark.base import MetaObs
 
 
 def start_device(device_config:dict):
     """
     Start a device in a subprocess.
+    Handles SIGTERM/SIGINT to ensure graceful cleanup of device resources (e.g., serial ports).
     """
     # Re-apply resource_tracker patch in subprocess (critical: must be done early)
     _fix_resource_tracker()
@@ -22,7 +25,29 @@ def start_device(device_config:dict):
     device_module = importlib.import_module(device_module_name)
     device_class = getattr(device_module, device_class_name)
     device = device_class(**device_config['args'])
-    device.start()
+    
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"[{device.name}] Received signal {signum}, stopping device...")
+        device.is_running = False
+        # Call close() to cleanup resources (shm, serial ports, etc.)
+        if hasattr(device, 'close'):
+            device.close()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    try:
+        device.start()
+    except Exception as e:
+        logger.error(f"[{device.name}] Error in device.start(): {e}")
+    finally:
+        # Ensure cleanup even if start() exits unexpectedly
+        device.is_running = False
+        if hasattr(device, 'close'):
+            device.close()
+    
     return device
 
 class BaseDevice(ABC):
