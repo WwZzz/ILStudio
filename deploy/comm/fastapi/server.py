@@ -242,7 +242,7 @@ class BatchedInferenceManager:
         mobs: MetaObs, 
         payload: Dict[str, Any], 
         client_id: Optional[str] = None,
-        timeout: float = 30.0,
+        timeout: float = 3600.0,
     ) -> list:
         """
         Submit a request and wait for the result.

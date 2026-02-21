@@ -144,7 +144,7 @@ class BasicActionManager(AbstractActionManager):
         
         # Step 3: If buffer empty, block-wait for inference result
         if buffer_empty:
-            self._wait_for_action_chunk(timeout=360.0)
+            self._wait_for_action_chunk(timeout=3600.0)
         
         # Step 4: Get single-step action
         action = self.get()

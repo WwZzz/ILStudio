@@ -180,7 +180,6 @@ def load_policy(args):
         # Create remote policy client (auto-detect TCP vs HTTP)
         policy = create_client(
             address=address,
-            chunk_size=getattr(args, 'chunk_size', None),
             timeout_s=3600.0,  # Set timeout to 3600 seconds for long-running inference
         )
         
