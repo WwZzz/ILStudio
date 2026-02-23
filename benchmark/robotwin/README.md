@@ -119,6 +119,20 @@ args:
   # robotwin_root: /path/to/RoboTwin
 ```
 
+### `max_timesteps` alignment (important)
+
+RoboTwin tasks have **different** evaluation step limits. The authoritative mapping lives in
+`benchmark/robotwin/RoboTwin/task_config/_eval_step_limit.yml`.
+
+In ILStudio, `max_timesteps` comes from your env YAML and directly controls evaluation horizon
+(`benchmark/utils.py:evaluate` loops `range(args.max_timesteps)`), so keeping it aligned matters.
+
+To (re)sync all RobotWin env configs under `configs/env/robotwin/` (including `ee/`):
+
+```bash
+python scripts/sync_robotwin_max_timesteps.py --repo_root .
+```
+
 **Single-Arm Robot (e.g., Franka Panda)**
 ```yaml
 type: benchmark.robotwin.RoboTwinEnv
