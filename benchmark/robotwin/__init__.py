@@ -6,6 +6,7 @@ RoboTwin is a dual-arm manipulation environment with 50 tasks.
 
 import sys
 import os
+import gc
 import numpy as np
 import yaml
 import importlib
@@ -39,6 +40,43 @@ sys.path.insert(0, os.path.join(ROBOTWIN_ROOT, 'description/utils'))
 # These will be set when first needed
 _UnStableError = None
 _generate_episode_descriptions = None
+
+
+def _is_cuda_oom(err: BaseException) -> bool:
+    s = str(err)
+    return (
+        "CUDA out of memory" in s
+        or "torch.OutOfMemoryError" in s
+        or err.__class__.__name__ in {"OutOfMemoryError", "CUDAOutOfMemoryError"}
+    )
+
+
+def _cleanup_torch_cuda(reason: str = "") -> None:
+    """
+    Best-effort cleanup for exception paths.
+    Notes:
+    - PyTorch uses a caching allocator; memory may look "not freed" in nvidia-smi even without leaks.
+    - This helps when we repeatedly create/destroy heavy GPU objects (e.g., curobo warmup).
+    """
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        import torch  # local import to avoid hard dependency at module import time
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            # helps free IPC handles in some multi-process cases
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+    except Exception:
+        # If torch isn't available, nothing to do.
+        pass
+    if reason:
+        logger.warning(f"[RoboTwinEnv] CUDA cleanup: {reason}")
 
 def _ensure_robotwin_imports():
     """Lazily import RoboTwin utilities that require being in RoboTwin directory."""
@@ -173,6 +211,7 @@ class RoboTwinEnv(MetaEnv):
         try:
             # Find a valid seed for initialization
             max_init_attempts = 50
+            oom_fallback_done = False
             for init_attempt in range(max_init_attempts):
                 try:
                     self.task_config['seed'] = self.seed + init_attempt
@@ -184,11 +223,27 @@ class RoboTwinEnv(MetaEnv):
                     self.episode_num = init_attempt
                     break
                 except Exception as e:
+                    # If planner warmup OOMs, do a one-time fallback to no-planner.
+                    # Otherwise we may repeatedly warm up curobo and accumulate reserved VRAM.
+                    if _is_cuda_oom(e) and self.use_planner and not oom_fallback_done:
+                        oom_fallback_done = True
+                        self.use_planner = False
+                        self.task_config['use_planner'] = False
+                        logger.warning(
+                            f"[RoboTwinEnv] Planner warmup OOM during pre-init (seed_offset={init_attempt}). "
+                            f"Falling back to use_planner=False and retrying."
+                        )
                     # Try to close and recreate for next attempt
                     try:
                         self.task_env.close_env(clear_cache=True)
                     except:
                         pass
+                    # Drop references and force CUDA cleanup on exception paths
+                    try:
+                        del self.task_env
+                    except Exception:
+                        pass
+                    _cleanup_torch_cuda(reason=f"pre-init attempt failed: {type(e).__name__}: {e}")
                     # Recreate task_env for next attempt
                     self.task_env = self._create_task_env()
                     if init_attempt == max_init_attempts - 1:
@@ -749,12 +804,14 @@ class RoboTwinEnv(MetaEnv):
         if self._env_initialized:
             _enter_robotwin_context()
             try:
-                self.task_env.close_env()
+                # clear_cache=True helps release sapien caches; CUDA cleanup is handled below
+                self.task_env.close_env(clear_cache=True)
             except:
                 pass
             finally:
                 _exit_robotwin_context()
         self._env_initialized = False
+        _cleanup_torch_cuda(reason="env.close()")
     
     def get_action_dim(self):
         """Return action dimension based on control space."""
