@@ -83,53 +83,59 @@ class RoboMindDataset(WrappedLerobotV21Dataset):
             return x[:,eff_idxs]
     
     def get_dataset_info(self, robot: str, ctrl_space: str = 'ee'):
+        """Get state/action keys for each robot type.
+        
+        Design principle: state[t] = action[t], i.e. both state and action
+        use the same observation keys so that action represents the absolute
+        state at the current timestep.
+        """
         if robot=='franka_3rgb' or robot=='franka_1rgb':
             is_dual=False
-            if ctrl_space=='ee': # dim 7 
+            if ctrl_space=='ee': # dim 7 (after effective_dim reduction from 14)
                 state_key = ['observation.states.end_effector', 'observation.states.joint_position']
-                action_key = ['observation.states.end_effector', 'observation.states.joint_position']
+                action_key = state_key  # state[t] = action[t]
             elif ctrl_space=='joint':  # dim 8
                 state_key = 'observation.states.joint_position'
-                action_key = 'actions.joint_position'
+                action_key = state_key  # state[t] = action[t]
         elif robot=='agilex_3rgb':
             is_dual = True
-            if ctrl_space=='ee': # dim 16
+            if ctrl_space=='ee': # dim 16 (after effective_dim reduction from 28)
                 state_key = ['observation.states.end_effector_left', 'observation.states.joint_effort_left', 'observation.states.end_effector_right',  'observation.states.joint_effort_right',]
-                action_key =  ['actions.end_effector_left', 'observation.states.joint_effort_left', 'actions.end_effector_right',  'observation.states.joint_effort_right',]
+                action_key = state_key  # state[t] = action[t]
             elif ctrl_space=='joint': # dim 14
                 state_key = ['observation.states.joint_position_left', 'observation.states.joint_position_right']
-                action_key = ['actions.joint_position_left', 'actions.joint_position_right']
+                action_key = state_key  # state[t] = action[t]
         elif robot=='tienkung_gello_1rgb' or robot=='tienkung_prod1_gello_1rgb': 
             is_dual = True 
             if ctrl_space=='ee':
-                raise ValueError("EE control not supported for tienkung_gello_1rgb")
+                raise ValueError("EE control not supported for tienkung_gello_1rgb / tienkung_prod1_gello_1rgb")
             elif ctrl_space=='joint': # dim 16
                 state_key = 'observation.states.joint_position'
-                action_key = 'actions.joint_position'
+                action_key = state_key  # state[t] = action[t]
         elif robot=='tienkung_xsens_1rgb': 
             is_dual = True
             if ctrl_space=='ee': # dim 12
                 state_key = 'observation.states.end_effector'
-                action_key = 'actions.end_effector'
+                action_key = state_key  # state[t] = action[t]
             elif ctrl_space=='joint': # dim 14
                 state_key = 'observation.states.joint_position'
-                action_key = 'actions.joint_position'
+                action_key = state_key  # state[t] = action[t]
         elif robot=='ur_1rgb':
             is_dual = False
-            if ctrl_space=='ee': # dim 7
+            if ctrl_space=='ee': # dim 7 (after effective_dim reduction from 13)
                 state_key = ['observation.states.end_effector', 'observation.states.joint_position']
-                action_key = ['observation.states.end_effector', 'observation.states.joint_position']
+                action_key = state_key  # state[t] = action[t]
             elif ctrl_space=='joint': # dim 7
                 state_key = 'observation.states.joint_position'
-                action_key = 'actions.joint_position'
+                action_key = state_key  # state[t] = action[t]
         elif robot=='franka_fr3_dual':
             is_dual = True
-            if ctrl_space=='ee': # dim 14
+            if ctrl_space=='ee': # dim 14 (after effective_dim reduction from 28)
                 state_key = ['observation.states.end_effector', 'observation.states.joint_position']
-                action_key = state_key
+                action_key = state_key  # state[t] = action[t]
             elif ctrl_space=='joint': # dim 16
                 state_key = 'observation.states.joint_position'
-                action_key = 'actions.joint_position'
+                action_key = state_key  # state[t] = action[t]
         return state_key, action_key, is_dual
 
     def __getitem__(self, index):
@@ -137,6 +143,24 @@ class RoboMindDataset(WrappedLerobotV21Dataset):
         if self.effective_dim is not None:
             res['action'] = self.reduce_dim(res['action'], self.effective_dim)
             res['state'] = self.reduce_dim(res['state'], self.effective_dim)
+
+        # For franka_3rgb: randomly select one camera from the 3 views each time.
+        # This reduces multi-view to single-view while keeping config simple.
+        if self.robot == 'franka_3rgb' and 'image' in res and res['image'] is not None:
+            img = res['image']
+            if hasattr(img, 'ndim') and img.ndim == 4 and img.shape[0] == 3:
+                # Deterministic-ish randomness per sample & worker for reproducibility.
+                try:
+                    from torch.utils.data import get_worker_info
+                    wi = get_worker_info()
+                    worker_id = wi.id if wi is not None else 0
+                except Exception:
+                    worker_id = 0
+
+                seed = (int(index) * 1000003 + worker_id * 101) & 0xFFFFFFFF
+                rng = np.random.RandomState(seed)
+                k = int(rng.randint(0, 3))
+                res['image'] = img[k:k+1]
         return res
     
     def _reduce_stats(self, stats: Dict[str, np.ndarray], eff_idxs: List[int]) -> Dict[str, np.ndarray]:
