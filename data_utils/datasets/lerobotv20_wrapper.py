@@ -140,12 +140,12 @@ def cast_stats_to_numpy(stats: dict) -> Dict[str, Dict[str, np.ndarray]]:
 
 def get_video_backend() -> str:
     """Get the best available video backend."""
-    try:
-        import importlib.util
-        if importlib.util.find_spec("torchcodec"):
-            return "torchcodec"
-    except Exception:
-        pass
+    # Allow explicit override (useful for debugging / reliability).
+    forced = os.environ.get("ILSTUDIO_VIDEO_BACKEND")
+    if forced:
+        return forced
+    # Default to torchvision/pyav for reliability. Torchcodec can be enabled explicitly
+    # via `ILSTUDIO_VIDEO_BACKEND=torchcodec` (or by passing `video_backend="torchcodec"`).
     return "pyav"
 
 
@@ -167,18 +167,25 @@ def decode_video_frames_torchcodec(
     Returns:
         Tensor of shape (N, C, H, W) with frames in [0, 1] range
     """
+    # NOTE: In some environments / torchcodec versions, constructing VideoDecoder from a path
+    # string can fail with: "No valid stream found in input file...".
+    # Using a regular file handle is more robust.
     from torchcodec.decoders import VideoDecoder
-    
-    # Initialize decoder
-    decoder = VideoDecoder(str(video_path), device="cpu", seek_mode="approximate")
-    metadata = decoder.metadata
-    video_fps = fps if fps else metadata.average_fps
-    
-    # Convert timestamps to frame indices
-    frame_indices = [round(ts * video_fps) for ts in timestamps]
-    
-    # Batch retrieve frames (much faster than one-by-one)
-    frames_batch = decoder.get_frames_at(indices=frame_indices)
+
+    video_path_str = str(video_path)
+
+    # Keep the file handle open for the lifetime of the decoder and `get_frames_at` call.
+    # (We intentionally avoid caching here to prevent "too many open files" issues.)
+    with open(video_path_str, "rb") as file_handle:
+        decoder = VideoDecoder(file_handle, seek_mode="approximate")
+        metadata = decoder.metadata
+        video_fps = fps if fps else metadata.average_fps
+
+        # Convert timestamps to frame indices
+        frame_indices = [round(ts * video_fps) for ts in timestamps]
+
+        # Batch retrieve frames (much faster than one-by-one)
+        frames_batch = decoder.get_frames_at(indices=frame_indices)
     
     loaded_frames = []
     loaded_ts = []
@@ -215,6 +222,10 @@ def decode_video_frames_torchvision(
     """
     Decode video frames at specified timestamps using torchvision VideoReader.
     
+    Memory-efficient: uses streaming decode - only keeps the frames needed for
+    timestamp matching instead of accumulating all frames from keyframe to last_ts.
+    This avoids OOM when pyav seeks to a keyframe far before the target.
+    
     Args:
         video_path: Path to video file
         timestamps: List of timestamps (in seconds) to extract
@@ -240,49 +251,48 @@ def decode_video_frames_torchvision(
     # Get first and last timestamps
     first_ts = min(timestamps)
     last_ts = max(timestamps)
+    stop_ts = last_ts + tolerance_s
     
     # Seek to closest key frame before first timestamp
     reader.seek(first_ts, keyframes_only=keyframes_only)
     
-    # Load frames until last requested frame
-    loaded_frames = []
-    loaded_ts = []
+    # Memory-efficient streaming: only keep best-match frame(s) per timestamp
+    best_for_ts: Dict[int, Tuple[torch.Tensor, float, float]] = {}
+    
     for frame in reader:
         current_ts = frame["pts"]
-        loaded_frames.append(frame["data"])
-        loaded_ts.append(current_ts)
-        if current_ts >= last_ts:
+        frame_data = frame["data"]
+        
+        for i, ts in enumerate(timestamps):
+            dist = abs(current_ts - ts)
+            if i not in best_for_ts or dist < best_for_ts[i][2]:
+                best_for_ts[i] = (frame_data.clone(), current_ts, dist)
+        
+        if current_ts >= stop_ts:
             break
     
-    # Close reader
+    # Close reader to release video buffers
     if backend == "pyav":
         reader.container.close()
     reader = None
     
-    if not loaded_frames:
+    if not best_for_ts:
         raise RuntimeError(f"No frames decoded from {video_path}")
     
-    # Match requested timestamps to loaded frames
-    query_ts = torch.tensor(timestamps)
-    loaded_ts = torch.tensor(loaded_ts)
+    frames_list = []
+    for i in range(len(timestamps)):
+        if i not in best_for_ts:
+            raise RuntimeError(f"No frame found for timestamp {timestamps[i]} in {video_path}")
+        frame_tensor, pts, dist = best_for_ts[i]
+        if dist >= tolerance_s:
+            warnings.warn(
+                f"Frame at {pts:.3f}s violates tolerance for ts={timestamps[i]}: "
+                f"dist={dist:.3f} > {tolerance_s}"
+            )
+        frames_list.append(frame_tensor)
     
-    # Compute distances between each query timestamp and loaded timestamps
-    dist = torch.cdist(query_ts[:, None], loaded_ts[:, None], p=1)
-    min_dist, argmin_idx = dist.min(1)
-    
-    # Check tolerance
-    is_within_tol = min_dist < tolerance_s
-    if not is_within_tol.all():
-        warnings.warn(
-            f"Some frames violate tolerance: {min_dist[~is_within_tol]} > {tolerance_s}"
-        )
-    
-    # Select frames
-    frames = torch.stack([loaded_frames[idx] for idx in argmin_idx])
-    
-    # Convert to float [0, 1]
+    frames = torch.stack(frames_list)
     frames = frames.float() / 255.0
-    
     return frames
 
 
@@ -468,6 +478,8 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         download_videos: Whether to download video files
         filter_invalid_videos: Whether to filter out episodes with missing/corrupted video files
         video_backend: Video decoding backend ("pyav", "torchcodec", or None for auto)
+        parquet_cache_size: Max number of episodes to keep in memory cache (0 disables caching).
+            With num_workers>0, each worker has its own cache. Default 8 balances memory vs I/O.
     """
     
     def __init__(
@@ -486,6 +498,7 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         download_videos: bool = True,
         filter_invalid_videos: bool = False,
         video_backend: Optional[str] = None,
+        parquet_cache_size: int = 8,
         *args,
         **kwargs,
     ):
@@ -499,6 +512,7 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         self.tolerance_s = tolerance_s
         self.download_videos = download_videos
         self.filter_invalid_videos = filter_invalid_videos
+        self.parquet_cache_size = int(parquet_cache_size) if parquet_cache_size is not None else 0
         self.camera_names = camera_names if isinstance(camera_names, list) else [camera_names]
         self.image_size = image_size
         self.ctrl_space = ctrl_space
@@ -565,8 +579,13 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         
         # Build index mapping for fast lookup
         self._build_index_mapping()
-        # Cache parquet data for each episode
-        self._parquet_cache: Dict[Tuple[int, int], Any] = {}
+        # Cache parquet data for recent episodes (LRU, bounded to avoid unbounded RAM growth)
+        from collections import OrderedDict
+        self._parquet_cache: "OrderedDict[Tuple[int, int], Any]" = OrderedDict()
+        self._parquet_available_columns = self._discover_parquet_columns()
+        self._core_parquet_columns = [
+            self._build_core_parquet_columns(i) for i in range(len(self.dataset_metas))
+        ]
         
         # Compute state and action dimensions from dataset features
         self.state_dim = self._compute_feature_dim(self.state_key)
@@ -886,27 +905,111 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         logger.warning("Could not infer image size from features, using default 224x224")
         return (224, 224)
     
-    def _load_episode_parquet(self, dataset_idx: int, ep_idx: int) -> Dict[str, np.ndarray]:
-        """Load parquet data for an episode."""
-        cache_key = (dataset_idx, ep_idx)
-        
-        if cache_key not in self._parquet_cache:
-            meta = self.dataset_metas[dataset_idx]
-            parquet_path = meta.root / meta.get_data_file_path(ep_idx)
-            
-            table = pq.read_table(parquet_path)
-            data = {col: table[col].to_numpy() for col in table.column_names}
-            
-            for key in data:
-                if data[key].dtype == object:
-                    try:
-                        data[key] = np.stack(data[key])
-                    except:
-                        pass
-            
+    def _discover_parquet_columns(self) -> List[set]:
+        """Discover available parquet columns once per dataset."""
+        available_columns = []
+        for meta, episodes in zip(self.dataset_metas, self.per_dataset_episodes):
+            if not episodes:
+                available_columns.append(set())
+                continue
+            parquet_path = meta.root / meta.get_data_file_path(episodes[0])
+            # Use the Arrow schema instead of the raw Parquet schema. For nested
+            # list/struct columns, `ParquetSchema.names` exposes leaf names such
+            # as `element`, which causes columns like
+            # `observation.state.joint_position` to be treated as missing.
+            schema = pq.ParquetFile(parquet_path).schema_arrow
+            available_columns.append(set(schema.names))
+        return available_columns
+
+    def _normalize_parquet_arrays(self, data: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """Convert object arrays to stacked numpy arrays when possible."""
+        for key, value in list(data.items()):
+            if getattr(value, "dtype", None) == object:
+                try:
+                    data[key] = np.stack(value)
+                except Exception:
+                    pass
+        return data
+
+    def _get_requested_camera_keys(self, meta: LeRobotV20Metadata) -> List[str]:
+        """Get the camera keys actually requested for this dataset."""
+        if len(self.camera_names) == 0:
+            return list(meta.camera_keys)
+        return [cam_key for cam_key in self.camera_names if cam_key in meta.camera_keys]
+
+    def _build_core_parquet_columns(self, dataset_idx: int) -> List[str]:
+        """Build the lightweight parquet column set cached for each episode."""
+        meta = self.dataset_metas[dataset_idx]
+        available = self._parquet_available_columns[dataset_idx]
+
+        columns = {"timestamp", "task_index"}
+        if isinstance(self.state_key, str):
+            columns.add(self.state_key)
+        else:
+            columns.update(self.state_key)
+        if isinstance(self.action_key, str):
+            columns.add(self.action_key)
+        else:
+            columns.update(self.action_key)
+
+        # Non-video cameras must come from parquet every sample, so include them in
+        # the core cache. Video cameras stay lazy to avoid bloating memory.
+        for cam_key in self._get_requested_camera_keys(meta):
+            if cam_key not in meta.video_keys:
+                columns.add(cam_key)
+
+        return sorted(col for col in columns if col in available)
+
+    def _read_episode_parquet_columns(
+        self,
+        dataset_idx: int,
+        ep_idx: int,
+        columns: Optional[List[str]] = None,
+    ) -> Dict[str, np.ndarray]:
+        """Read a subset of parquet columns for one episode."""
+        meta = self.dataset_metas[dataset_idx]
+        parquet_path = meta.root / meta.get_data_file_path(ep_idx)
+        available = self._parquet_available_columns[dataset_idx]
+
+        read_columns = None
+        if columns is not None:
+            read_columns = [col for col in columns if col in available]
+            if not read_columns:
+                return {}
+
+        table = pq.read_table(parquet_path, columns=read_columns)
+        data = {col: table[col].to_numpy() for col in table.column_names}
+        return self._normalize_parquet_arrays(data)
+
+    def _load_episode_parquet(
+        self,
+        dataset_idx: int,
+        ep_idx: int,
+        columns: Optional[List[str]] = None,
+        cache_result: bool = True,
+    ) -> Dict[str, np.ndarray]:
+        """Load parquet data for an episode, caching only the lightweight core columns."""
+        core_columns = self._core_parquet_columns[dataset_idx]
+        requested_columns = core_columns if columns is None else list(dict.fromkeys(columns))
+        use_core_cache = requested_columns == core_columns and cache_result and self.parquet_cache_size > 0
+
+        if use_core_cache:
+            cache_key = (dataset_idx, ep_idx)
+            cached = self._parquet_cache.get(cache_key)
+            if cached is not None:
+                self._parquet_cache.move_to_end(cache_key)
+                return cached
+
+        data = self._read_episode_parquet_columns(dataset_idx, ep_idx, requested_columns)
+
+        if use_core_cache:
+            cache_key = (dataset_idx, ep_idx)
             self._parquet_cache[cache_key] = data
-        
-        return self._parquet_cache[cache_key]
+            self._parquet_cache.move_to_end(cache_key)
+            while len(self._parquet_cache) > self.parquet_cache_size:
+                self._parquet_cache.popitem(last=False)
+
+        return data
     
     def _load_video_frame(
         self,
@@ -923,9 +1026,19 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         if video_path.exists():
             try:
                 if self.video_backend == "torchcodec":
-                    frames = decode_video_frames_torchcodec(
-                        video_path, [timestamp], self.tolerance_s, fps=meta.fps
-                    )
+                    try:
+                        frames = decode_video_frames_torchcodec(
+                            video_path, [timestamp], self.tolerance_s, fps=meta.fps
+                        )
+                    except Exception as e_torchcodec:
+                        # Torchcodec can be sensitive to FFmpeg / shared-lib setup in some
+                        # environments. Fall back to torchvision/pyav for robustness.
+                        logger.warning(
+                            f"torchcodec decode failed for {video_path}: {e_torchcodec}. Falling back to pyav."
+                        )
+                        frames = decode_video_frames_torchvision(
+                            video_path, [timestamp], self.tolerance_s, backend="pyav"
+                        )
                 else:
                     frames = decode_video_frames_torchvision(
                         video_path, [timestamp], self.tolerance_s, backend="pyav"
@@ -950,6 +1063,9 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         meta: LeRobotV20Metadata,
     ) -> Optional[torch.Tensor]:
         """Load image from parquet data. Handles various image storage formats."""
+        # Use OpenCV for fast image decoding (significantly faster than PIL).
+        # Always return CHW float32 in [0, 1].
+        import cv2
         from io import BytesIO
         
         if cam_key not in parquet_data:
@@ -963,21 +1079,32 @@ class WrappedLerobotV20Dataset(tud.Dataset):
         # Case 1: Dictionary with 'bytes' key (HuggingFace datasets Image format)
         if isinstance(img_data, dict):
             if 'bytes' in img_data and img_data['bytes'] is not None:
-                img = Image.open(BytesIO(img_data['bytes'])).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                nparr = np.frombuffer(img_data['bytes'], np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    return None
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif 'path' in img_data and img_data['path'] is not None:
                 img_path = img_data['path']
                 if not os.path.isabs(img_path):
                     img_path = meta.root / img_path
                 if Path(img_path).exists():
-                    img = Image.open(img_path).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+                    if img is None:
+                        return None
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             return None
         
         # Case 2: Raw bytes
         if isinstance(img_data, bytes):
-            img = Image.open(BytesIO(img_data)).convert('RGB')
-            return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            nparr = np.frombuffer(img_data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return None
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         # Case 3: numpy array
         if isinstance(img_data, np.ndarray):
@@ -988,22 +1115,34 @@ class WrappedLerobotV20Dataset(tud.Dataset):
                         img_tensor = img_tensor / 255.0
                     return img_tensor
                 else:
-                    img = Image.fromarray(img_data.astype(np.uint8)).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    # Assume HWC uint8
+                    img = img_data.astype(np.uint8, copy=False)
+                    # If grayscale-like last dim, fall back to cv2 conversion via PIL-like path
+                    if img.shape[-1] == 3:
+                        return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+                    # Unknown format
+                    img = np.ascontiguousarray(img)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif img_data.ndim == 2:
-                img = Image.fromarray(img_data.astype(np.uint8)).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                img = img_data.astype(np.uint8, copy=False)
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif img_data.ndim == 1:
                 try:
-                    img = Image.open(BytesIO(img_data.tobytes())).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    nparr = np.frombuffer(img_data.tobytes(), np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if img is None:
+                        return None
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
                 except Exception:
                     pass
         
         # Case 4: PIL Image
         if isinstance(img_data, Image.Image):
-            img = img_data.convert('RGB')
-            return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            # Keep PIL support for rare cases, but convert via numpy only.
+            img = np.array(img_data.convert('RGB'))
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         # Case 5: String path
         if isinstance(img_data, str):
@@ -1011,8 +1150,11 @@ class WrappedLerobotV20Dataset(tud.Dataset):
             if not os.path.isabs(img_path):
                 img_path = meta.root / img_path
             if Path(img_path).exists():
-                img = Image.open(img_path).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+                if img is None:
+                    return None
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         logger.warning(f"Unknown image data type for {cam_key}: {type(img_data)}")
         return None
@@ -1187,7 +1329,18 @@ class WrappedLerobotV20Dataset(tud.Dataset):
                     parquet_data=parquet_data, frame_index=frame_offset
                 )
             
-            # Fallback to parquet if video failed or camera is in parquet
+            # Fallback to parquet if video failed or camera is stored directly in parquet.
+            if frame is None and cam_key not in parquet_data and cam_key in self._parquet_available_columns[dataset_idx]:
+                parquet_data = {
+                    **parquet_data,
+                    **self._load_episode_parquet(
+                        dataset_idx,
+                        ep_idx,
+                        columns=[cam_key],
+                        cache_result=False,
+                    ),
+                }
+
             if frame is None and cam_key in parquet_data:
                 try:
                     frame = self._load_image_from_parquet(

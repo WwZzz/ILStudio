@@ -547,6 +547,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         episode_filter: Filter episodes by metadata (e.g., {"episode_index": [0,1,2]})
         download_videos: Whether to download video files
         filter_invalid_videos: Whether to filter out episodes with missing/corrupted video files
+        parquet_cache_size: Max number of episodes to keep in memory cache (0 disables caching)
     """
     
     def __init__(
@@ -567,6 +568,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         video_backend: Optional[str] = None,
         no_ensure_download: bool = False,
         local_only: bool = False,
+        parquet_cache_size: int = 16,
         *args,
         **kwargs,
     ):
@@ -580,6 +582,7 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         self.tolerance_s = tolerance_s
         self.download_videos = download_videos
         self.filter_invalid_videos = filter_invalid_videos
+        self.parquet_cache_size = int(parquet_cache_size) if parquet_cache_size is not None else 0
         self.camera_names = camera_names if isinstance(camera_names, list) else [camera_names]
         self.image_size = image_size
         self.ctrl_space = ctrl_space
@@ -680,8 +683,9 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         
         # Build index mapping for fast lookup
         self._build_index_mapping()
-        # Cache parquet data for each episode
-        self._parquet_cache: Dict[Tuple[int, int], Any] = {}
+        # Cache parquet data for recent episodes (LRU, bounded to avoid unbounded RAM growth)
+        from collections import OrderedDict
+        self._parquet_cache: "OrderedDict[Tuple[int, int], Any]" = OrderedDict()
         # Cache for aggregated stats (computed lazily)
         self._aggregated_stats: Dict[str, Dict[str, np.ndarray]] = {}
         
@@ -1155,27 +1159,45 @@ class WrappedLerobotV21Dataset(tud.Dataset):
     def _load_episode_parquet(self, dataset_idx: int, ep_idx: int) -> Dict[str, np.ndarray]:
         """Load parquet data for an episode."""
         cache_key = (dataset_idx, ep_idx)
-        
-        if cache_key not in self._parquet_cache:
+
+        # Cache disabled
+        if self.parquet_cache_size <= 0:
             meta = self.dataset_metas[dataset_idx]
             parquet_path = meta.root / meta.get_data_file_path(ep_idx)
-            
-            # Read parquet file
             table = pq.read_table(parquet_path)
             data = {col: table[col].to_numpy() for col in table.column_names}
-            
-            # Handle nested arrays (sequences)
             for key in data:
                 if data[key].dtype == object:
-                    # Try to stack if all elements have same shape
                     try:
                         data[key] = np.stack(data[key])
-                    except:
+                    except Exception:
                         pass
-            
-            self._parquet_cache[cache_key] = data
-        
-        return self._parquet_cache[cache_key]
+            return data
+
+        cached = self._parquet_cache.get(cache_key)
+        if cached is not None:
+            self._parquet_cache.move_to_end(cache_key)
+            return cached
+
+        meta = self.dataset_metas[dataset_idx]
+        parquet_path = meta.root / meta.get_data_file_path(ep_idx)
+
+        table = pq.read_table(parquet_path)
+        data = {col: table[col].to_numpy() for col in table.column_names}
+
+        for key in data:
+            if data[key].dtype == object:
+                try:
+                    data[key] = np.stack(data[key])
+                except Exception:
+                    pass
+
+        self._parquet_cache[cache_key] = data
+        self._parquet_cache.move_to_end(cache_key)
+        while len(self._parquet_cache) > self.parquet_cache_size:
+            self._parquet_cache.popitem(last=False)
+
+        return data
     
     def _load_video_frame(
         self,
@@ -1263,6 +1285,9 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         Returns:
             Image tensor (C, H, W) in [0, 1] range, or None if failed
         """
+        # Use OpenCV for fast image decoding (significantly faster than PIL).
+        # Always return CHW float32 in [0, 1].
+        import cv2
         from io import BytesIO
         
         img_data = parquet_data[cam_key][frame_index]
@@ -1274,8 +1299,12 @@ class WrappedLerobotV21Dataset(tud.Dataset):
         # Case 1: Dictionary with 'bytes' key (HuggingFace datasets Image format)
         if isinstance(img_data, dict):
             if 'bytes' in img_data and img_data['bytes'] is not None:
-                img = Image.open(BytesIO(img_data['bytes'])).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                nparr = np.frombuffer(img_data['bytes'], np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    return None
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif 'path' in img_data and img_data['path'] is not None:
                 # Image stored as file path
                 img_path = img_data['path']
@@ -1283,14 +1312,21 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                 if not os.path.isabs(img_path):
                     img_path = meta.root / img_path
                 if Path(img_path).exists():
-                    img = Image.open(img_path).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+                    if img is None:
+                        return None
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             return None
         
         # Case 2: Raw bytes
         if isinstance(img_data, bytes):
-            img = Image.open(BytesIO(img_data)).convert('RGB')
-            return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            nparr = np.frombuffer(img_data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return None
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         # Case 3: numpy array (raw pixel values)
         if isinstance(img_data, np.ndarray):
@@ -1303,24 +1339,32 @@ class WrappedLerobotV21Dataset(tud.Dataset):
                         img_tensor = img_tensor / 255.0
                     return img_tensor
                 else:  # Likely (H, W, C)
-                    img = Image.fromarray(img_data.astype(np.uint8)).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    img = img_data.astype(np.uint8, copy=False)
+                    if img.shape[-1] == 3:
+                        return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+                    img = np.ascontiguousarray(img)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif img_data.ndim == 2:
                 # Grayscale image
-                img = Image.fromarray(img_data.astype(np.uint8)).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                img = img_data.astype(np.uint8, copy=False)
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             elif img_data.ndim == 1:
                 # Might be compressed bytes stored as uint8 array
                 try:
-                    img = Image.open(BytesIO(img_data.tobytes())).convert('RGB')
-                    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    nparr = np.frombuffer(img_data.tobytes(), np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if img is None:
+                        return None
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
                 except Exception:
                     pass
         
         # Case 4: PIL Image (unlikely but handle it)
         if isinstance(img_data, Image.Image):
-            img = img_data.convert('RGB')
-            return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            img = np.array(img_data.convert('RGB'))
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         # Case 5: String path
         if isinstance(img_data, str):
@@ -1328,8 +1372,11 @@ class WrappedLerobotV21Dataset(tud.Dataset):
             if not os.path.isabs(img_path):
                 img_path = meta.root / img_path
             if Path(img_path).exists():
-                img = Image.open(img_path).convert('RGB')
-                return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+                if img is None:
+                    return None
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         
         logger.warning(f"Unknown image data type for {cam_key}: {type(img_data)}")
         return None
