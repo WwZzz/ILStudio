@@ -16,7 +16,7 @@ args:
   ctrl_space: ee  # 'joint' or 'ee'
   ctrl_type: abs     # 'abs' or 'delta'
   camera_names:
-    - front
+    - overhead
     - wrist
   image_size: [256, 256]
   headless: true
