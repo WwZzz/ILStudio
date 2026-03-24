@@ -2,32 +2,58 @@
 # 相对末端位姿控制模式，VR解冻后锁定锚点，后续动作相对锚点应用
 # Optimized for VR teleoperation with fast Pinocchio IK (~0.3ms)
 
-type: deploy.robot.alicia_d.AliciaD
-args:
-  name: alicia_d
-  fps: 200.0
-  control_mode: rel_ee  # Relative EE control with anchor mechanism
-  port: /dev/ttyACM0
-  # Speed settings
-  speed_deg_s: 400.0      # Higher speed for responsive control
-  gripper_speed_deg_s: 483.4
-  
-  # IK settings (optimized for real-time VR teleoperation)
-  ik_eps: 0.001          # 1mm tolerance
-  ik_max_iter: 20        # ~0.3ms per solve
-  ik_dt: 1.0             # Large step for fast convergence
-  ik_rotation_weight: 0.3 
-  
-  # Relative EE scaling (tune based on your teleop device)
-  position_scale: 1.0    # meters -> meters
-  rotation_scale: 1.0    # radians -> radians
-  gripper_scale: 1.0    # Inverted: AliciaD gripper increases to close, so negate input
-  
+- type: deploy.robot.alicia_d.AliciaD
+  name: alicia_d_rel_ee
+  args:
+    name: alicia_d
+    fps: 200.0
+    control_mode: rel_ee  # Relative EE control with anchor mechanism
+    port: /dev/ttyACM0
+    # Speed settings
+    speed_deg_s: 400.0      # Higher speed for responsive control
+    gripper_speed_deg_s: 483.4
+    
+    # IK settings (optimized for real-time VR teleoperation)
+    ik_eps: 0.001          # 1mm tolerance
+    ik_max_iter: 20        # ~0.3ms per solve
+    ik_dt: 1.0             # Large step for fast convergence
+    ik_rotation_weight: 0.3 
+    
+    # Relative EE scaling (tune based on your teleop device)
+    position_scale: 1.0    # meters -> meters
+    rotation_scale: 1.0    # radians -> radians
+    gripper_scale: 1.0    # Inverted: AliciaD gripper increases to close, so negate input
+    
 
-  # Smoothing: exponential low-pass filter on joint trajectory
-  smoothing_tau: 0.04  
-  
-  # Safety settings
-  max_joint_delta_deg: 270.0  # Max allowed joint change per action (degrees)
-  
-  debug: false
+    # Smoothing: exponential low-pass filter on joint trajectory
+    smoothing_tau: 0.04  
+    
+    # Safety settings
+    max_joint_delta_deg: 30.0  # Per-action joint limit (degrees). At 200Hz allows ~2000°/s, well above servo max 439°/s.
+    
+    debug: false
+
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: wrist_camera
+  args:
+    name: wrist_camera
+    index_or_path: /dev/video4
+    width: 640
+    height: 480
+    max_size_mb: 10
+    fps: 30
+    fourcc: MJPG
+    bgr_to_rgb: true
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: side_camera
+  args:
+    name: side_camera
+    index_or_path: /dev/video2
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+    bgr_to_rgb: true

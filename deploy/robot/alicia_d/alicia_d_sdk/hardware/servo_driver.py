@@ -77,6 +77,10 @@ class ServoDriver:
         """
         self.debug_mode = debug_mode
         self._lock = threading.Lock()
+        # Throttle repetitive warnings to avoid spamming high-rate loops
+        # key -> {"last_ts": float, "suppressed": int}
+        self._warn_throttle_state: Dict[str, Dict[str, Union[float, int]]] = {}
+        self._warn_throttle_default_interval_s: float = 2.0
 
         # Create serial communication module and data parser
         self.serial_comm = SerialComm(lock=self._lock, port=port, debug_mode=debug_mode)
@@ -91,6 +95,31 @@ class ServoDriver:
         self._thread_running = False
 
         self.disconnect()
+
+    def _warning_throttled(self, key: str, content: str, interval_s: Optional[float] = None) -> None:
+        """
+        Print warning at most once per interval for a given key.
+        If warnings are suppressed, the next emitted warning includes the suppressed count.
+        """
+        if interval_s is None:
+            interval_s = self._warn_throttle_default_interval_s
+
+        now = time.monotonic()
+        state = self._warn_throttle_state.get(key)
+        if state is None:
+            state = {"last_ts": 0.0, "suppressed": 0}
+            self._warn_throttle_state[key] = state
+
+        last_ts = float(state["last_ts"])
+        if now - last_ts >= float(interval_s):
+            suppressed = int(state["suppressed"])
+            if suppressed > 0:
+                content = f"{content} (suppressed {suppressed} repeats)"
+            logger.warning(content)
+            state["last_ts"] = now
+            state["suppressed"] = 0
+        else:
+            state["suppressed"] = int(state["suppressed"]) + 1
 
     def wait_for_valid_state(self, timeout: float = 1.5) -> bool:
         """
@@ -482,10 +511,16 @@ class ServoDriver:
 
         # Validate and clip speed to required range
         if speed_deg_s < MIN_SPEED_DEG_S:
-            logger.warning(f"Speed below range: {speed_deg_s} deg/s (min {MIN_SPEED_DEG_S:.2f}), will be clipped to {MIN_SPEED_DEG_S:.2f}")
+            self._warning_throttled(
+                "speed_below_range",
+                f"Speed below range: {speed_deg_s} deg/s (min {MIN_SPEED_DEG_S:.2f}), will be clipped to {MIN_SPEED_DEG_S:.2f}",
+            )
             speed_deg_s = MIN_SPEED_DEG_S
         elif speed_deg_s > MAX_SPEED_DEG_S:
-            logger.warning(f"Speed above range: {speed_deg_s} deg/s (max {MAX_SPEED_DEG_S:.2f}), will be clipped to {MAX_SPEED_DEG_S:.2f}")
+            self._warning_throttled(
+                "speed_above_range",
+                f"Speed above range: {speed_deg_s} deg/s (max {MAX_SPEED_DEG_S:.2f}), will be clipped to {MAX_SPEED_DEG_S:.2f}",
+            )
             speed_deg_s = MAX_SPEED_DEG_S
 
         # Convert deg/s to ticks/s using the known ratio

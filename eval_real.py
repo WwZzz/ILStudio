@@ -109,6 +109,12 @@ def get_shm_name(cfg: dict) -> str:
     return args.get("name") or args.get("robot_id") or cfg.get("name", "unknown")
 
 
+def _device_spawns_children(cfg: dict) -> bool:
+    """True if this device type spawns child processes (e.g. GUI), so it must not run in a daemon process."""
+    device_type = cfg.get("type", "")
+    return "keyboard" in device_type or "tk_slider" in device_type
+
+
 def start_devices(configs: List[dict], daemon: bool = True) -> List[mp.Process]:
     """Start each device config in a separate process.
     
@@ -116,11 +122,14 @@ def start_devices(configs: List[dict], daemon: bool = True) -> List[mp.Process]:
         configs: List of device configurations
         daemon: If True, processes will be terminated when main process exits
                 (including crashes/segfaults). Default True for safety.
+                Devices that spawn children (e.g. Keyboard, TkSlider GUI) are always
+                started with daemon=False so they can create subprocesses.
     """
     procs = []
     for cfg in configs:
         p = mp.Process(target=start_device, args=(cfg,))
-        p.daemon = daemon
+        # Daemon processes cannot have children; Keyboard/TkSlider start GUI subprocesses
+        p.daemon = False if _device_spawns_children(cfg) else daemon
         p.start()
         procs.append(p)
     return procs

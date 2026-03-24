@@ -1,36 +1,62 @@
 # Alicia-D Robot Configuration - Delta EE Control Mode
 # Optimized for VR teleoperation with fast Pinocchio IK (~0.3ms)
 
-type: deploy.robot.alicia_d.AliciaD
-args:
-  name: alicia_d
-  port: /dev/ttyACM0
-  fps: 200.0
-  control_mode: delta_ee  # IK-based end-effector control
-  
-  # Speed settings
-  speed_deg_s: 500.0      # Higher speed for responsive control
-  gripper_speed_deg_s: 483.4
-  
-  # IK settings (optimized for real-time VR teleoperation)
-  ik_eps: 0.001          # 1mm tolerance
-  ik_max_iter: 20        # ~0.3ms per solve
-  ik_dt: 1.0             # Large step for fast convergence
-  ik_rotation_weight: 0.7  # 旋转权重 (< 1.0 优先保证位置精度，抑制甩腕)
-  
-  # Delta EE scaling (tune based on your teleop device)
-  position_scale: 1.0    # meters -> meters
-  rotation_scale: 1.0    # radians -> radians
-  gripper_scale: -1.0    # Inverted: AliciaD gripper increases to close, so negate input
-  
-  # Rotation handling: Input xyz euler angles from teleop (after calibration_transform)
-  # are converted to rotation matrix and LEFT multiplied to current EE pose.
-  # Coordinate alignment is done in teleop's calibration_transform (see configs/teleop/*.yaml).
-  
-  # Smoothing: exponential low-pass filter on joint trajectory
-  smoothing_tau: 0.04  # 时间常数(秒)。0.02=轻度, 0.04=适中, 0.08=重度, 0=禁用
-  
-  # Safety settings
-  max_joint_delta_deg: 270.0  # Max allowed joint change per action (degrees)
-  
-  debug: false
+- type: deploy.robot.alicia_d.AliciaD
+  name: alicia_d_ee
+  args:
+    name: alicia_d
+    port: /dev/ttyACM0
+    fps: 200.0
+    control_mode: delta_ee  # IK-based end-effector control
+    
+    # Speed settings
+    speed_deg_s: 439.0      # Higher speed for responsive control
+    gripper_speed_deg_s: 483.4
+    
+    # IK settings (optimized for real-time VR teleoperation)
+    ik_eps: 0.001          # 1mm tolerance
+    ik_max_iter: 20        # ~0.3ms per solve
+    ik_dt: 1.0             # Large step for fast convergence
+    ik_rotation_weight: 0.7  # 旋转权重 (< 1.0 优先保证位置精度，抑制甩腕)
+    
+    # Delta EE scaling (tune based on your teleop device)
+    position_scale: 1.0    # meters -> meters
+    rotation_scale: 1.0    # radians -> radians
+    gripper_scale: -1.0    # Inverted: AliciaD gripper increases to close, so negate input
+    
+    # Rotation handling: Input xyz euler angles from teleop (after calibration_transform)
+    # are converted to rotation matrix and LEFT multiplied to current EE pose.
+    # Coordinate alignment is done in teleop's calibration_transform (see configs/teleop/*.yaml).
+    
+    # Smoothing: exponential low-pass filter on joint trajectory
+    smoothing_tau: 0.04  # 时间常数(秒)。0.02=轻度, 0.04=适中, 0.08=重度, 0=禁用
+    
+    # Safety settings
+    max_joint_delta_deg: 30.0  # Per-action joint limit (degrees). At 200Hz allows ~2000°/s, well above servo max 439°/s.
+    
+    debug: false
+
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: wrist_camera
+  args:
+    name: wrist_camera
+    index_or_path: /dev/video4
+    width: 640
+    height: 480
+    max_size_mb: 10
+    fps: 30
+    fourcc: MJPG
+    bgr_to_rgb: true
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: side_camera
+  args:
+    name: side_camera
+    index_or_path: /dev/video2
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+    bgr_to_rgb: true

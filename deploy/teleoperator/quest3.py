@@ -151,6 +151,10 @@ class Quest3Teleop(BaseTeleopDevice):
         self._right_unsqueeze_active = False  # VR side grip state - enables pose transmission
         self._right_last_goal_id = None  # Track if goal changed
         
+        # B button go-home: edge detection (only trigger once per press)
+        self._right_b_was_pressed = False
+        self._left_b_was_pressed = False
+        
         # Anchor positions for rel_ee mode (set when unsqueeze is first activated)
         self._left_anchor_position = None
         self._left_anchor_quaternion = None
@@ -562,7 +566,11 @@ class Quest3Teleop(BaseTeleopDevice):
         
         if self.arm_mode == "dual":
             # Initialize with default gripper values
-            if self.gripper_delta_mode:
+            # Button control mode: default is 0 (no change) — only explicit button press produces delta
+            # Trigger control mode: default is close/open direction (trigger released = default state)
+            if self.gripper_button_control:
+                default_gripper = 0.0
+            elif self.gripper_delta_mode:
                 default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
@@ -636,7 +644,9 @@ class Quest3Teleop(BaseTeleopDevice):
             
         elif self.arm_mode == "left":
             # Initialize with default gripper value
-            if self.gripper_delta_mode:
+            if self.gripper_button_control:
+                default_gripper = 0.0
+            elif self.gripper_delta_mode:
                 default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
@@ -676,7 +686,9 @@ class Quest3Teleop(BaseTeleopDevice):
             
         else:  # right
             # Initialize with default gripper value
-            if self.gripper_delta_mode:
+            if self.gripper_button_control:
+                default_gripper = 0.0
+            elif self.gripper_delta_mode:
                 default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
@@ -713,11 +725,63 @@ class Quest3Teleop(BaseTeleopDevice):
             just_released = right_was_active and not self._right_unsqueeze_active
             should_write = (has_new_data and unsqueeze_active) or just_released
         
+        # ============================================================
+        # Gripper is independent: always write when gripper button is active,
+        # even when unsqueeze is not pressed (arm is frozen).
+        # ============================================================
+        final_unsqueeze_for_gripper = unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active)
+        if not final_unsqueeze_for_gripper:
+            # Check if any gripper button is pressed (A/trigger for open, B/trigger for close)
+            gripper_value_in_action = action[6] if self.arm_mode != "dual" else (action[6] or action[13])
+            if abs(gripper_value_in_action) > 1e-6:
+                should_write = True
+        
+        # ============================================================
+        # B button go-home detection (only when unsqueeze is NOT active)
+        # When unsqueeze is active, B button controls gripper (close).
+        # When unsqueeze is released, B button triggers go-home command.
+        # Uses edge detection: only triggers on rising edge (press, not hold).
+        # ============================================================
+        go_home = False
+        final_unsqueeze = unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active)
+        
+        if not final_unsqueeze:
+            # Check B button on right hand (or Y on left hand)
+            for hand_key in (["right"] if self.arm_mode == "right" else 
+                            ["left"] if self.arm_mode == "left" else 
+                            ["right", "left"]):
+                goal = data.get(hand_key)
+                if goal is not None and goal.metadata:
+                    buttons = goal.metadata.get("buttons", {})
+                    if hand_key == "right":
+                        b_pressed = (buttons.get("b", False) or 
+                                    buttons.get("button_b", False) or
+                                    buttons.get("B", False))
+                        # Rising edge detection
+                        if b_pressed and not self._right_b_was_pressed:
+                            go_home = True
+                        self._right_b_was_pressed = b_pressed
+                    else:
+                        b_pressed = (buttons.get("y", False) or 
+                                    buttons.get("button_y", False) or
+                                    buttons.get("Y", False))
+                        if b_pressed and not self._left_b_was_pressed:
+                            go_home = True
+                        self._left_b_was_pressed = b_pressed
+        else:
+            # Reset edge detection when unsqueeze is active (B is used for gripper)
+            self._right_b_was_pressed = False
+            self._left_b_was_pressed = False
+        
+        if go_home:
+            should_write = True
+        
         # Return action dict with state information for robot side anchor management
         action_dict = {
             "action": action,
-            "unsqueeze_active": unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active),
+            "unsqueeze_active": final_unsqueeze,
             "anchor_just_set": anchor_just_set,
+            "go_home": go_home,
         }
         
         return action_dict, should_write

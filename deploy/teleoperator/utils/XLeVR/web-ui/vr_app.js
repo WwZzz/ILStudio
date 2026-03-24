@@ -40,37 +40,68 @@ AFRAME.registerComponent('controller-updater', {
     // --- Get hostname dynamically ---
     const serverHostname = window.location.hostname;
     const websocketPort = 8442; // Make sure this matches controller_server.py
-    const websocketUrl = `wss://${serverHostname}:${websocketPort}`;
-    console.log(`Attempting WebSocket connection to: ${websocketUrl}`);
-    // !!! IMPORTANT: Replace 'YOUR_LAPTOP_IP' with the actual IP address of your laptop !!!
-    // const websocketUrl = 'ws://YOUR_LAPTOP_IP:8442';
-    try {
-      this.websocket = new WebSocket(websocketUrl);
-      this.websocket.onopen = (event) => {
-        console.log(`WebSocket connected to ${websocketUrl}`);
-        this.reportVRStatus(true);
-      };
-      this.websocket.onerror = (event) => {
-        // More detailed error logging
-        console.error(`WebSocket Error: Event type: ${event.type}`, event);
+    this.websocketUrl = `wss://${serverHostname}:${websocketPort}`;
+
+    // --- Auto-reconnect settings ---
+    this._reconnectBaseDelay = 1000;  // Start at 1 second
+    this._reconnectMaxDelay = 5000;   // Cap at 5 seconds
+    this._reconnectDelay = this._reconnectBaseDelay;
+    this._reconnectTimer = null;
+    this._intentionalClose = false;
+
+    // --- Reusable WebSocket connect function ---
+    this.connectWebSocket = () => {
+      // Clear any pending reconnect timer
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = null;
+      }
+
+      console.log(`Attempting WebSocket connection to: ${this.websocketUrl}`);
+      try {
+        this.websocket = new WebSocket(this.websocketUrl);
+        this.websocket.onopen = (event) => {
+          console.log(`WebSocket connected to ${this.websocketUrl}`);
+          this._reconnectDelay = this._reconnectBaseDelay; // Reset backoff on success
+          this.reportVRStatus(true);
+        };
+        this.websocket.onerror = (event) => {
+          console.error(`WebSocket Error: Event type: ${event.type}`, event);
+          this.reportVRStatus(false);
+        };
+        this.websocket.onclose = (event) => {
+          console.log(`WebSocket disconnected. Clean: ${event.wasClean}, Code: ${event.code}, Reason: '${event.reason}'`);
+          this.websocket = null;
+          this.reportVRStatus(false);
+
+          // Auto-reconnect with exponential backoff (unless intentionally closed)
+          if (!this._intentionalClose) {
+            console.log(`Will reconnect in ${this._reconnectDelay}ms ...`);
+            this._reconnectTimer = setTimeout(() => {
+              this.connectWebSocket();
+            }, this._reconnectDelay);
+            // Exponential backoff, capped at max
+            this._reconnectDelay = Math.min(this._reconnectDelay * 1.5, this._reconnectMaxDelay);
+          }
+        };
+        this.websocket.onmessage = (event) => {
+          console.log(`WebSocket message received: ${event.data}`);
+        };
+      } catch (error) {
+        console.error(`Failed to create WebSocket connection to ${this.websocketUrl}:`, error);
         this.reportVRStatus(false);
-      };
-      this.websocket.onclose = (event) => {
-        console.log(`WebSocket disconnected from ${websocketUrl}. Clean close: ${event.wasClean}, Code: ${event.code}, Reason: '${event.reason}'`);
-        // Attempt to log specific error if available (might be limited by browser security)
-        if (!event.wasClean) {
-          console.error('WebSocket closed unexpectedly.');
+        // Also retry on construction failure
+        if (!this._intentionalClose) {
+          this._reconnectTimer = setTimeout(() => {
+            this.connectWebSocket();
+          }, this._reconnectDelay);
+          this._reconnectDelay = Math.min(this._reconnectDelay * 1.5, this._reconnectMaxDelay);
         }
-        this.websocket = null; // Clear the reference
-        this.reportVRStatus(false);
-      };
-      this.websocket.onmessage = (event) => {
-        console.log(`WebSocket message received: ${event.data}`); // Log any messages from server
-      };
-    } catch (error) {
-        console.error(`Failed to create WebSocket connection to ${websocketUrl}:`, error);
-        this.reportVRStatus(false);
-    }
+      }
+    };
+
+    // Initial connection
+    this.connectWebSocket();
     // --- End WebSocket Setup ---
 
     // --- VR Status Reporting Function ---
