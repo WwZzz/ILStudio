@@ -1,4 +1,4 @@
-from .basic import BasicActionManager
+from .base import BasicActionManager
 
 
 class TruncatedManager(BasicActionManager):
@@ -16,16 +16,11 @@ class TruncatedManager(BasicActionManager):
     refusing new chunks until the current chunk is sufficiently executed.
     """
     
-    def __init__(self, config):
-        super().__init__(config)
-        self.start_ratio = getattr(config, 'start_ratio', 0.0)
-        self.end_ratio = getattr(config, 'end_ratio', 0.0)
-        self.older_coef = getattr(config, 'older_coef', 1.0)
-        
-        print(f"TruncatedManager initialized:")
-        print(f"  - start_ratio: {self.start_ratio} (drop first {self.start_ratio*100:.1f}%)")
-        print(f"  - end_ratio: {self.end_ratio} (drop last {self.end_ratio*100:.1f}%)")
-        print(f"  - older_coef: {self.older_coef} (accept new chunk after {self.older_coef*100:.1f}% executed)")
+    def __init__(self, start_ratio: float = 0.0, end_ratio: float = 0.0, older_coef: float = 1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.start_ratio = start_ratio
+        self.end_ratio = end_ratio
+        self.older_coef = older_coef
 
     def put(self, chunk, timestamp: float = None):
         # Truncate the chunk first
@@ -40,33 +35,23 @@ class TruncatedManager(BasicActionManager):
             
             # Ensure we have at least one action
             if end_idx <= start_idx:
-                # If truncation would remove everything, keep at least the middle action
                 mid_idx = total_len // 2
                 chunk = [chunk[mid_idx]]
-                print(f"[TruncatedManager] Warning: Truncation too aggressive, keeping only middle action")
             else:
                 chunk = chunk[start_idx:end_idx]
-                if start_idx > 0 or end_idx < total_len:
-                    chunk_type = "first chunk" if is_first_chunk else "chunk"
-                    print(f"[TruncatedManager] Truncated {chunk_type}: {total_len} -> {len(chunk)} actions (kept [{start_idx}:{end_idx}])")
         
         # Now apply OlderFirst logic
         if self._chunk_buffer is None:
-            # First chunk, accept directly
             with self._lock:
                 self._chunk_buffer = chunk
                 self.current_step = 0
         else:
-            # Check if current chunk is sufficiently executed
             with self._lock:
-                if self.current_step < int(len(self._chunk_buffer) * self.older_coef):
-                    # Current chunk not done enough, refuse new chunk
-                    print(f"[TruncatedManager] Refusing new chunk: {self.current_step}/{len(self._chunk_buffer)} executed ({self.current_step/len(self._chunk_buffer)*100:.1f}% < {self.older_coef*100:.1f}%)")
+                threshold = int(len(self._chunk_buffer) * self.older_coef)
+                if self.current_step < threshold:
+                    self._stats["chunks_discarded"] += 1
                     return
             
-            # Accept new chunk
             with self._lock:
                 self._chunk_buffer = chunk
                 self.current_step = 0
-                print(f"[TruncatedManager] Accepted new chunk: {len(chunk)} actions")
-

@@ -12,7 +12,7 @@ Usage:
 
     # Client side
     client = SHMPolicyClient(obs_shm_name="policy_obs", action_shm_name="policy_action")
-    action = client.select_action(mobs, t)
+    mact_list = client.inference(mobs)  # Returns full action chunk list
 """
 
 from .server import SHMPolicyServer

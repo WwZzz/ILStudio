@@ -14,7 +14,7 @@ name: robotwin_handover_block_3cam_qpos
 args:
   task: handover_block  # Task class name (matches Python file)
   task_config: demo_clean     # 'demo_clean' or 'demo_randomized'
-  max_timesteps: 400         # Maximum steps per episode (RoboTwin default for this task)
+  max_timesteps: 800         # Maximum steps per episode (RoboTwin default for this task)
   ctrl_space: qpos            # 'qpos' or 'ee'
   ctrl_type: abs              # Only 'abs' supported by RoboTwin
   seed: 0

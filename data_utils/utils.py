@@ -574,28 +574,29 @@ def _create_normalizer_from_stats(normalizer_class, merged_stats: dict, dataset_
     import pickle
     import os
     
-    # Get cache directory
     cache_dir = os.path.join(os.environ.get('ILSTD_CACHE', os.path.expanduser('~/.cache/ilstd')), 'normalize')
     os.makedirs(cache_dir, exist_ok=True)
     
-    # Extract ctrl_space and ctrl_type from stats or use defaults
     ctrl_space = merged_stats.get('ctrl_space', 'ee')
     ctrl_type = merged_stats.get('ctrl_type', 'delta')
     
-    # Save merged stats to cache so normalizer can load them
     stats_filename = f"{dataset_id}_stats_{ctrl_space}_{ctrl_type}.pkl"
     stats_path = os.path.join(cache_dir, stats_filename)
     
-    # Save merged stats
-    with open(stats_path, 'wb') as f:
-        pickle.dump(merged_stats, f)
+    rank = dist.get_rank() if is_distributed() else 0
+
+    if rank == 0:
+        tmp_path = stats_path + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            pickle.dump(merged_stats, f)
+        os.replace(tmp_path, stats_path)
+        logger.info(f"Saved merged stats to: {stats_path}")
+
+    if is_distributed():
+        dist.barrier()
     
-    logger.info(f"Saved merged stats to: {stats_path}")
-    
-    # Create normalizer by loading from the saved stats
-    # Pass a dummy string as dataset to trigger load mode
     normalizer = normalizer_class(
-        dataset=cache_dir,  # Trigger load mode
+        dataset=cache_dir,
         dataset_name=dataset_id,
         ctrl_type=ctrl_type,
         ctrl_space=ctrl_space,
@@ -1017,16 +1018,11 @@ def load_data(args, task_config, save_norm=True):
     
     if 'datasets' in task_config:
         datasets_config = task_config['datasets']
-        # Create datasets (with merged dataset support)
-        rank = dist.get_rank() if is_distributed() else 0
+        # Create datasets on every rank. Dataset construction may perform slow local
+        # metadata/index preparation, so serializing it behind a global barrier can
+        # cause other ranks to hit the process-group timeout before rank 0 finishes.
         datasets = []
-        
-        if rank == 0:
-            datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
-        if is_distributed():
-            dist.barrier()
-        if rank != 0:
-            datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
+        datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
         
         # Normalize datasets (with merged stats support)
         datasets = _normalize_datasets(datasets, args, task_config, save_norm, merge_info)
@@ -1037,18 +1033,10 @@ def load_data(args, task_config, save_norm=True):
         datasets = []
     if 'vqa' in task_config:
         vqa_configs = task_config['vqa']
-        rank = dist.get_rank() if is_distributed() else 0
         vqa_datasets = []
-        if rank == 0:
-            for dataset_config in vqa_configs:
-                dataset = _create_vqa_dataset_from_config(dataset_config, args)
-                vqa_datasets.append(dataset)
-        if is_distributed():
-            dist.barrier()
-        if rank != 0:
-            for dataset_config in vqa_configs:
-                dataset = _create_vqa_dataset_from_config(dataset_config, args)
-                vqa_datasets.append(dataset)
+        for dataset_config in vqa_configs:
+            dataset = _create_vqa_dataset_from_config(dataset_config, args)
+            vqa_datasets.append(dataset)
         # Apply transforms to vqa datasets
         vqa_datasets = _apply_transforms_to_datasets(vqa_datasets, args, task_config)
         # Wrap vqa datasets

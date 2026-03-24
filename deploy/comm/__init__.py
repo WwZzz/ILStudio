@@ -131,10 +131,9 @@ def parse_server_address(model_path: str) -> Tuple[str, int]:
 
 def create_client(
     address: str,
-    chunk_size: Optional[int] = None,
     ctrl_space: str = "ee",
     ctrl_type: str = "delta",
-    timeout_s: float = 30.0,
+    timeout_s: float = 3600.0,
 ) -> BaseClient:
     """
     Create a policy client based on address format.
@@ -146,7 +145,6 @@ def create_client(
     if is_http_address(address):
         return FastAPIPolicyClient(
             base_url=address,
-            chunk_size=chunk_size,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
             timeout_s=timeout_s,
@@ -155,7 +153,6 @@ def create_client(
         shm_name = parse_shm_address(address)
         return SHMPolicyClient(
             shm_name=shm_name,
-            chunk_size=chunk_size,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
             timeout_s=timeout_s,
@@ -165,7 +162,6 @@ def create_client(
         return PolicyClient(
             host=host,
             port=port,
-            chunk_size=chunk_size,
             ctrl_space=ctrl_space,
             ctrl_type=ctrl_type,
         )
