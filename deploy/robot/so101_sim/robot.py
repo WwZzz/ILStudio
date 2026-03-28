@@ -1,22 +1,16 @@
 """
-SO101 Simulation Robot with Multiple Control Modes
-
-Supports two control modes:
-1. delta_ee: 7D delta actions (6-DOF pose delta + gripper delta), uses IK
-2. qpos: 6D absolute joint positions, direct joint control
-
-Note: Visualization is handled separately by the Visualizer class.
-Use collect_data.py with --visualize flag to enable visualization.
+SO101 Simulation Robot with Multiple Control Modes.
 """
 
-import numpy as np
-import mujoco
 import time
 import threading
-from typing import Optional, Dict, Any
 from pathlib import Path
+from typing import Dict, Optional
 
-from deploy.robot.base import BaseRobot
+import mujoco
+import numpy as np
+
+from deploy.simulation.mujoco.base import MujocoDeviceBase
 from .kinematics import create_so101, lerobot_FK, lerobot_IK
 
 
@@ -37,8 +31,43 @@ DEFAULT_GLIMIT_MAX = [0.340, 0.4, 0.23, 2.0, 1.57, 1.5]
 # Default initial positions
 DEFAULT_INIT_QPOS = [0.0, -3.14, 3.14, 0.0, -1.57, -0.157]
 
+# `table_block.xml`: table_scene at (0.48,0,0.575), top half-thickness 0.025 → surface z=0.60; top half-size x=0.34.
+_TABLE_BLOCK_TOP_Z = 0.575 + 0.025
+_TABLE_BLOCK_BASE_Z_CLEARANCE = 0.004
+_TABLE_BLOCK_CENTER_X = 0.48
+_TABLE_BLOCK_HALF_X = 0.34
+# Bessica root sits near world origin; place SO101 on the tabletop edge closest to that side (-world X from table center).
+_TABLE_BLOCK_SO101_EDGE_INSET = 0.06
+# Match `bessica_d.xml` bessica_root quat (wxyz): body +X → world +Y, same table-facing convention.
+_TABLE_BLOCK_SO101_BASE_QUAT_WXYZ = np.array([0.707107, 0.0, 0.0, 0.707107], dtype=np.float64)
 
-class So101SimRobot(BaseRobot):
+
+def _draw_viewer_coordinate_frame(viewer, pos, axis_length=0.05, axis_radius=0.002):
+    axes_and_colors = [
+        (np.array([0, 1, 0]), [1, 0, 0, 1]),
+        (np.array([-1, 0, 0]), [0, 1, 0, 1]),
+        (np.array([0, 0, 1]), [0, 0, 1, 1]),
+    ]
+    for axis, color in axes_and_colors:
+        mujoco.mjv_initGeom(
+            viewer.user_scn.geoms[viewer.user_scn.ngeom],
+            mujoco.mjtGeom.mjGEOM_CAPSULE,
+            np.zeros(3),
+            np.zeros(3),
+            np.eye(3).flatten(),
+            np.array(color, dtype=np.float32),
+        )
+        mujoco.mjv_connector(
+            viewer.user_scn.geoms[viewer.user_scn.ngeom],
+            mujoco.mjtGeom.mjGEOM_CAPSULE,
+            axis_radius,
+            pos,
+            pos + axis * axis_length,
+        )
+        viewer.user_scn.ngeom += 1
+
+
+class So101SimRobot(MujocoDeviceBase):
     """
     SO101 Simulation Robot with Multiple Control Modes
     
@@ -67,6 +96,11 @@ class So101SimRobot(BaseRobot):
                  fps: float = 50.0,
                  control_shm_name: Optional[str] = None,
                  xml_path: Optional[str] = None,
+                 scene_name: Optional[str] = None,
+                 scene_xml_path: Optional[str] = None,
+                 camera_names: Optional[list] = None,
+                 camera_width: int = 640,
+                 camera_height: int = 480,
                  control_mode: str = "delta_ee",
                  qpos_input_unit: str = "normalized",
                  position_scale: float = 0.001,
@@ -100,8 +134,6 @@ class So101SimRobot(BaseRobot):
             joint_signs: Joint direction signs (6D list, 1=normal, -1=reversed)
             init_qpos: Initial joint positions in radians (6D list)
         """
-        super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
-        
         # Joint limits and signs (configurable)
         self.qlimit_min = np.array(qlimit_min if qlimit_min is not None else DEFAULT_QLIMIT_MIN)
         self.qlimit_max = np.array(qlimit_max if qlimit_max is not None else DEFAULT_QLIMIT_MAX)
@@ -120,53 +152,95 @@ class So101SimRobot(BaseRobot):
         
         print(f"[So101SimRobot] Control mode: {control_mode}" + 
               (f", qpos_input_unit: {qpos_input_unit}" if control_mode == "qpos" else ""))
-        
-        # Locate XML model
-        if xml_path is None:
-            # Default to bundled model
-            module_dir = Path(__file__).parent
-            xml_path = str(module_dir / "mujoco_model" / "scene.xml")
-        self.xml_path = xml_path
-        
+
         # Action scaling
         self.position_scale = position_scale
         self.rotation_scale = rotation_scale
         self.gripper_scale = gripper_scale
-        
-        
+
         # Kinematics
         self.robot_kin = create_so101()
-        
+
         # Current state
         self.current_qpos = self.init_qpos.copy()
-        
-        # Thread lock for state access
-        self._lock = threading.Lock()
-        
-        # Initialize MuJoCo model and data
-        print(f"[So101SimRobot] Loading MuJoCo model from {self.xml_path}")
-        self.mjmodel = mujoco.MjModel.from_xml_path(self.xml_path)
-        self.mjdata = mujoco.MjData(self.mjmodel)
-        
-        # Get joint indices
-        self.qpos_indices = np.array([
-            self.mjmodel.jnt_qposadr[self.mjmodel.joint(name).id] 
-            for name in JOINT_NAMES
-        ])
-        
-        # Set initial position
-        self.mjdata.qpos[self.qpos_indices] = self.current_qpos
-        mujoco.mj_forward(self.mjmodel, self.mjdata)
-        
-        # Compute initial gpos from FK
+
         self.current_gpos = lerobot_FK(self.current_qpos[1:5], robot=self.robot_kin)
         self.target_gpos = self.current_gpos.copy()
-        
+
+        super().__init__(
+            name=name,
+            max_size_mb=max_size_mb,
+            fps=fps,
+            control_shm_name=control_shm_name,
+            xml_path=xml_path,
+            scene_name=scene_name,
+            scene_xml_path=scene_xml_path,
+            camera_names=camera_names,
+            camera_width=camera_width,
+            camera_height=camera_height,
+            **kwargs,
+        )
         print("[So101SimRobot] Initialized successfully")
-    
-    def connect(self) -> bool:
-        """Connect to the robot (already done in __init__)"""
-        return True
+
+    def _default_robot_xml_path(self) -> str:
+        module_dir = Path(__file__).parent
+        return str(module_dir / "mujoco_model" / "so_101.xml")
+
+    def _configure_loaded_model(self) -> None:
+        if self.scene_name != "table_block":
+            return
+        try:
+            base_body_id = self.mjmodel.body("Base").id
+        except KeyError:
+            return
+        # On tabletop near Bessica (origin): left edge + inset, same base yaw as bessica_root.
+        bx = _TABLE_BLOCK_CENTER_X - _TABLE_BLOCK_HALF_X + _TABLE_BLOCK_SO101_EDGE_INSET
+        bz = _TABLE_BLOCK_TOP_Z + _TABLE_BLOCK_BASE_Z_CLEARANCE
+        self.mjmodel.body_pos[base_body_id] = np.array([bx, 0.0, bz], dtype=np.float64)
+        self.mjmodel.body_quat[base_body_id] = _TABLE_BLOCK_SO101_BASE_QUAT_WXYZ.copy()
+
+    def _build_joint_indices(self) -> None:
+        self.qpos_indices = np.array([
+            self.mjmodel.jnt_qposadr[self.mjmodel.joint(name).id]
+            for name in JOINT_NAMES
+        ])
+        # Position actuators: set ctrl to targets and mj_step so PD generates torque at contacts.
+        # Never set qpos == ctrl immediately before mj_step — zero error => zero torque => deep penetration.
+        self.actuator_indices = np.array(
+            [self.mjmodel.actuator(name).id for name in JOINT_NAMES],
+            dtype=np.int32,
+        )
+        # Match ~50Hz control when model timestep is 0.001 (see so_101.xml <option>).
+        self._physics_substeps_per_command = 20
+        self.qvel_indices = np.array(
+            [self.mjmodel.jnt_dofadr[self.mjmodel.joint(name).id] for name in JOINT_NAMES],
+            dtype=np.int32,
+        )
+
+    def _apply_qpos_preview_for_static_guard_locked(self, q6: np.ndarray) -> None:
+        self.mjdata.qpos[self.qpos_indices] = q6
+        self.mjdata.ctrl[self.actuator_indices] = q6
+        self.mjdata.qvel[:] = 0.0
+        mujoco.mj_forward(self.mjmodel, self.mjdata)
+
+    def _apply_initial_state(self) -> None:
+        self.mjdata.qpos[self.qpos_indices] = self.current_qpos
+        self.mjdata.ctrl[self.actuator_indices] = self.current_qpos
+        mujoco.mj_forward(self.mjmodel, self.mjdata)
+        self.current_gpos = lerobot_FK(self.current_qpos[1:5], robot=self.robot_kin)
+        self.target_gpos = self.current_gpos.copy()
+        self._safe_commanded_qpos = self.current_qpos.copy()
+
+    def _setup_viewer_overlay_state(self) -> None:
+        try:
+            self._viewer_tcp_site_id = self.mjmodel.site("tcp").id
+        except KeyError:
+            self._viewer_tcp_site_id = None
+
+    def _draw_viewer_overlay_locked(self, viewer) -> None:
+        if getattr(self, "_viewer_tcp_site_id", None) is None:
+            return
+        _draw_viewer_coordinate_frame(viewer, self.mjdata.site_xpos[self._viewer_tcp_site_id].copy(), 0.07, 0.003)
     
     def get_action_dim(self) -> int:
         """Return action dimension based on control mode"""
@@ -175,18 +249,15 @@ class So101SimRobot(BaseRobot):
         else:  # qpos
             return 6  # 6 joint positions
     
-    def get_observation(self) -> Dict[str, Any]:
-        """Get current observation"""
-        with self._lock:
-            qpos = self.current_qpos.copy()
-            gpos = self.current_gpos.copy()
-        
+    def _get_robot_observation_core(self) -> Dict[str, np.ndarray]:
+        qpos = self.current_qpos.copy()
+        gpos = self.current_gpos.copy()
         return {
             'qpos': qpos,
             'gpos': gpos,  # End-effector pose [x, y, z, roll, pitch, yaw]
         }
-    
-    def process_action(self, action_dict: dict) -> dict:
+
+    def _process_robot_action(self, action_dict: dict) -> dict:
         """
         Process action based on control mode
         
@@ -401,43 +472,28 @@ class So101SimRobot(BaseRobot):
         
         return action_dict
     
-    def publish_action(self, action: np.ndarray):
+    def _publish_robot_action(self, action: np.ndarray):
         """Execute joint position action in simulation"""
         with self._lock:
-            # Update simulation
-            self.mjdata.qpos[self.qpos_indices] = action
-            mujoco.mj_step(self.mjmodel, self.mjdata)
-            
-            # Update current state
-            self.current_qpos = action.copy()
-            self.current_gpos = lerobot_FK(action[1:5], robot=self.robot_kin)
-    
-    def is_running(self) -> bool:
-        """Check if simulation is running"""
-        return self.mjmodel is not None
-    
-    def shutdown(self):
-        """Shutdown simulation"""
-        self.mjmodel = None
-        self.mjdata = None
-    
-    def close(self):
-        """Close robot"""
-        super().close()
-        self.shutdown()
+            action = np.asarray(action, dtype=np.float64).reshape(6)
+            action = self._interpolate_pose_avoiding_static_contact_locked(
+                self._safe_commanded_qpos,
+                action,
+                self._apply_qpos_preview_for_static_guard_locked,
+            )
+            self.mjdata.ctrl[self.actuator_indices] = action
+            for _ in range(self._physics_substeps_per_command):
+                mujoco.mj_step(self.mjmodel, self.mjdata)
+            q = self.mjdata.qpos[self.qpos_indices].copy()
+            self.current_qpos = q
+            self._safe_commanded_qpos = q.copy()
+            self.current_gpos = lerobot_FK(q[1:5], robot=self.robot_kin)
     
     def meta2act(self, mact):
         """Convert MetaAction to robot action"""
         default_dim = 7 if self.control_mode == "delta_ee" else 6
         return mact.get('action', np.zeros(default_dim))
     
-    def obs2meta(self, obs):
-        """Convert observation to MetaObs"""
-        from benchmark.base import MetaObs
-        qpos = obs.get('qpos', np.zeros(6))
-        return MetaObs(state=qpos, state_joint=qpos, image=np.zeros((1, 3, 480, 640), dtype=np.uint8))
-
-
 # ==============================================================================
 # Test
 # ==============================================================================

@@ -25,6 +25,7 @@ class SliderTeleop(BaseTeleopDevice):
                  action_dim: int = 7,
                  slider_ranges: Optional[List[Tuple[float, float]]] = None,
                  slider_labels: Optional[List[str]] = None,
+                 initial_values: Optional[List[float]] = None,
                  **kwargs):
         """
         Initialize the Slider teleoperation device
@@ -50,12 +51,13 @@ class SliderTeleop(BaseTeleopDevice):
         if slider_labels is None:
             slider_labels = [f"Action {i}" for i in range(action_dim)]
         self.slider_labels = slider_labels
+        self.initial_values = initial_values
 
         # Shared array for slider values (will be created in start())
         self._slider_values = None
         self._gui_proc = None
 
-    def _slider_gui_process(self, shared_array, slider_ranges, slider_labels):
+    def _slider_gui_process(self, shared_array, slider_ranges, slider_labels, initial_values):
         root = tk.Tk()
         root.title("Teleop Sliders")
         scales = []
@@ -69,15 +71,21 @@ class SliderTeleop(BaseTeleopDevice):
             label.pack(side=tk.LEFT)
             
             scale = tk.Scale(frame, from_=low, to=high, resolution=0.01, orient=tk.HORIZONTAL, length=300)
-            scale.set((low + high) / 2)
+            if initial_values is not None and i < len(initial_values):
+                scale.set(float(initial_values[i]))
+            else:
+                scale.set((low + high) / 2)
             scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
             scales.append(scale)
         
         # Add reset button
         def reset_all():
             for i, scale in enumerate(scales):
-                low, high = slider_ranges[i]
-                scale.set((low + high) / 2)
+                if initial_values is not None and i < len(initial_values):
+                    scale.set(float(initial_values[i]))
+                else:
+                    low, high = slider_ranges[i]
+                    scale.set((low + high) / 2)
         
         reset_btn = tk.Button(root, text="Reset All to Center", command=reset_all)
         reset_btn.pack(pady=10)
@@ -85,7 +93,7 @@ class SliderTeleop(BaseTeleopDevice):
         def update_shared():
             for i, scale in enumerate(scales):
                 shared_array[i] = scale.get()
-            root.after(50, update_shared)  # update every 50 ms
+            root.after(10, update_shared)  # update every 10 ms for lower control latency
 
         # Track if already closing to avoid double destroy
         closing = [False]
@@ -112,7 +120,7 @@ class SliderTeleop(BaseTeleopDevice):
         signal.signal(signal.SIGTERM, sigterm_handler)
         signal.signal(signal.SIGINT, sigterm_handler)
 
-        root.after(50, update_shared)
+        root.after(10, update_shared)
         try:
             root.mainloop()
         except Exception:
@@ -133,7 +141,7 @@ class SliderTeleop(BaseTeleopDevice):
         # Start the GUI process
         self._gui_proc = mp.Process(
             target=self._slider_gui_process,
-            args=(self._slider_values, self.slider_ranges, self.slider_labels)
+            args=(self._slider_values, self.slider_ranges, self.slider_labels, self.initial_values)
         )
         self._gui_proc.daemon = True
         self._gui_proc.start()

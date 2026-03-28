@@ -1,0 +1,4 @@
+<mujoco model="bessica_visualizer">
+  <include file="bessica_d.xml"/>
+  <include file="../../../simulation/mujoco/scenes/table_block.xml"/>
+</mujoco>

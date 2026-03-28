@@ -101,6 +101,7 @@ def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str], List
                         )
             except Exception:
                 pass
+
     if teleop_configs:
         logger.info("Teleop devices: {}", [get_shm_name(c) for c in teleop_configs])
     logger.info("Robot devices: {}", [get_shm_name(c) for c in robot_configs])

@@ -13,6 +13,11 @@ args:
   name: so101_sim
   max_size_mb: 64
   fps: 50.0
+  scene_name: empty
+  enable_viewer: true
+  camera_names: [frontview]
+  camera_width: 640
+  camera_height: 480
   # control_shm_name will be auto-filled from teleop if not specified
   control_mode: delta_ee  # 7D delta EE control (default)
   # No scaling on robot side - controllers output actual deltas in meters/radians

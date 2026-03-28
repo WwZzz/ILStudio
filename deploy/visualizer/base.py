@@ -223,6 +223,20 @@ def get_visualizer_type_string(device_type: str) -> Optional[str]:
     return None
 
 
+def is_mujoco_device_type(device_type: str) -> bool:
+    try:
+        parts = device_type.rsplit('.', 1)
+        module_path = parts[0]
+        class_name = parts[1]
+        module = importlib.import_module(module_path)
+        device_class = getattr(module, class_name)
+        from deploy.simulation.mujoco import MujocoDeviceBase
+
+        return issubclass(device_class, MujocoDeviceBase)
+    except Exception:
+        return False
+
+
 def start_all_visualizers(
     device_configs: list,
     get_shm_name_func,
@@ -256,6 +270,12 @@ def start_all_visualizers(
     for cfg in device_configs:
         device_type = cfg.get("type", "")
         device_shm_name = get_shm_name_func(cfg)
+        device_args = cfg.get("args", {})
+
+        # Visualizer devices are standalone processes already started by start_devices().
+        # Do not recursively spawn a visualizer for a visualizer.
+        if device_type.startswith("deploy.visualizer."):
+            continue
         
         # Check if this is a camera device
         try:
@@ -264,6 +284,43 @@ def start_all_visualizers(
                 continue
         except Exception:
             pass
+
+        if is_mujoco_device_type(device_type):
+            if not device_args.get(
+                "enable_viewer", device_args.get("enable_viewer_proxy", True)
+            ):
+                continue
+            from deploy.simulation.mujoco import (
+                get_mujoco_viewer_command_shm_name,
+                get_mujoco_viewer_state_shm_name,
+            )
+
+            viz_type = "deploy.visualizer.mujoco_proxy_visualizer.MujocoProxyVisualizer"
+            default_camera = device_args.get("viewer_default_camera")
+            viz_kwargs = {
+                "robot_shm_name": device_shm_name,
+                "viewer_command_shm_name": device_args.get("viewer_command_shm_name")
+                or get_mujoco_viewer_command_shm_name(device_shm_name),
+                "viewer_state_shm_name": device_args.get("viewer_state_shm_name")
+                or get_mujoco_viewer_state_shm_name(device_shm_name),
+                "default_camera_name": default_camera,
+                "auto_open": True,
+                "show_tcp_frame": device_args.get("viewer_show_tcp_frame", True),
+                "fps": float(device_args.get("viewer_proxy_fps", 15.0)),
+                "window_name": f"{device_shm_name} Viewer Proxy",
+                "show_window": bool(device_args.get("viewer_proxy_show_window", False)),
+            }
+            logger.info("Starting MuJoCo proxy visualizer for {}: {}", device_shm_name, viz_type)
+            viz_proc = mp.Process(
+                target=start_visualizer,
+                args=(viz_type, device_shm_name),
+                kwargs=viz_kwargs,
+                daemon=True
+            )
+            viz_proc.start()
+            viz_procs.append(viz_proc)
+            logger.info("MuJoCo proxy visualizer started for SHM: {}", device_shm_name)
+            continue
         
         # Check if device module has its own Visualizer
         viz_class = get_visualizer_class(device_type)
@@ -272,15 +329,21 @@ def start_all_visualizers(
             viz_type = parts[0] + ".Visualizer"
             
             logger.info("Starting visualizer for {}: {}", device_shm_name, viz_type)
+            viz_kwargs = {
+                key: device_args[key]
+                for key in ("xml_path", "scene_name", "scene_xml_path")
+                if device_args.get(key) is not None
+            }
             viz_proc = mp.Process(
                 target=start_visualizer,
                 args=(viz_type, device_shm_name),
+                kwargs=viz_kwargs,
                 daemon=True
             )
             viz_proc.start()
             viz_procs.append(viz_proc)
             logger.info("Visualizer subprocess started for SHM: {}", device_shm_name)
-    
+
     # Start a single camera visualizer for all cameras
     if camera_shm_names:
         from deploy.visualizer.camera_visualizer import start_camera_visualizer

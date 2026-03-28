@@ -1,0 +1,18 @@
+[project]
+name = "bessica-sim"
+description = "Bessica-D dual-arm MuJoCo simulation for ILStudio (Pinocchio IK)"
+version = "0.0.1"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "mujoco",
+    "pin",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["bessica_sim"]
