@@ -201,7 +201,10 @@ class BessicaBimanualKinematics:
         Gripper channels are ignored at kinematics level.
         """
         max_iter = 18 if fast else 35
-        eps = 3e-3 if fast else 1e-3
+        # Keyboard delta_ee sends ~2mm translation steps. The previous fast epsilon
+        # (3e-3) treated those as already converged, so translational commands were
+        # effectively ignored even though rotations still moved.
+        eps = 3e-4 if fast else 1e-4
         dt = 0.45 if fast else 0.35
 
         q = q_pin.copy()
@@ -218,6 +221,24 @@ class BessicaBimanualKinematics:
             ok_all = ok_all and ok
 
         return ok_all, q
+
+    def solve_targets_bimanual(
+        self,
+        q_pin: np.ndarray,
+        T_right: np.ndarray,
+        T_left: np.ndarray,
+        fast: bool = True,
+    ) -> Tuple[bool, np.ndarray]:
+        """
+        IK to absolute SE(3) targets for right then left arm (sequential, same as delta stack).
+        """
+        max_iter = 18 if fast else 35
+        eps = 3e-4 if fast else 1e-4
+        dt = 0.45 if fast else 0.35
+        q = q_pin.copy()
+        ok_r, q = self.solve_ik_arm(q, "right", T_right, max_iter=max_iter, eps=eps, dt=dt)
+        ok_l, q = self.solve_ik_arm(q, "left", T_left, max_iter=max_iter, eps=eps, dt=dt)
+        return ok_r and ok_l, q
 
 
 def default_urdf_path() -> str:

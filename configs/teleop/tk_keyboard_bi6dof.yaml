@@ -43,9 +43,9 @@ args:
   max_size_mb: 1
   fps: 50.0
   # Output actual units: meters for position, radians for rotation
-  trans_scale: 0.002     # Key press → 2mm per frame
-  rot_scale: 0.01        # Key press → 0.01 rad (~0.57°) per frame
-  gripper_scale: 0.01    # Gripper delta per frame
+  trans_scale: 0.002   # Key press → 2mm per frame
+  rot_scale: 0.01      # Key press → 0.01 rad (~0.57°) per frame
+  gripper_scale: 0.01  # Gripper delta per frame
   debug: false
   
   # Custom key mappings for left arm (7D: X, Y, Z, Roll, Pitch, Yaw, Gripper)

@@ -195,6 +195,7 @@ class MujocoDeviceBase(BaseRobot):
         viewer_command_shm_name: Optional[str] = None,
         viewer_state_shm_name: Optional[str] = None,
         viewer_default_camera: Optional[str] = None,
+        viewer_auto_open: bool = False,
         viewer_show_tcp_frame: bool = True,
         viewer_show_left_ui: bool = True,
         viewer_show_right_ui: bool = True,
@@ -205,7 +206,6 @@ class MujocoDeviceBase(BaseRobot):
         **kwargs,
     ):
         _install_mujoco_warning_handler()
-        kwargs.pop("viewer_auto_open", None)
         if "enable_viewer_proxy" in kwargs:
             enable_viewer = bool(kwargs.pop("enable_viewer_proxy"))
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
@@ -228,6 +228,7 @@ class MujocoDeviceBase(BaseRobot):
         self.enable_viewer = bool(enable_viewer)
         self.viewer_command_shm_name = viewer_command_shm_name or get_mujoco_viewer_command_shm_name(name)
         self.viewer_state_shm_name = viewer_state_shm_name or get_mujoco_viewer_state_shm_name(name)
+        self.viewer_auto_open = bool(viewer_auto_open)
         self.viewer_default_camera = viewer_default_camera
         self.viewer_show_left_ui = bool(viewer_show_left_ui)
         self.viewer_show_right_ui = bool(viewer_show_right_ui)
@@ -664,6 +665,8 @@ class MujocoDeviceBase(BaseRobot):
     def start(self):
         self._ensure_viewer_state_channel()
         with self._lock:
+            if self.enable_viewer and self.viewer_auto_open:
+                self._open_viewer_locked()
             self._publish_viewer_state_locked()
         if self.enable_viewer and self._viewer_thread is None:
             self._viewer_thread_stop.clear()

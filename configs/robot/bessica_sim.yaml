@@ -3,7 +3,7 @@
 #
 # Delta end-effector (dual arm, 14D)
 #
-# Action: [R_dx,R_dy,R_dz,R_dr,R_dp,R_dy,R_grip, L_dx,...,L_grip]
+# Action: [L_dx,...,L_grip, R_dx,...,R_grip] (same order as KeyboardBimanual / Quest3 dual)
 # Position deltas in world frame (m), rotation deltas axis-angle (rad).
 # Gripper: slider delta, scaled by gripper_scale. Positive=open, negative=close.
 #
@@ -17,6 +17,10 @@ args:
   fps: 50.0
   scene_name: empty
   enable_viewer: true
+  # With Tk keyboard teleop, letting the proxy open the MuJoCo GLFW window from the
+  # viewer worker thread can trigger X11/GLFW BadValue/BadWindow errors. Open it
+  # eagerly on the robot process main thread instead.
+  viewer_auto_open: true
   camera_names: [leftview, rightview, headview, frontview]
   camera_width: 640
   camera_height: 480
