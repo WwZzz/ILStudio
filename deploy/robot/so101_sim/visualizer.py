@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from deploy.simulation.mujoco.base import prepare_mujoco_xml_path
 from deploy.visualizer.base import BaseVisualizer
 
 
@@ -81,6 +82,8 @@ class Visualizer(BaseVisualizer):
                  shm_name: str, 
                  fps: float = 60.0,
                  xml_path: Optional[str] = None,
+                 scene_name: Optional[str] = None,
+                 scene_xml_path: Optional[str] = None,
                  show_tcp_frame: bool = True,
                  **kwargs):
         """
@@ -94,11 +97,9 @@ class Visualizer(BaseVisualizer):
         """
         super().__init__(shm_name=shm_name, fps=fps, **kwargs)
         
-        # Locate XML model
-        if xml_path is None:
-            module_dir = Path(__file__).parent
-            xml_path = str(module_dir / "mujoco_model" / "scene.xml")
         self.xml_path = xml_path
+        self.scene_name = scene_name
+        self.scene_xml_path = scene_xml_path
         
         # MuJoCo objects
         self.mjmodel = None
@@ -107,12 +108,21 @@ class Visualizer(BaseVisualizer):
         self.qpos_indices = None
         self.tcp_site_id = None
         self.show_tcp_frame = show_tcp_frame
+        self._generated_xml_path = None
     
     def setup(self) -> bool:
         """
         Load MuJoCo model and launch the viewer.
         """
         try:
+            robot_xml_path = str(Path(__file__).parent / "mujoco_model" / "so_101.xml")
+            self.xml_path, self._generated_xml_path = prepare_mujoco_xml_path(
+                robot_xml_path,
+                xml_path=self.xml_path,
+                scene_name=self.scene_name,
+                scene_xml_path=self.scene_xml_path,
+                generated_name="so101_visualizer",
+            )
             print(f"[Visualizer] Loading MuJoCo model from {self.xml_path}")
             self.mjmodel = mujoco.MjModel.from_xml_path(self.xml_path)
             self.mjdata = mujoco.MjData(self.mjmodel)
@@ -203,6 +213,14 @@ class Visualizer(BaseVisualizer):
             self.viewer = None
         self.mjmodel = None
         self.mjdata = None
+        if self._generated_xml_path is not None:
+            try:
+                Path(self._generated_xml_path).unlink()
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+            self._generated_xml_path = None
 
 
 # ==============================================================================
