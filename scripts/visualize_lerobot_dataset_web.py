@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-在浏览器中可视化任意 LeRobot 风格 parquet 数据集（按 episode_index / frame_index 切分）。
+Visualize any LeRobot-style parquet dataset in a browser
+(split by episode_index / frame_index).
 
-用法:
+Usage:
   python scripts/visualize_lerobot_dataset_web.py --dataset /path/to/dataset
   python scripts/visualize_lerobot_dataset_web.py --dataset data/rlbench_reach_target --port 8765
   python scripts/visualize_lerobot_dataset_web.py --dataset ... --episode 3
 
-依赖: pyarrow, pillow, numpy
+Dependencies: pyarrow, pillow, numpy
 """
 from __future__ import annotations
 
@@ -27,13 +28,13 @@ import numpy as np
 try:
     import pyarrow.parquet as pq
 except ImportError:
-    print("需要安装 pyarrow: pip install pyarrow", file=sys.stderr)
+    print("pyarrow is required: pip install pyarrow", file=sys.stderr)
     raise
 
 try:
     from PIL import Image
 except ImportError:
-    print("需要安装 pillow: pip install pillow", file=sys.stderr)
+    print("pillow is required: pip install pillow", file=sys.stderr)
     raise
 
 
@@ -45,7 +46,10 @@ def _collect_parquet_files(dataset_dir: str) -> List[str]:
     pattern = os.path.join(dataset_dir, "data", "**", "*.parquet")
     files = sorted(glob.glob(pattern, recursive=True))
     if not files:
-        raise FileNotFoundError(f"未找到 parquet: {pattern}（需为 LeRobot 目录结构 dataset/data/**/*.parquet）")
+        raise FileNotFoundError(
+            f"No parquet files found: {pattern} "
+            "(expected LeRobot layout: dataset/data/**/*.parquet)"
+        )
     return files
 
 
@@ -84,7 +88,7 @@ def _to_jpeg_bytes(b: bytes, max_side: int = 512) -> Tuple[str, bytes]:
 
 
 def _infer_data_columns(schema_names: List[str]) -> List[str]:
-    """可序列化到 JSON 的列（排除图像与索引列）。"""
+    """Columns serializable to JSON (excluding image and index columns)."""
     skip_exact = {
         "episode_index",
         "frame_index",
@@ -121,7 +125,7 @@ def _serialize_cell(cell: Any) -> Any:
 
 
 class DatasetIndex:
-    """episode_id -> 按 frame_index 排序的 (parquet_path, row_index) 列表。"""
+    """episode_id -> list of (parquet_path, row_index), sorted by frame_index."""
 
     def __init__(self, dataset_dir: str):
         self.dataset_dir = os.path.abspath(dataset_dir)
@@ -284,11 +288,11 @@ def make_handler(index: DatasetIndex, default_episode: Optional[int]):
 
 
 PAGE_HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>__TITLE__ — LeRobot 可视化</title>
+  <title>__TITLE__ - LeRobot Viewer</title>
   <style>
     :root { --bg:#0f1419; --panel:#1a2332; --text:#e7ecf3; --accent:#5b9cf5; --muted:#8b9cb3; }
     * { box-sizing: border-box; }
@@ -302,7 +306,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
     select, input[type=range] { accent-color: var(--accent); }
     select { background:#243044; color:var(--text); border:1px solid #3d4f66; border-radius:6px; padding:0.4rem 0.6rem; }
     .frame-readout { font-variant-numeric: tabular-nums; min-width:8rem; color:var(--muted); padding-bottom:0.35rem; }
-    /* 向量数据在相机下方，固定高度，避免播放时整页跳动 */
+    /* Keep vector data under cameras with fixed height to avoid page jumping while playing. */
     .vector-panel {
       display:grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -357,7 +361,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
 </head>
 <body>
   <header>
-    <h1>LeRobot 数据集 — Episode 浏览器</h1>
+    <h1>LeRobot Dataset - Episode Browser</h1>
     <div class="sub" id="datasetPath"></div>
   </header>
   <main>
@@ -368,13 +372,13 @@ PAGE_HTML = r"""<!DOCTYPE html>
         <select id="epSelect"></select>
       </div>
       <div style="flex:1; min-width:200px;">
-        <label>帧 <span id="frameLabel"></span></label>
+        <label>Frame <span id="frameLabel"></span></label>
         <input type="range" id="frameSlider" min="0" max="0" value="0"/>
       </div>
       <div class="frame-readout" id="frameReadout"></div>
       <div>
         <label>&nbsp;</label>
-        <button type="button" id="btnPlay">播放</button>
+        <button type="button" id="btnPlay">Play</button>
       </div>
     </div>
     <div class="grid" id="imgGrid"></div>
@@ -522,10 +526,10 @@ PAGE_HTML = r"""<!DOCTYPE html>
       if (playTimer) {
         clearInterval(playTimer);
         playTimer = null;
-        document.getElementById('btnPlay').textContent = '播放';
+        document.getElementById('btnPlay').textContent = 'Play';
         return;
       }
-      document.getElementById('btnPlay').textContent = '暂停';
+      document.getElementById('btnPlay').textContent = 'Pause';
       playTimer = setInterval(() => {
         let v = parseInt(document.getElementById('frameSlider').value, 10) + 1;
         if (v >= numFrames) v = 0;
@@ -545,38 +549,38 @@ def _default_dataset_dir() -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="浏览器可视化 LeRobot parquet 数据集")
+    ap = argparse.ArgumentParser(description="Browser viewer for LeRobot parquet datasets")
     ap.add_argument(
         "--dataset",
         type=str,
         default=_default_dataset_dir(),
-        help="数据集根目录（含 data/**/*.parquet，需有 episode_index / frame_index 列）",
+        help="Dataset root directory (contains data/**/*.parquet with episode_index/frame_index columns)",
     )
     ap.add_argument("--host", type=str, default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--episode", type=int, default=None, help="打开页面时默认选中的 episode_id")
+    ap.add_argument("--episode", type=int, default=None, help="Default episode_id selected on page load")
     args = ap.parse_args()
 
     dataset_dir = os.path.abspath(args.dataset)
     if not os.path.isdir(dataset_dir):
-        print(f"目录不存在: {dataset_dir}", file=sys.stderr)
+        print(f"Directory does not exist: {dataset_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print("正在索引 parquet（首次会稍慢）…")
+    print("Indexing parquet files (first run may be slower)...")
     index = DatasetIndex(dataset_dir)
     print(f"  episodes: {len(index.episode_ids)}  id {index.episode_ids[0]}…{index.episode_ids[-1]}")
-    print(f"  相机: {', '.join(index.camera_keys) or '(无)'}")
-    print(f"  数据列: {len(index.data_columns)} 个")
+    print(f"  cameras: {', '.join(index.camera_keys) or '(none)'}")
+    print(f"  data fields: {len(index.data_columns)}")
 
     handler = make_handler(index, args.episode)
     httpd = ThreadingHTTPServer((args.host, args.port), handler)
     url = f"http://{args.host}:{args.port}/"
-    print(f"请在浏览器打开: {url}")
-    print("Ctrl+C 结束")
+    print(f"Open in browser: {url}")
+    print("Press Ctrl+C to stop")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n已退出")
+        print("\nExited")
 
 
 if __name__ == "__main__":
