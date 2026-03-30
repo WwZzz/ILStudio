@@ -12,6 +12,7 @@ __pycache__/
 .*__pycache__/.*
 \.local/
 tmp_scripts/*
+scripts/*
 !scripts/dataset_visualizer.py
 !scripts/*example*.sh
 !scripts/mp4_to_gif.py
