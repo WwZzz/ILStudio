@@ -15,6 +15,7 @@ args:
   max_timesteps: 400  # Maximum steps per episode (more complex task)
   ctrl_space: ee  # end-effector control
   ctrl_type: abs
+
   camera_names:
     - front
     - wrist
