@@ -2,7 +2,7 @@
 """
 Loss Convergence Analysis Script
 
-分析训练日志，判断模型是否收敛，并生成可视化图表。
+Analyze training logs to determine convergence and generate visualizations.
 
 Usage:
     python scripts/loss_analysis.py --log_dir <log_directory> [--ckpt_dir <ckpt_directory>]
@@ -31,18 +31,18 @@ except ImportError:
 
 
 class LossConvergenceAnalyzer:
-    """分析loss收敛情况的类"""
+    """Analyzer for loss convergence behavior."""
     
     def __init__(self, log_dir: str, ckpt_dir: Optional[str] = None, 
                  window_size: int = 1000, convergence_threshold: float = 0.01,
                  min_stable_steps: int = 5000):
         """
         Args:
-            log_dir: TensorBoard日志目录
-            ckpt_dir: 检查点目录（用于保存结果）
-            window_size: 用于计算移动平均的窗口大小
-            convergence_threshold: 收敛阈值（相对变化率）
-            min_stable_steps: 最小稳定步数（用于判断收敛）
+            log_dir: TensorBoard log directory
+            ckpt_dir: Checkpoint directory (used to save results)
+            window_size: Window size for moving average
+            convergence_threshold: Convergence threshold (relative change rate)
+            min_stable_steps: Minimum stable steps (used to determine convergence)
         """
         self.log_dir = Path(log_dir)
         self.ckpt_dir = Path(ckpt_dir) if ckpt_dir else self.log_dir.parent
@@ -50,15 +50,15 @@ class LossConvergenceAnalyzer:
         self.convergence_threshold = convergence_threshold
         self.min_stable_steps = min_stable_steps
         
-        # 确保输出目录存在
+        # Ensure output directory exists
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         
     def load_tensorboard_data(self, tag: str = "train/loss") -> Tuple[np.ndarray, np.ndarray]:
         """
-        从TensorBoard事件文件加载数据
+        Load data from TensorBoard event files.
         
         Returns:
-            (steps, values): 步数和对应的loss值
+            (steps, values): Step indices and corresponding loss values
         """
         event_files = list(self.log_dir.glob("events.out.tfevents.*"))
         if not event_files:
@@ -66,7 +66,7 @@ class LossConvergenceAnalyzer:
         
         print(f"Found {len(event_files)} event file(s)")
         
-        # 加载所有事件文件
+        # Load all event files
         all_steps = []
         all_values = []
         
@@ -75,13 +75,13 @@ class LossConvergenceAnalyzer:
             ea = EventAccumulator(str(event_file.parent))
             ea.Reload()
             
-            # 获取所有可用的scalar tags
+            # Get all available scalar tags
             scalar_tags = ea.Tags()['scalars']
             print(f"Available scalar tags: {scalar_tags}")
             
             if tag not in scalar_tags:
                 print(f"Warning: Tag '{tag}' not found. Available tags: {scalar_tags}")
-                # 尝试使用第一个可用的loss相关tag
+                # Try using the first available loss-related tag
                 loss_tags = [t for t in scalar_tags if 'loss' in t.lower()]
                 if loss_tags:
                     tag = loss_tags[0]
@@ -95,7 +95,7 @@ class LossConvergenceAnalyzer:
                 all_steps.append(int(event.step))
                 all_values.append(float(event.value))
         
-        # 排序并去重（如果有重复的step）
+        # Sort and deduplicate (if repeated steps exist)
         data = pd.DataFrame({'step': all_steps, 'value': all_values})
         data = data.sort_values('step')
         data = data.drop_duplicates(subset=['step'], keep='last')
@@ -110,23 +110,23 @@ class LossConvergenceAnalyzer:
         return steps, values
     
     def compute_moving_average(self, values: np.ndarray, window: int) -> np.ndarray:
-        """计算移动平均"""
+        """Compute moving average."""
         if len(values) < window:
             return values
         return pd.Series(values).rolling(window=window, center=True).mean().values
     
     def detect_convergence(self, steps: np.ndarray, values: np.ndarray) -> Dict:
         """
-        检测收敛点
+        Detect convergence point.
         
         Returns:
-            包含收敛信息的字典
+            Dictionary containing convergence details
         """
-        # 计算移动平均
+        # Compute moving average
         ma_values = self.compute_moving_average(values, self.window_size)
         
-        # 计算相对变化率（使用移动平均）
-        # 对于每个点，计算后续一段窗口内的相对变化
+        # Compute relative change (using moving average)
+        # For each point, evaluate relative change in a following window
         convergence_info = {
             'converged': False,
             'convergence_step': None,
@@ -135,10 +135,10 @@ class LossConvergenceAnalyzer:
             'analysis': {}
         }
         
-        # 方法1: 检测稳定区间（变化率小于阈值）
-        # 从后往前找，找到第一个满足条件的稳定区间
+        # Method 1: detect stable interval (variation below threshold)
+        # Search backward and take the first matching stable interval
         stable_start = None
-        for i in range(len(ma_values) - self.min_stable_steps, 0, -100):  # 每100步检查一次
+        for i in range(len(ma_values) - self.min_stable_steps, 0, -100):  # check every 100 steps
             if i < 0:
                 break
             end_idx = min(i + self.min_stable_steps, len(ma_values))
@@ -147,24 +147,27 @@ class LossConvergenceAnalyzer:
             if len(window_ma) < 100:
                 continue
                 
-            # 计算窗口内的相对变化率
+            # Compute relative variation in the window
             window_mean = np.mean(window_ma)
             window_std = np.std(window_ma)
             relative_std = window_std / (window_mean + 1e-8)
             
-            # 如果相对标准差小于阈值，认为稳定
+            # If relative std is below threshold, consider it stable
             if relative_std < self.convergence_threshold:
                 stable_start = i
                 convergence_info['converged'] = True
                 convergence_info['convergence_step'] = int(steps[i])
                 convergence_info['convergence_loss'] = float(window_mean)
-                convergence_info['reason'] = f"在step {steps[i]}附近发现稳定区间（相对标准差: {relative_std:.4f} < {self.convergence_threshold})"
+                convergence_info['reason'] = (
+                    f"Found a stable interval near step {steps[i]} "
+                    f"(relative std: {relative_std:.4f} < {self.convergence_threshold})"
+                )
                 break
         
-        # 方法2: 如果方法1没找到，使用梯度下降率判断
+        # Method 2: if method 1 fails, use loss drop rate
         if not convergence_info['converged']:
-            # 计算损失下降率
-            # 将数据分成多个区间，计算每个区间的平均下降率
+            # Compute loss drop rate
+            # Split data into segments and compute average drop per segment
             num_segments = 10
             segment_size = len(values) // num_segments
             
@@ -176,45 +179,51 @@ class LossConvergenceAnalyzer:
                 segment_means.append(np.mean(values[start_idx:end_idx]))
                 segment_steps.append(steps[start_idx + (end_idx - start_idx) // 2])
             
-            # 计算相邻区间的下降率
+            # Compute drop rate between adjacent segments
             drop_rates = []
             for i in range(len(segment_means) - 1):
                 drop_rate = (segment_means[i] - segment_means[i+1]) / (segment_means[i] + 1e-8)
                 drop_rates.append(drop_rate)
             
-            # 如果最后几个区间的下降率都很小，认为可能收敛
+            # If recent segment drop rates are all small, likely converged
             if len(drop_rates) >= 3:
                 recent_drop_rates = drop_rates[-3:]
                 avg_recent_drop = np.mean(recent_drop_rates)
                 
-                if avg_recent_drop < 0.05:  # 平均下降率小于5%
+                if avg_recent_drop < 0.05:  # average drop rate < 5%
                     convergence_info['converged'] = True
                     convergence_info['convergence_step'] = int(segment_steps[-3])
                     convergence_info['convergence_loss'] = float(segment_means[-1])
-                    convergence_info['reason'] = f"在step {segment_steps[-3]}附近损失下降率显著降低（平均下降率: {avg_recent_drop:.4f} < 0.05)"
+                    convergence_info['reason'] = (
+                        f"Loss drop rate decreases significantly near step {segment_steps[-3]} "
+                        f"(average drop rate: {avg_recent_drop:.4f} < 0.05)"
+                    )
         
-        # 方法3: 如果loss已经很低，使用更宽松的收敛判断
+        # Method 3: if loss is already low, use a looser convergence rule
         if not convergence_info['converged']:
-            # 检查最后20%的数据
+            # Check the last 20% of the data
             last_20_percent_start = int(len(values) * 0.8)
             last_20_values = values[last_20_percent_start:]
             last_20_steps = steps[last_20_percent_start:]
             last_20_ma = ma_values[last_20_percent_start:]
             
             if len(last_20_values) > 100:
-                # 计算最后20%的平均loss和标准差
+                # Compute mean loss and std over last 20%
                 mean_loss = np.mean(last_20_ma)
                 std_loss = np.std(last_20_ma)
-                cv = std_loss / (mean_loss + 1e-8)  # 变异系数
+                cv = std_loss / (mean_loss + 1e-8)  # coefficient of variation
                 
-                # 如果loss已经很低（<0.01）且变异系数不太大（<0.5），认为基本收敛
+                # If loss is low (<0.01) and variation is modest (<0.5), treat as converged
                 if mean_loss < 0.01 and cv < 0.5:
                     convergence_info['converged'] = True
                     convergence_info['convergence_step'] = int(last_20_steps[0])
                     convergence_info['convergence_loss'] = float(mean_loss)
-                    convergence_info['reason'] = f"在step {last_20_steps[0]}附近loss已降至较低水平（平均loss: {mean_loss:.6f} < 0.01, CV: {cv:.4f} < 0.5）"
+                    convergence_info['reason'] = (
+                        f"Loss reaches a low level near step {last_20_steps[0]} "
+                        f"(mean loss: {mean_loss:.6f} < 0.01, CV: {cv:.4f} < 0.5)"
+                    )
         
-        # 方法4: 检测loss平台期（连续多个区间loss变化很小）
+        # Method 4: detect plateau phase (small changes across consecutive segments)
         if not convergence_info['converged']:
             num_segments = 20
             segment_size = len(values) // num_segments
@@ -226,28 +235,34 @@ class LossConvergenceAnalyzer:
                 segment_means.append(np.mean(values[start_idx:end_idx]))
                 segment_steps.append(steps[start_idx + (end_idx - start_idx) // 2])
             
-            # 从后往前找连续的平台期
+            # Search backward for a continuous plateau
             for i in range(len(segment_means) - 2, max(0, len(segment_means) - 6), -1):
-                # 检查连续3个区间的变化
+                # Check change across 3 consecutive segments
                 recent_segments = segment_means[i:i+3]
                 if len(recent_segments) == 3:
                     max_change = np.max(recent_segments) - np.min(recent_segments)
                     mean_value = np.mean(recent_segments)
                     relative_change = max_change / (mean_value + 1e-8)
                     
-                    # 如果相对变化小于10%，认为进入平台期
+                    # If relative change < 10%, consider it a plateau
                     if relative_change < 0.1:
                         convergence_info['converged'] = True
                         convergence_info['convergence_step'] = int(segment_steps[i])
                         convergence_info['convergence_loss'] = float(mean_value)
-                        convergence_info['reason'] = f"在step {segment_steps[i]}附近进入平台期（相对变化: {relative_change:.4f} < 0.1）"
+                        convergence_info['reason'] = (
+                            f"Entered a plateau near step {segment_steps[i]} "
+                            f"(relative change: {relative_change:.4f} < 0.1)"
+                        )
                         break
         
-        # 如果还是没找到，标记为未收敛
+        # If still not found, mark as not converged
         if not convergence_info['converged']:
-            convergence_info['reason'] = "未找到持续稳定区间（可能仍在下降或波动较大）"
+            convergence_info['reason'] = (
+                "No sustained stable interval found "
+                "(loss may still be decreasing or fluctuating heavily)"
+            )
         
-        # 计算关键统计信息
+        # Compute key statistics
         initial_10p = values[:len(values)//10]
         final_10p = values[-len(values)//10:]
         
@@ -265,18 +280,18 @@ class LossConvergenceAnalyzer:
     
     def plot_analysis(self, steps: np.ndarray, values: np.ndarray, 
                      convergence_info: Dict, tag: str = "train/loss"):
-        """生成可视化图表"""
-        # 创建简单的loss曲线图
+        """Generate visualization plots."""
+        # Create a simple loss curve plot
         fig, ax = plt.subplots(figsize=(12, 6))
         
-        # 计算移动平均
+        # Compute moving average
         ma_values = self.compute_moving_average(values, self.window_size)
         
-        # 绘制原始loss和移动平均
+        # Plot raw loss and moving average
         ax.plot(steps, values, alpha=0.3, color='blue', label='Raw Loss', linewidth=0.5)
         ax.plot(steps, ma_values, color='red', label=f'Moving Average (window={self.window_size})', linewidth=2)
         
-        # 标记收敛点
+        # Mark convergence point
         if convergence_info['convergence_step']:
             ax.axvline(x=convergence_info['convergence_step'], 
                       color='green', linestyle='--', linewidth=2, 
@@ -289,15 +304,15 @@ class LossConvergenceAnalyzer:
         ax.set_title(f'Loss Curve: {tag}', fontsize=14, fontweight='bold')
         ax.legend(fontsize=10)
         ax.grid(True, alpha=0.3)
-        ax.set_yscale('log')  # 使用对数刻度
+        ax.set_yscale('log')  # Use logarithmic scale
         
-        # 保存图片
+        # Save plot image
         output_path = self.ckpt_dir / 'loss_curve.png'
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         print(f"Saved plot to: {output_path}")
         plt.close()
         
-        # 保存原始数据为CSV
+        # Save raw data as CSV
         data_df = pd.DataFrame({
             'step': steps,
             'loss': values
@@ -307,7 +322,7 @@ class LossConvergenceAnalyzer:
         print(f"Saved data to: {csv_path}")
     
     def generate_report(self, convergence_info: Dict, tag: str = "train/loss") -> str:
-        """生成文本报告"""
+        """Generate text report."""
         report = []
         report.append("=" * 60)
         report.append("Loss Convergence Analysis Report")
@@ -339,35 +354,35 @@ class LossConvergenceAnalyzer:
         return "\n".join(report)
     
     def run_analysis(self, tag: str = "train/loss"):
-        """运行完整分析流程"""
+        """Run the full analysis pipeline."""
         print(f"Starting loss convergence analysis...")
         print(f"Log directory: {self.log_dir}")
         print(f"Output directory: {self.ckpt_dir}")
         print(f"Tag: {tag}")
         print("")
         
-        # 加载数据
+        # Load data
         steps, values = self.load_tensorboard_data(tag)
         
-        # 检测收敛
+        # Detect convergence
         print("\nDetecting convergence...")
         convergence_info = self.detect_convergence(steps, values)
         
-        # 生成可视化
+        # Generate visualizations
         print("\nGenerating plots...")
         self.plot_analysis(steps, values, convergence_info, tag)
         
-        # 生成报告
+        # Generate report
         print("\nGenerating report...")
         report = self.generate_report(convergence_info, tag)
         
-        # 保存报告
+        # Save report
         report_path = self.ckpt_dir / 'loss_analysis_report.txt'
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         print(f"Saved report to: {report_path}")
         
-        # 打印报告
+        # Print report
         print("\n" + report)
         
         return convergence_info
@@ -390,7 +405,7 @@ def main():
     
     args = parser.parse_args()
     
-    # 创建分析器
+    # Create analyzer
     analyzer = LossConvergenceAnalyzer(
         log_dir=args.log_dir,
         ckpt_dir=args.ckpt_dir,
@@ -399,7 +414,7 @@ def main():
         min_stable_steps=args.min_stable_steps
     )
     
-    # 运行分析
+    # Run analysis
     analyzer.run_analysis(tag=args.tag)
 
 
