@@ -484,6 +484,7 @@ class So101SimRobot(MujocoDeviceBase):
             self.mjdata.ctrl[self.actuator_indices] = action
             for _ in range(self._physics_substeps_per_command):
                 mujoco.mj_step(self.mjmodel, self.mjdata)
+                self._resolve_scene_prop_penetrations_locked()
             q = self.mjdata.qpos[self.qpos_indices].copy()
             self.current_qpos = q
             self._safe_commanded_qpos = q.copy()

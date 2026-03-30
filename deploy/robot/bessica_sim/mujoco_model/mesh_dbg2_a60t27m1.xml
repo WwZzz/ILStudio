@@ -1,0 +1,5 @@
+<mujoco model="mesh_dbg2">
+  <size nconmax="512" njmax="1024"/>
+  <include file="bessica_d.xml"/>
+  <include file="../../../simulation/mujoco/scenes/table_block.xml"/>
+</mujoco>

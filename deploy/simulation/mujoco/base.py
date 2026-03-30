@@ -40,6 +40,7 @@ TABLE_BLOCK_STATIC_GEOM_NAMES: frozenset = frozenset(
 )
 # Contacts involving these non-static geoms are ignored (e.g. free-moving block).
 TABLE_BLOCK_PAIR_IGNORE_OTHER_GEOMS: frozenset = frozenset({"block_geom"})
+TABLE_BLOCK_PROTECTED_DYNAMIC_GEOM_NAMES: frozenset = frozenset({"block_geom"})
 DEFAULT_STATIC_COLLISION_PENETRATION_SLOP: float = 0.0015
 
 
@@ -221,6 +222,9 @@ class MujocoDeviceBase(BaseRobot):
             if static_scene_geom_names is not None
             else TABLE_BLOCK_STATIC_GEOM_NAMES
         )
+        self._protected_dynamic_geom_names = (
+            TABLE_BLOCK_PROTECTED_DYNAMIC_GEOM_NAMES if scene_name == "table_block" else frozenset()
+        )
         self.camera_names = list(camera_names) if camera_names is not None else None
         self.camera_width = int(camera_width)
         self.camera_height = int(camera_height)
@@ -316,6 +320,222 @@ class MujocoDeviceBase(BaseRobot):
             return True
         return False
 
+    def _get_freejoint_ancestor_info_locked(
+        self,
+        body_id: int,
+    ) -> Optional[Tuple[int, int, int]]:
+        """Return `(body_id, qpos_adr, qvel_adr)` for the nearest free-joint ancestor body."""
+        while body_id > 0:
+            jnt_adr = int(self.mjmodel.body_jntadr[body_id])
+            jnt_num = int(self.mjmodel.body_jntnum[body_id])
+            if jnt_num == 1:
+                joint_id = jnt_adr
+                if self.mjmodel.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_FREE:
+                    return (
+                        body_id,
+                        int(self.mjmodel.jnt_qposadr[joint_id]),
+                        int(self.mjmodel.jnt_dofadr[joint_id]),
+                    )
+            body_id = int(self.mjmodel.body_parentid[body_id])
+        return None
+
+    def _resolve_free_body_static_scene_penetrations_locked(self, max_passes: int = 16) -> bool:
+        """
+        Project free-joint scene bodies out of static scene geoms.
+
+        This complements `_has_static_scene_penetration_locked`, which prevents the
+        robot itself from moving through the table. Here we repair dynamic props such
+        as a free block after physics/contact resolution so they cannot remain pressed
+        inside static scene geometry.
+        """
+        if not self._enable_static_scene_contact_guard:
+            return False
+
+        corrected = False
+        target_clearance = 1e-5
+        static_names = self._static_scene_geom_names
+
+        for _ in range(max(1, int(max_passes))):
+            body_corrections: Dict[int, list[np.ndarray]] = {}
+            body_qpos_adr: Dict[int, int] = {}
+            body_qvel_adr: Dict[int, int] = {}
+
+            for i in range(self.mjdata.ncon):
+                contact = self.mjdata.contact[i]
+                if contact.dist >= target_clearance:
+                    continue
+
+                geom1 = contact.geom1
+                geom2 = contact.geom2
+                name1 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom1)
+                name2 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom2)
+                is_static_1 = name1 in static_names
+                is_static_2 = name2 in static_names
+                if is_static_1 == is_static_2:
+                    continue
+
+                other_geom = geom2 if is_static_1 else geom1
+                freejoint_info = self._get_freejoint_ancestor_info_locked(
+                    int(self.mjmodel.geom_bodyid[other_geom])
+                )
+                if freejoint_info is None:
+                    continue
+
+                body_id, qpos_adr, qvel_adr = freejoint_info
+                normal = np.asarray(contact.frame[:3], dtype=np.float64)
+                direction = 1.0 if is_static_1 else -1.0
+                correction = normal * direction * (target_clearance - float(contact.dist))
+                body_corrections.setdefault(body_id, []).append(correction)
+                body_qpos_adr[body_id] = qpos_adr
+                body_qvel_adr[body_id] = qvel_adr
+
+            if not body_corrections:
+                break
+
+            corrected = True
+            for body_id, corrections in body_corrections.items():
+                corr = np.mean(np.asarray(corrections, dtype=np.float64), axis=0)
+                if float(np.linalg.norm(corr)) < 1e-12:
+                    norms = [float(np.linalg.norm(v)) for v in corrections]
+                    corr = np.asarray(corrections[int(np.argmax(norms))], dtype=np.float64)
+                qpos_adr = body_qpos_adr[body_id]
+                qvel_adr = body_qvel_adr[body_id]
+                self.mjdata.qpos[qpos_adr : qpos_adr + 3] += corr
+                self.mjdata.qvel[qvel_adr : qvel_adr + 6] = 0.0
+
+            mujoco.mj_forward(self.mjmodel, self.mjdata)
+
+        return corrected
+
+    def _has_protected_dynamic_geom_penetration_locked(self) -> bool:
+        """
+        True if the robot penetrates a protected dynamic scene geom such as `block_geom`.
+
+        We intentionally ignore static-scene contacts here; those are handled by the
+        static-scene guard. This check is specifically to stop commanded robot motion
+        from geometrically entering grasped / graspable dynamic props.
+        """
+        protected_names = self._protected_dynamic_geom_names
+        if not protected_names:
+            return False
+
+        slop = self.static_collision_penetration_slop
+        static_names = self._static_scene_geom_names
+        for i in range(self.mjdata.ncon):
+            contact = self.mjdata.contact[i]
+            if contact.dist >= -slop:
+                continue
+
+            geom1 = contact.geom1
+            geom2 = contact.geom2
+            name1 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom1)
+            name2 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom2)
+            is_protected_1 = name1 in protected_names
+            is_protected_2 = name2 in protected_names
+            if is_protected_1 == is_protected_2:
+                continue
+
+            other_geom = geom2 if is_protected_1 else geom1
+            other_name = name2 if is_protected_1 else name1
+            if other_name in static_names:
+                continue
+
+            # Ignore contacts against the same free-joint prop body, but reject robot
+            # or other non-freejoint bodies penetrating the protected prop.
+            other_body_id = int(self.mjmodel.geom_bodyid[other_geom])
+            if self._get_freejoint_ancestor_info_locked(other_body_id) is not None:
+                continue
+            return True
+
+        return False
+
+    def _resolve_protected_dynamic_geom_penetrations_locked(self, max_passes: int = 16) -> bool:
+        """
+        Project protected free-joint props out of robot geometry after physics/contact resolution.
+
+        This keeps graspable objects such as `block_geom` from remaining interpenetrated
+        with finger / wrist geometry even when a robot implementation drives joints in a
+        mostly kinematic manner.
+        """
+        protected_names = self._protected_dynamic_geom_names
+        if not protected_names:
+            return False
+
+        corrected = False
+        target_clearance = 1e-5
+        static_names = self._static_scene_geom_names
+
+        for _ in range(max(1, int(max_passes))):
+            body_corrections: Dict[int, list[np.ndarray]] = {}
+            body_qpos_adr: Dict[int, int] = {}
+            body_qvel_adr: Dict[int, int] = {}
+
+            for i in range(self.mjdata.ncon):
+                contact = self.mjdata.contact[i]
+                if contact.dist >= target_clearance:
+                    continue
+
+                geom1 = contact.geom1
+                geom2 = contact.geom2
+                name1 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom1)
+                name2 = mujoco.mj_id2name(self.mjmodel, mujoco.mjtObj.mjOBJ_GEOM, geom2)
+                is_protected_1 = name1 in protected_names
+                is_protected_2 = name2 in protected_names
+                if is_protected_1 == is_protected_2:
+                    continue
+
+                protected_geom = geom1 if is_protected_1 else geom2
+                other_geom = geom2 if is_protected_1 else geom1
+                other_name = name2 if is_protected_1 else name1
+                if other_name in static_names:
+                    continue
+
+                freejoint_info = self._get_freejoint_ancestor_info_locked(
+                    int(self.mjmodel.geom_bodyid[protected_geom])
+                )
+                if freejoint_info is None:
+                    continue
+
+                # Only repair penetrations against non-freejoint geometry, i.e. robot
+                # links / fingers. Free-body vs free-body is left to physics.
+                other_body_id = int(self.mjmodel.geom_bodyid[other_geom])
+                if self._get_freejoint_ancestor_info_locked(other_body_id) is not None:
+                    continue
+
+                body_id, qpos_adr, qvel_adr = freejoint_info
+                normal = np.asarray(contact.frame[:3], dtype=np.float64)
+                direction = -1.0 if is_protected_1 else 1.0
+                correction = normal * direction * (target_clearance - float(contact.dist))
+                body_corrections.setdefault(body_id, []).append(correction)
+                body_qpos_adr[body_id] = qpos_adr
+                body_qvel_adr[body_id] = qvel_adr
+
+            if not body_corrections:
+                break
+
+            corrected = True
+            for body_id, corrections in body_corrections.items():
+                corr = np.mean(np.asarray(corrections, dtype=np.float64), axis=0)
+                if float(np.linalg.norm(corr)) < 1e-12:
+                    norms = [float(np.linalg.norm(v)) for v in corrections]
+                    corr = np.asarray(corrections[int(np.argmax(norms))], dtype=np.float64)
+                qpos_adr = body_qpos_adr[body_id]
+                qvel_adr = body_qvel_adr[body_id]
+                self.mjdata.qpos[qpos_adr : qpos_adr + 3] += corr
+                self.mjdata.qvel[qvel_adr : qvel_adr + 6] = 0.0
+
+            mujoco.mj_forward(self.mjmodel, self.mjdata)
+
+        return corrected
+
+    def _resolve_scene_prop_penetrations_locked(self) -> bool:
+        """Repair protected free-joint props against robot and static scene penetration."""
+        corrected_robot = self._resolve_protected_dynamic_geom_penetrations_locked()
+        corrected_static = self._resolve_free_body_static_scene_penetrations_locked()
+        if corrected_robot:
+            corrected_static = self._resolve_free_body_static_scene_penetrations_locked() or corrected_static
+        return corrected_robot or corrected_static
+
     def _interpolate_pose_avoiding_static_contact_locked(
         self,
         start_vec: np.ndarray,
@@ -342,7 +562,10 @@ class MujocoDeviceBase(BaseRobot):
             alpha = idx / steps
             cand = start_vec + (target_vec - start_vec) * alpha
             apply_vec(cand)
-            if self._has_static_scene_penetration_locked():
+            if (
+                self._has_static_scene_penetration_locked()
+                or self._has_protected_dynamic_geom_penetration_locked()
+            ):
                 break
             accepted = cand.copy()
         return accepted

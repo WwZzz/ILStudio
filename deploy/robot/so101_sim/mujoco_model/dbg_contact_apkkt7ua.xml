@@ -1,0 +1,5 @@
+<mujoco model="dbg_contact">
+  <size nconmax="512" njmax="1024"/>
+  <include file="so_101.xml"/>
+  <include file="../../../simulation/mujoco/scenes/table_block.xml"/>
+</mujoco>

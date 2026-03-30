@@ -119,6 +119,13 @@ class BessicaSimRobot(MujocoDeviceBase):
         ik_fast: bool = True,
         simulation_fps: float = 240.0,
         max_joint_delta_rad: Optional[float] = None,
+        arm_actuator_kp: float = 200.0,
+        arm_actuator_forcerange: float = 200.0,
+        arm_joint_damping: float = 40.0,
+        arm_joint_armature: float = 0.6,
+        ee_position_deadband: float = 0.001,
+        ee_rotation_deadband: float = 0.01,
+        freeze_arms_without_pose_control: bool = True,
         **kwargs,
     ):
         if control_mode not in self.CONTROL_MODES:
@@ -136,10 +143,19 @@ class BessicaSimRobot(MujocoDeviceBase):
         self.max_joint_delta_rad = (
             None if max_joint_delta_rad is None else float(max_joint_delta_rad)
         )
+        self.arm_actuator_kp = float(arm_actuator_kp)
+        self.arm_actuator_forcerange = float(arm_actuator_forcerange)
+        self.arm_joint_damping = float(arm_joint_damping)
+        self.arm_joint_armature = float(arm_joint_armature)
+        self.ee_position_deadband = float(ee_position_deadband)
+        self.ee_rotation_deadband = float(ee_rotation_deadband)
+        self.freeze_arms_without_pose_control = bool(freeze_arms_without_pose_control)
         self.kin = BessicaBimanualKinematics(urdf_path=urdf_path)
         # rel_ee: per-arm anchor SE(3), VR unsqueeze edges, IK-failure offsets (AliciaD-style)
         self._rel_anchor_T_r: Optional[np.ndarray] = None
         self._rel_anchor_T_l: Optional[np.ndarray] = None
+        self._rel_reference_T_r: Optional[np.ndarray] = None
+        self._rel_reference_T_l: Optional[np.ndarray] = None
         self._rel_prev_l_unsq = False
         self._rel_prev_r_unsq = False
         self._rel_off_pos_l = np.zeros(3, dtype=np.float64)
@@ -152,6 +168,7 @@ class BessicaSimRobot(MujocoDeviceBase):
         self._rel_last_raw_eul_r = np.zeros(3, dtype=np.float64)
         self._physics_thread: Optional[threading.Thread] = None
         self._physics_stop = threading.Event()
+        self._pose_control_active = False
 
         init_qpos_arr = None if init_qpos is None else np.array(init_qpos, dtype=np.float64).ravel()
         if init_qpos_arr is not None and len(init_qpos_arr) == 16:
@@ -218,6 +235,10 @@ class BessicaSimRobot(MujocoDeviceBase):
             [self.mjmodel.jnt_dofadr[self.mjmodel.joint(n).id] for n in GRIPPER_MIRROR_JOINT_NAMES],
             dtype=np.int32,
         )
+        self.arm_ctrl_indices = np.array(
+            [self.mjmodel.actuator(n).id for n in ARM_JOINT_NAMES],
+            dtype=np.int32,
+        )
         self.gripper_ctrl_indices = np.array(
             [
                 self.mjmodel.actuator("right_arm_gripper_joint").id,
@@ -225,12 +246,80 @@ class BessicaSimRobot(MujocoDeviceBase):
             ],
             dtype=np.int32,
         )
+        self.mjmodel.dof_damping[self.arm_qvel_indices] = self.arm_joint_damping
+        self.mjmodel.dof_armature[self.arm_qvel_indices] = self.arm_joint_armature
+        for actuator_id in self.arm_ctrl_indices:
+            self.mjmodel.actuator_gainprm[actuator_id][0] = self.arm_actuator_kp
+            self.mjmodel.actuator_biasprm[actuator_id][1] = -self.arm_actuator_kp
+            self.mjmodel.actuator_forcerange[actuator_id][:] = (
+                -self.arm_actuator_forcerange,
+                self.arm_actuator_forcerange,
+            )
+        timestep = float(max(self.mjmodel.opt.timestep, 1e-6))
+        target_dt = 1.0 / max(self.simulation_fps, 1.0)
+        self._physics_substeps_per_tick = max(1, int(round(target_dt / timestep)))
 
     def _apply_gripper_to_mujoco(self, width: np.ndarray):
         q = width / 2.0
         self.mjdata.qpos[self.gripper_qpos_indices] = q
         self.mjdata.qpos[self.gripper_mirror_qpos_indices] = q
         self.mjdata.ctrl[self.gripper_ctrl_indices] = q
+
+    def _set_gripper_ctrl(self, width: np.ndarray) -> None:
+        self.mjdata.ctrl[self.gripper_ctrl_indices] = width / 2.0
+
+    def _sync_state_from_mujoco_locked(self) -> None:
+        arm_q = self.mjdata.qpos[self.arm_qpos_indices].copy()
+        self.current_arm_qpos = arm_q
+        self._safe_arm_qpos = arm_q.copy()
+        self.current_gpos = self._update_gpos_from_q(arm_q)
+
+    def _apply_ee_deadband(self, pos: np.ndarray, euler: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        pos = np.asarray(pos, dtype=np.float64).copy()
+        euler = np.asarray(euler, dtype=np.float64).copy()
+        pos[np.abs(pos) < self.ee_position_deadband] = 0.0
+        euler[np.abs(euler) < self.ee_rotation_deadband] = 0.0
+        return pos, euler
+
+    def _rel_get_reference_T(self, side: str) -> np.ndarray:
+        ref = self._rel_reference_T_r if side == "right" else self._rel_reference_T_l
+        if ref is not None:
+            return ref
+        q_pin = self.kin.q_mujoco_to_pin(self.current_arm_qpos)
+        ref = self.kin.fk_T(q_pin, side).copy()
+        if side == "right":
+            self._rel_reference_T_r = ref.copy()
+        else:
+            self._rel_reference_T_l = ref.copy()
+        return ref
+
+    def _rel_build_target_from_anchor(
+        self,
+        side: str,
+        anchor_T: np.ndarray,
+        pos_component: np.ndarray,
+        euler_component: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Apply Quest rel_ee deltas with dynamic frame correction.
+
+        `calibration_transform` in teleop is defined relative to the initial wrist
+        frame semantics. After freeze / re-unsqueeze the wrist can be at a different
+        orientation, so we rotate the already-calibrated robot-frame delta by the
+        change from the initial wrist pose to the current anchor wrist pose.
+        """
+        target_T = anchor_T.copy()
+        ref_T = self._rel_get_reference_T(side)
+        R_ref = ref_T[:3, :3]
+        R_anchor = anchor_T[:3, :3]
+        R_corr = R_anchor @ R_ref.T
+
+        target_T[:3, 3] = anchor_T[:3, 3] + (R_corr @ pos_component)
+        if np.linalg.norm(euler_component) > 1e-10:
+            R_rel = R_scipy.from_euler("xyz", euler_component).as_matrix()
+            R_rel_corr = R_corr @ R_rel @ R_corr.T
+            target_T[:3, :3] = R_rel_corr @ R_anchor
+        return target_T
 
     def _update_gpos_from_q(self, arm_qpos: np.ndarray) -> np.ndarray:
         q_pin = self.kin.q_mujoco_to_pin(arm_qpos)
@@ -241,15 +330,15 @@ class BessicaSimRobot(MujocoDeviceBase):
     def _apply_initial_state(self) -> None:
         self._apply_gripper_to_mujoco(self.current_gripper_width)
         self.mjdata.qpos[self.arm_qpos_indices] = self.current_arm_qpos
-        self.mjdata.qvel[self.arm_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_mirror_qvel_indices] = 0.0
+        self.mjdata.ctrl[self.arm_ctrl_indices] = self.current_arm_qpos
+        self.mjdata.qvel[:] = 0.0
         mujoco.mj_forward(self.mjmodel, self.mjdata)
         self._commanded_arm_qpos = self.current_arm_qpos.copy()
         self._commanded_gripper_width = self.current_gripper_width.copy()
-        self._safe_arm_qpos = self.current_arm_qpos.copy()
-        self._safe_gripper_width = self.current_gripper_width.copy()
-        self.current_gpos = self._update_gpos_from_q(self.current_arm_qpos)
+        self._sync_state_from_mujoco_locked()
+        q_pin = self.kin.q_mujoco_to_pin(self.current_arm_qpos)
+        self._rel_reference_T_r = self.kin.fk_T(q_pin, "right").copy()
+        self._rel_reference_T_l = self.kin.fk_T(q_pin, "left").copy()
         self.target_gpos = self.current_gpos.copy()
 
     def _project_to_safe_static_contact_locked(
@@ -337,6 +426,13 @@ class BessicaSimRobot(MujocoDeviceBase):
         # (dx,dy,dz, droll,dpitch,dyaw, dgripper).
         d_l = action[0:7].copy()
         d_r = action[7:14].copy()
+        d_l[:3], d_l[3:6] = self._apply_ee_deadband(d_l[:3], d_l[3:6])
+        d_r[:3], d_r[3:6] = self._apply_ee_deadband(d_r[:3], d_r[3:6])
+        pose_control_active = bool(
+            action_dict.get("left_unsqueeze_active", action_dict.get("unsqueeze_active", False))
+            or action_dict.get("right_unsqueeze_active", False)
+        )
+        self._pose_control_active = pose_control_active
         grip_r_delta = d_r[6] * self.gripper_scale
         grip_l_delta = d_l[6] * self.gripper_scale
 
@@ -396,6 +492,7 @@ class BessicaSimRobot(MujocoDeviceBase):
         r_unsq = action_dict.get(
             "right_unsqueeze_active", action_dict.get("unsqueeze_active", False)
         )
+        self._pose_control_active = bool(l_unsq or r_unsq)
         l_was = self._rel_prev_l_unsq
         r_was = self._rel_prev_r_unsq
 
@@ -414,6 +511,8 @@ class BessicaSimRobot(MujocoDeviceBase):
         pos_r = action[7:10] * self.position_scale
         euler_r = action[10:13] * self.rotation_scale
         g_r = action[13] * self.gripper_scale
+        pos_l, euler_l = self._apply_ee_deadband(pos_l, euler_l)
+        pos_r, euler_r = self._apply_ee_deadband(pos_r, euler_r)
 
         with self._lock:
             if not l_unsq and not r_unsq:
@@ -487,11 +586,7 @@ class BessicaSimRobot(MujocoDeviceBase):
             if l_unsq:
                 cp = pos_l - self._rel_off_pos_l
                 ce = euler_l - self._rel_off_eul_l
-                Tl = self._rel_anchor_T_l.copy()
-                Tl[:3, 3] = Tl[:3, 3] + cp
-                if np.linalg.norm(ce) > 1e-10:
-                    Rrel = R_scipy.from_euler("xyz", ce).as_matrix()
-                    Tl[:3, :3] = Rrel @ self._rel_anchor_T_l[:3, :3]
+                Tl = self._rel_build_target_from_anchor("left", self._rel_anchor_T_l.copy(), cp, ce)
                 self._rel_last_raw_pos_l = pos_l.copy()
                 self._rel_last_raw_eul_l = euler_l.copy()
             else:
@@ -500,11 +595,7 @@ class BessicaSimRobot(MujocoDeviceBase):
             if r_unsq:
                 cp = pos_r - self._rel_off_pos_r
                 ce = euler_r - self._rel_off_eul_r
-                Tr = self._rel_anchor_T_r.copy()
-                Tr[:3, 3] = Tr[:3, 3] + cp
-                if np.linalg.norm(ce) > 1e-10:
-                    Rrel = R_scipy.from_euler("xyz", ce).as_matrix()
-                    Tr[:3, :3] = Rrel @ self._rel_anchor_T_r[:3, :3]
+                Tr = self._rel_build_target_from_anchor("right", self._rel_anchor_T_r.copy(), cp, ce)
                 self._rel_last_raw_pos_r = pos_r.copy()
                 self._rel_last_raw_eul_r = euler_r.copy()
             else:
@@ -554,17 +645,13 @@ class BessicaSimRobot(MujocoDeviceBase):
             arm_q, grip_w = self._project_to_safe_static_contact_locked(arm_q, grip_w)
             self._commanded_arm_qpos = arm_q.copy()
             self._commanded_gripper_width = grip_w.copy()
-            self.mjdata.qpos[self.arm_qpos_indices] = arm_q
+            self.mjdata.ctrl[self.arm_ctrl_indices] = arm_q
+            # Keep gripper on the original direct-position path for stable, predictable
+            # teleoperation feel independent of pose freeze / actual-state arm sync.
             self._apply_gripper_to_mujoco(grip_w)
-            self.mjdata.qvel[self.arm_qvel_indices] = 0.0
-            self.mjdata.qvel[self.gripper_qvel_indices] = 0.0
-            self.mjdata.qvel[self.gripper_mirror_qvel_indices] = 0.0
-            mujoco.mj_forward(self.mjmodel, self.mjdata)
-            self.current_arm_qpos = arm_q.copy()
             self.current_gripper_width = grip_w.copy()
-            self._safe_arm_qpos = arm_q.copy()
             self._safe_gripper_width = grip_w.copy()
-            self.current_gpos = self._update_gpos_from_q(arm_q)
+            self._sync_state_from_mujoco_locked()
 
     def _physics_loop(self) -> None:
         interval = 1.0 / max(self.simulation_fps, 1.0)
@@ -574,20 +661,22 @@ class BessicaSimRobot(MujocoDeviceBase):
             self._physics_stop.wait(interval)
 
     def _step_physics_locked(self) -> None:
-        arm_q = self._commanded_arm_qpos
+        if self.freeze_arms_without_pose_control and not self._pose_control_active:
+            arm_q = self.mjdata.qpos[self.arm_qpos_indices].copy()
+            self._commanded_arm_qpos = arm_q.copy()
+        else:
+            arm_q = self._commanded_arm_qpos
         grip_w = self._commanded_gripper_width
-        self.mjdata.qpos[self.arm_qpos_indices] = arm_q
-        self._apply_gripper_to_mujoco(grip_w)
-        self.mjdata.qvel[self.arm_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_mirror_qvel_indices] = 0.0
-        mujoco.mj_step(self.mjmodel, self.mjdata)
-        self.mjdata.qpos[self.arm_qpos_indices] = arm_q
-        self._apply_gripper_to_mujoco(grip_w)
-        self.mjdata.qvel[self.arm_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_qvel_indices] = 0.0
-        self.mjdata.qvel[self.gripper_mirror_qvel_indices] = 0.0
-        mujoco.mj_forward(self.mjmodel, self.mjdata)
+        self.mjdata.ctrl[self.arm_ctrl_indices] = arm_q
+        self.current_gripper_width = grip_w.copy()
+        self._safe_gripper_width = grip_w.copy()
+        for _ in range(self._physics_substeps_per_tick):
+            self._apply_gripper_to_mujoco(grip_w)
+            self.mjdata.qvel[self.gripper_qvel_indices] = 0.0
+            self.mjdata.qvel[self.gripper_mirror_qvel_indices] = 0.0
+            mujoco.mj_step(self.mjmodel, self.mjdata)
+            self._resolve_scene_prop_penetrations_locked()
+        self._sync_state_from_mujoco_locked()
 
     def start(self):
         self._physics_stop.clear()

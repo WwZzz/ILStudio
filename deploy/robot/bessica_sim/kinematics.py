@@ -74,8 +74,14 @@ class BessicaBimanualKinematics:
         self._frame_l = self._resolve_frame("left")
         self._right_v_cols = self._velocity_cols(self.model, self.RIGHT_JOINTS)
         self._left_v_cols = self._velocity_cols(self.model, self.LEFT_JOINTS)
+        self._right_q_cols = self._position_cols(self.model, self.RIGHT_JOINTS)
+        self._left_q_cols = self._position_cols(self.model, self.LEFT_JOINTS)
 
         self._w_err = np.array([0.45, 0.45, 0.45, 1.0, 1.0, 1.0], dtype=np.float64)
+        # Penalize proximal joint motion more than distal joint motion so wrist-axis
+        # orientation changes prefer elbow / wrist articulation over large shoulder twists.
+        self._joint_motion_weight = np.array([2.5, 2.0, 1.6, 1.2, 1.0, 0.9, 0.8], dtype=np.float64)
+        self._posture_weight = 1e-4
 
     def _resolve_frame(self, side: str) -> int:
         for name in (f"{side}_arm_link7", f"{side}_arm_joint7"):
@@ -93,6 +99,16 @@ class BessicaBimanualKinematics:
             j = model.joints[jid]
             for k in range(j.nv):
                 cols.append(j.idx_v + k)
+        return cols
+
+    @staticmethod
+    def _position_cols(model: pin.Model, names: List[str]) -> List[int]:
+        cols: List[int] = []
+        for n in names:
+            jid = model.getJointId(n)
+            j = model.joints[jid]
+            for k in range(j.nq):
+                cols.append(j.idx_q + k)
         return cols
 
     def q_mujoco_to_pin(self, q_mj: np.ndarray) -> np.ndarray:
@@ -145,11 +161,13 @@ class BessicaBimanualKinematics:
         initial guess and only arm columns of the Jacobian are used.
         """
         cols = self._right_v_cols if side == "right" else self._left_v_cols
+        q_cols = self._right_q_cols if side == "right" else self._left_q_cols
         nv_a = len(cols)
         fid = self._frame_r if side == "right" else self._frame_l
         target = pin.SE3(target_T[:3, :3], target_T[:3, 3])
         q = q_pin.copy()
-        reg = damp * np.eye(nv_a)
+        q_seed_arm = q_pin[q_cols].copy()
+        reg = damp * np.diag(self._joint_motion_weight[:nv_a])
 
         best_err = float("inf")
         best_q = q.copy()
@@ -172,10 +190,12 @@ class BessicaBimanualKinematics:
             )
             J_a = J[:, cols]
             J_w = self._w_err[:, None] * J_a
+            q_arm_err = q_seed_arm - q[q_cols]
+            rhs = J_w.T @ err_w + self._posture_weight * q_arm_err
             try:
-                dq_a = np.linalg.solve(J_w.T @ J_w + reg, J_w.T @ err_w)
+                dq_a = np.linalg.solve(J_w.T @ J_w + reg, rhs)
             except np.linalg.LinAlgError:
-                dq_a = np.linalg.lstsq(J_w, err_w, rcond=None)[0]
+                dq_a = np.linalg.lstsq(J_w.T @ J_w + reg, rhs, rcond=None)[0]
 
             v = np.zeros(self.model.nv, dtype=np.float64)
             for j, c in enumerate(cols):
