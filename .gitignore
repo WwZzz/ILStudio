@@ -18,6 +18,7 @@ scripts/*
 !scripts/mp4_to_gif.py
 !scripts/push_to_hub.py
 !scripts/download_dataset.py
+!scripts/evaluate_model.py
 logs/
 vla_backup/
 .vscode/
