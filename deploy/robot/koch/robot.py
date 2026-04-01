@@ -108,21 +108,14 @@ class KochFollowerWithCamera(BaseRobot):
             print(f"Error getting observation: {e}")
             return None
 
-    def obs2meta(self, obs):
-        """Convert the observations from the robot to MetaObs"""
-        if obs is None:
-            return None
-        qpos = obs.get('qpos')
+    def obs2meta(self, device_data):
+        """Extract robot state from this device's SHM data."""
+        if device_data is None:
+            return {}
+        qpos = device_data.get('qpos')
         if qpos is None:
-            qpos = np.array([obs[mname + '.pos'] for mname in self._motors], dtype=np.float32)
-        
-        # Process image data
-        if 'front_camera' in obs:
-            image = obs['front_camera'][np.newaxis, :].transpose(0, 3, 1, 2)
-        else:
-            image = np.zeros((1, 3, 480, 640), dtype=np.uint8)
-            
-        return MetaObs(state=qpos, state_joint=qpos, image=image)
+            qpos = np.array([device_data[m + '.pos'] for m in self._motors], dtype=np.float32)
+        return {'state': np.asarray(qpos, dtype=np.float32)}
     
     def shutdown(self):
         """Shutdown robot and cameras"""

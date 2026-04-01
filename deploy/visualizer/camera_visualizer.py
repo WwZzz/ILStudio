@@ -50,8 +50,10 @@ from typing import List, Optional, Tuple
 
 from deploy.shm_utils import SharedMemoryChannel
 
+from deploy.visualizer.base import BaseVisualizer
 
-class CameraVisualizer:
+
+class CameraVisualizer(BaseVisualizer):
     """
     Visualizer for camera images from shared memory.
     
@@ -78,11 +80,11 @@ class CameraVisualizer:
             grid_cols: Number of columns in grid layout (auto if None)
             scale: Scale factor for display (0.5 = half size)
         """
-        self.shm_names = shm_names
+        first = shm_names[0] if shm_names else ""
+        super().__init__(shm_name=first, fps=fps, **kwargs)
+        self.shm_names = list(shm_names)
         self.window_name = window_name
-        self.fps = fps
         self.scale = scale
-        self.is_running = False
         
         # Auto-calculate grid layout
         n_cameras = len(shm_names)
@@ -221,7 +223,11 @@ class CameraVisualizer:
         
         return grid
     
-    def visualize(self) -> bool:
+    def visualize(self, data: dict) -> bool:
+        """Satisfies ``BaseVisualizer``; ``data`` is unused (multi-SHM read inside)."""
+        return self._visualize_frame()
+
+    def _visualize_frame(self) -> bool:
         """
         Read from all cameras and display.
         
@@ -291,7 +297,7 @@ class CameraVisualizer:
                 
                 last_frame_time = current_time
                 
-                if not self.visualize():
+                if not self._visualize_frame():
                     break
                     
         except KeyboardInterrupt:

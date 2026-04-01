@@ -431,11 +431,12 @@ class So101SimRobot(BaseRobot):
         default_dim = 7 if self.control_mode == "delta_ee" else 6
         return mact.get('action', np.zeros(default_dim))
     
-    def obs2meta(self, obs):
-        """Convert observation to MetaObs"""
-        from benchmark.base import MetaObs
-        qpos = obs.get('qpos', np.zeros(6))
-        return MetaObs(state=qpos, state_joint=qpos, image=np.zeros((1, 3, 480, 640), dtype=np.uint8))
+    def obs2meta(self, device_data):
+        """Extract robot state from this device's SHM data."""
+        if device_data is None:
+            return {}
+        qpos = device_data.get('qpos', np.zeros(6, dtype=np.float32))
+        return {'state': np.asarray(qpos, dtype=np.float32)}
 
 
 # ==============================================================================

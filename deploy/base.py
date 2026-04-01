@@ -194,6 +194,86 @@ def is_camera_config(config:dict) -> bool:
     from deploy.sensor.camera.opencv_camera import OpenCVCamera
     return issubclass(device_class, OpenCVCamera)
 
+def _resolve_device_class(config: dict):
+    """Import and return the device class from a config dict."""
+    parts = config['type'].rsplit('.', 1)
+    mod = importlib.import_module(parts[0])
+    return getattr(mod, parts[1])
+
+
+def _get_device_shm_name(config: dict) -> str:
+    """Get the SHM name for a device config."""
+    args = config.get('args', {})
+    return args.get('name') or args.get('robot_id') or config.get('name', 'unknown')
+
+
+def create_obs2meta_func(device_configs: list):
+    """Build a composite obs2meta from per-device obs2meta methods.
+
+    Each device class must have a static/classmethod ``obs2meta(device_data) -> dict``
+    that returns partial observation fields (e.g. ``{'state': ...}`` or
+    ``{'image': ...}``).
+
+    The returned function takes a ``synced_data`` dict (keyed by SHM name) and
+    assembles a :class:`MetaObs`:
+
+    * ``'state'`` values are concatenated in config order.
+    * ``'image'`` values (each ``(K, C, H, W)``) are stacked along dim-0.
+    * Other keys: first non-None value wins.
+
+    Args:
+        device_configs: ordered list of device config dicts (the same list used
+            to start devices).  Visualizer entries should already be filtered out.
+    """
+    from deploy.utils import partition_visualizer_configs
+
+    # Filter out visualizer entries in case caller forgot
+    device_configs, _ = partition_visualizer_configs(list(device_configs))
+
+    entries = []  # list of (shm_name, obs2meta_callable)
+    for cfg in device_configs:
+        shm_name = _get_device_shm_name(cfg)
+        try:
+            cls = _resolve_device_class(cfg)
+        except Exception as e:
+            logger.warning("create_obs2meta_func: skip {} ({})", cfg.get('type'), e)
+            continue
+        if hasattr(cls, 'obs2meta'):
+            entries.append((shm_name, cls.obs2meta))
+        else:
+            logger.info("create_obs2meta_func: {} has no obs2meta, skip", cls.__name__)
+
+    logger.info("create_obs2meta_func: {} devices → [{}]",
+                len(entries), ", ".join(n for n, _ in entries))
+
+    def _composite_obs2meta(synced_data: dict) -> MetaObs:
+        if not synced_data:
+            return None
+        states = []
+        images = []
+        extra = {}
+        for shm_name, fn in entries:
+            dev_data = synced_data.get(shm_name)
+            if dev_data is None:
+                continue
+            partial = fn(dev_data)
+            if not partial:
+                continue
+            if 'state' in partial:
+                states.append(np.asarray(partial['state'], dtype=np.float32))
+            if 'image' in partial:
+                images.append(partial['image'])
+            for k, v in partial.items():
+                if k not in ('state', 'image') and k not in extra:
+                    extra[k] = v
+
+        state = np.concatenate(states) if states else None
+        image = np.concatenate(images, axis=0) if images else None
+        return MetaObs(state=state, image=image, **extra)
+
+    return _composite_obs2meta
+
+
 def is_teleop_config(config:dict) -> bool:
     """
     Check if the config is a teleop config

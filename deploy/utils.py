@@ -1,9 +1,77 @@
+import importlib
 import multiprocessing as mp
 import time
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import yaml
 from loguru import logger
+
+
+def finalize_deploy_device_dict(item: dict) -> dict:
+    """Normalize one deploy YAML entry (robot/teleop/viz row) and flatten ``args`` like ConfigLoader.load_robot."""
+    from configs.loader import ConfigLoader
+
+    if not isinstance(item, dict):
+        return item
+    cfg = ConfigLoader.normalize_config(item)
+    if "args" in cfg and isinstance(cfg["args"], dict):
+        for key, value in cfg["args"].items():
+            if key not in cfg:
+                cfg[key] = value
+    if "type" in cfg:
+        cfg["target"] = cfg["type"]
+    return cfg
+
+
+def coerce_finalize_deploy_list(cfg_or_list: Any) -> List:
+    """If YAML root is a list, finalize each dict; if a single dict, wrap as one-element list."""
+    if isinstance(cfg_or_list, list):
+        return [finalize_deploy_device_dict(x) if isinstance(x, dict) else x for x in cfg_or_list]
+    if isinstance(cfg_or_list, dict):
+        return [finalize_deploy_device_dict(cfg_or_list)]
+    return []
+
+
+def is_visualizer_config(cfg: dict) -> bool:
+    """True if ``type`` resolves to a class that subclasses ``BaseVisualizer`` (and is not the base itself)."""
+    if not isinstance(cfg, dict):
+        return False
+    t = cfg.get("type")
+    if not isinstance(t, str):
+        return False
+    t = t.strip()
+    if "." not in t:
+        return False
+    mod_name, _, attr_name = t.rpartition(".")
+    if not mod_name or not attr_name:
+        return False
+    try:
+        mod = importlib.import_module(mod_name)
+        obj = getattr(mod, attr_name, None)
+    except Exception:
+        return False
+    if not isinstance(obj, type):
+        return False
+    from deploy.visualizer.base import BaseVisualizer
+
+    try:
+        return issubclass(obj, BaseVisualizer) and obj is not BaseVisualizer
+    except TypeError:
+        return False
+
+
+def partition_visualizer_configs(
+    configs: List[dict],
+) -> Tuple[List[dict], List[dict]]:
+    """Split ``configs`` into (device entries, visualizer entries)."""
+    devices: List[dict] = []
+    viz: List[dict] = []
+    for c in configs:
+        if is_visualizer_config(c):
+            viz.append(c)
+        else:
+            devices.append(c)
+    return devices, viz
 
 
 def load_config(path: str) -> List[dict]:
@@ -49,44 +117,51 @@ def get_shm_name(cfg: dict) -> str:
     return args.get("name") or args.get("robot_id") or cfg.get("name", "unknown")
 
 
-def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str], List[dict]]:
+def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str], List[dict], List[dict]]:
     """
     Load device configs from args.
 
+    Visualizer rows: ``type`` is a class subclassing ``BaseVisualizer`` (other than
+    ``BaseVisualizer`` itself). Those rows are removed from the device list.
+
     Returns:
-        Tuple of (all_configs, all_shm_names, teleop_configs)
+        Tuple of (all_device_configs, all_shm_names, teleop_device_configs, visualizer_configs)
     """
     from configs.loader import ConfigLoader
 
     from deploy.base import is_robot_config
 
     cfg_loader = ConfigLoader(args=args, unknown_args=unknown_args)
-    robot_configs = []
-    teleop_configs = []
+    robot_configs: List[dict] = []
+    teleop_configs: List[dict] = []
 
     # Load robot config
     try:
         robot_cfg, robot_path = cfg_loader.load_robot(args.robot)
-        robot_configs = [robot_cfg] if not isinstance(robot_cfg, list) else robot_cfg
+        robot_configs = coerce_finalize_deploy_list(robot_cfg)
         logger.info("Loaded robot config from: {}", robot_path)
     except FileNotFoundError as e:
         logger.warning("ConfigLoader failed, falling back to direct YAML: {}", e)
-        robot_configs = load_config(args.robot)
+        robot_configs = coerce_finalize_deploy_list(load_config(args.robot))
 
     # Load teleop config
     if args.teleop.strip():
         try:
             teleop_cfg, teleop_path = cfg_loader.load_teleop(args.teleop)
-            teleop_configs = [teleop_cfg] if not isinstance(teleop_cfg, list) else teleop_cfg
+            teleop_configs = coerce_finalize_deploy_list(teleop_cfg)
             logger.info("Loaded teleop config from: {}", teleop_path)
         except FileNotFoundError as e:
             logger.warning("ConfigLoader failed, falling back to direct YAML: {}", e)
-            teleop_configs = load_config(args.teleop)
+            teleop_configs = coerce_finalize_deploy_list(load_config(args.teleop))
+
+    robot_devices, robot_viz = partition_visualizer_configs(robot_configs)
+    teleop_devices, teleop_viz = partition_visualizer_configs(teleop_configs)
+    visualizer_configs = teleop_viz + robot_viz
 
     # Auto-fill control_shm_name for robot configs if teleop is specified
-    if teleop_configs:
-        teleop_shm_name = get_shm_name(teleop_configs[0])
-        for cfg in robot_configs:
+    if teleop_devices:
+        teleop_shm_name = get_shm_name(teleop_devices[0])
+        for cfg in robot_devices:
             try:
                 if is_robot_config(cfg):
                     args_dict = cfg.get("args", {})
@@ -101,12 +176,17 @@ def load_device_configs(args, unknown_args) -> Tuple[List[dict], List[str], List
                         )
             except Exception:
                 pass
-    if teleop_configs:
-        logger.info("Teleop devices: {}", [get_shm_name(c) for c in teleop_configs])
-    logger.info("Robot devices: {}", [get_shm_name(c) for c in robot_configs])
-    all_configs = teleop_configs + robot_configs
+    if teleop_devices:
+        logger.info("Teleop devices: {}", [get_shm_name(c) for c in teleop_devices])
+    logger.info("Robot devices: {}", [get_shm_name(c) for c in robot_devices])
+    if visualizer_configs:
+        logger.info(
+            "Visualizer entries: {}",
+            [v.get("name") or v.get("type") for v in visualizer_configs],
+        )
+    all_configs = teleop_devices + robot_devices
     all_shm_names = [get_shm_name(c) for c in all_configs]
-    return all_configs, all_shm_names, teleop_configs
+    return all_configs, all_shm_names, teleop_devices, visualizer_configs
 
 
 class RateLimiter:

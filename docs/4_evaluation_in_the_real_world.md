@@ -11,24 +11,23 @@ This guide covers how to deploy and evaluate a trained policy on a physical robo
 
 ## System Architecture
 
-The `eval_real.py` script uses a multi-threaded architecture to handle the different rates of sensing, inference, and action:
+The current `eval_real.py` script uses a multi-process, shared-memory architecture:
 
-1.  **Sensing Thread**: Runs at a high frequency (`--sensing_rate`) to capture the latest observations (e.g., camera images, joint states) from the robot. It puts these observations into a queue.
-2.  **Inference Thread**: Waits for an observation from the queue. When it receives one, it runs the policy model to produce a *chunk* of future actions. This runs at a lower frequency, as inference can be slow. The resulting action chunk is passed to the Action Manager.
-3.  **Main Control Loop (Action Thread)**: Runs at the robot's required control frequency (`--publish_rate`). It continuously queries the **Action Manager** for the next action and sends it to the robot hardware.
+1.  **Device Processes**: Robot and camera devices run in their own subprocesses and publish data into shared memory.
+2.  **Inference Worker**: A dedicated subprocess reads device shared memory directly, synchronizes observations, runs policy inference, and writes action chunks into its own shared-memory channel.
+3.  **Main Control Loop**: Runs at the robot's required control frequency (`--publish_rate`). It continuously queries the **Action Manager** for the next action and sends it to the robot hardware through `policy_control_shm`.
 
 ## Example Usage
 
-This example shows how to run an evaluation on a hypothetical "agilex_aloha" robot for the "transfer_cube" task.
+This example shows how to run an evaluation on a real robot with the current CLI.
 
 ```bash
 python eval_real.py \
     --model_name_or_path ckpt/act_sim_transfer_cube_scripted_zscore_example \
     --robot_config agilex_aloha \
-    --task agilex_transfer_cube \
     --publish_rate 50 \
     --sensing_rate 25 \
-    --action_manager OlderFirstManager
+    --action_manager basic
 ```
 
 ## Key Arguments
@@ -56,7 +55,7 @@ python eval_real.py \
 
 *   `--action_manager` (string):
     *   **Description**: The name of the Action Manager class to use. See the Action Manager documentation for more details.
-    *   **Default**: `OlderFirstManager`
+    *   **Default**: `basic`
 
 ## Pre-flight Checklist
 

@@ -1,3 +1,28 @@
+# Visualizers: ``type`` must be a class subclassing ``BaseVisualizer``; such rows are not devices. Use -v.
+# One CameraVisualizer can list multiple ``shm_names`` (one window). Use multiple entries for separate windows.
+ 
+- type: deploy.visualizer.camera_visualizer.CameraVisualizer
+  name: biso101_cameras
+  args:
+    shm_names:
+      - top_camera
+      - head_camera
+      - left_wrist_camera
+      - right_wrist_camera
+    fps: 30
+    scale: 0.5
+
+# - type: deploy.visualizer.lowdim_visualizer.LowDimVisualizer
+#   name: biso101_lowdim
+#   args:
+#     shm_entries:
+#       - [bi_so101_leader, action]
+#       - [bi_so101_follower, qpos]
+#       - [policy_control_shm, action]
+#     dim: 12
+#     fps: 60
+#     time_window_s: 12
+
 - type: deploy.robot.bi_so101_follower.BiSo101Follower
   name: bi_so101_follower
   args:
@@ -9,6 +34,18 @@
     # This avoids re-calibration when switching between single and bimanual configs
     left_arm_id: so101_left_arm     # Same as so101_follower.yaml's robot_id
     right_arm_id: so101_right_arm    # Unique ID for right arm
+
+- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+  name: top_camera
+  args:
+    name: top_camera
+    index_or_path: /dev/top_camera
+    width: 640
+    height: 480
+    fps: 30
+    max_size_mb: 10
+    fourcc: MJPG
+    bgr_to_rgb: true
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: head_camera
@@ -34,7 +71,7 @@
     fps: 30
     fourcc: MJPG
     bgr_to_rgb: true
-    
+
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: right_wrist_camera
   args:
@@ -45,4 +82,4 @@
     fps: 30
     max_size_mb: 10
     fourcc: MJPG
-    bgr_to_rgb: true
+    bgr_to_rgb: true    

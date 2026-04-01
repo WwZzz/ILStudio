@@ -97,19 +97,29 @@ class ConfigLoader:
         else:
             # Collect non-reserved fields as args
             reserved_keys = {
-                'type', 'name', 'args', 'module_path', 'target', 
+                'type', 'name', 'args', 'module_path', 'target',
                 'manager_name', 'class', 'model_args', 'pretrained_config',
-                'config_class', 'model_class', 'data_processor', 
-                'data_collator', 'trainer_class', 'datasets', 'meta', 'envs'
+                'config_class', 'model_class', 'data_processor',
+                'data_collator', 'trainer_class', 'datasets', 'meta', 'envs',
+                'visualizer',
             }
             args_dict = {k: v for k, v in cfg.items() if k not in reserved_keys}
             if args_dict:
                 normalized['args'] = args_dict
         
         # 4. Preserve special fields
-        special_fields = ['pretrained_config', 'config_class', 'model_class', 
-                         'data_processor', 'data_collator', 'trainer_class',
-                         'datasets', 'meta', 'envs']
+        special_fields = [
+            'pretrained_config',
+            'config_class',
+            'model_class',
+            'data_processor',
+            'data_collator',
+            'trainer_class',
+            'datasets',
+            'meta',
+            'envs',
+            'visualizer',
+        ]
         for field in special_fields:
             if field in cfg:
                 normalized[field] = cfg[field]

@@ -107,7 +107,8 @@ if __name__=='__main__':
         action_normalizer=normalizers['action'], 
         state_normalizer=normalizers['state'], 
         ctrl_space=ctrl_space, 
-        ctrl_type=ctrl_type
+        ctrl_type=ctrl_type,
+        chunk_size=args.chunk_size,
     )
     logger.info(f"Policy created")
     

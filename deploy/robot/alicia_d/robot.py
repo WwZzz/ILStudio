@@ -1188,26 +1188,12 @@ class AliciaD(BaseRobot):
             
             rate_limiter.sleep(self.fps)
     
-    def obs2meta(self, obs: dict) -> MetaObs:
-        """Convert observations to MetaObs format."""
-        if obs is None:
-            return None
-        
-        qpos = obs.get('qpos', np.zeros(7))
-        
-        # Handle images if present
-        images = []
-        if 'image' in obs:
-            images = obs['image']
-            if isinstance(images, dict):
-                images = np.stack([images[k] for k in sorted(images.keys())], axis=0)
-            if images.ndim == 3:
-                images = images[None]
-            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
-        else:
-            images = np.zeros((1, 3, 480, 640), dtype=np.uint8)
-        
-        return MetaObs(state=qpos, image=images)
+    def obs2meta(self, device_data: dict) -> dict:
+        """Extract robot state from this device's SHM data."""
+        if device_data is None:
+            return {}
+        qpos = device_data.get('qpos', np.zeros(7, dtype=np.float32))
+        return {'state': np.asarray(qpos, dtype=np.float32)}
     
     def meta2act(self, mact) -> np.ndarray:
         """Convert MetaAction to robot action."""
