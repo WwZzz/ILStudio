@@ -41,6 +41,27 @@ DEFAULT_GLIMIT_MAX = [0.340, 0.4, 0.23, 2.0, 1.57, 1.5]
 DEFAULT_JOINT_SIGNS = [1, 1, 1, 1, 1, 1]
 
 
+def _camera_frame_to_chw_u8(frame: np.ndarray) -> np.ndarray:
+    """
+    Normalize a single camera frame to uint8 CHW (3, H, W).
+
+    OpenCV / LeRobot typically yield HWC (H, W, 3). Placeholders may use CHW (3, H, W).
+    Stacking HWC then doing transpose(0, 3, 1, 2) breaks if any frame is already CHW
+    (e.g. head missing and only np.zeros((3, H, W)) is used), which yields tensors
+    like (K, H, C, W) and ACT/ResNet errors (e.g. 640 vs 3 on channel/spatial dims).
+    """
+    if frame.ndim != 3:
+        raise ValueError(f"Camera frame must be rank-3, got shape {getattr(frame, 'shape', None)}")
+    frame = np.asarray(frame)
+    if frame.shape[-1] == 3:
+        return np.ascontiguousarray(frame.transpose(2, 0, 1))
+    if frame.shape[0] == 3:
+        return np.ascontiguousarray(frame)
+    raise ValueError(
+        f"Expected HWC (H, W, 3) or CHW (3, H, W) camera frame, got shape {frame.shape}"
+    )
+
+
 class BiSo101Follower(BaseRobot):
     """
     Bimanual SO101 Follower Robot with Camera Integration
@@ -657,28 +678,20 @@ class BiSo101Follower(BaseRobot):
         return action_dict
     
     @classmethod
-    def obs2meta(cls, obs):
-        """Convert the observations from the robot to MetaObs"""
-        if obs is None:
-            return None
-        
-        left_qpos = np.array([obs['bi_so101_follower'][mname+'.pos'] for mname in cls._left_motors], dtype=np.float32)
-        right_qpos = np.array([obs['bi_so101_follower'][mname+'.pos'] for mname in cls._right_motors], dtype=np.float32)
-        qpos = np.concatenate([left_qpos, right_qpos])
-        images = []
-        if 'head_camera' in obs:
-            image = obs['head_camera']['image']
-            images.append(image)
-        else:
-            images.append(np.zeros((3, 480, 640), dtype=np.uint8))
-        if 'left_wrist_camera' in obs:
-            image = obs['left_wrist_camera']['image']
-            images.append(image)
-        if 'right_wrist_camera' in obs:
-            image = obs['right_wrist_camera']['image']
-            images.append(image)
-        images = np.stack(images).transpose(0, 3, 1, 2)
-        return MetaObs(state=qpos,  image=images)
+    def obs2meta(cls, device_data):
+        """Extract robot state from this device's SHM data.
+
+        Args:
+            device_data: dict from SharedMemoryChannel (motor positions, etc.)
+
+        Returns:
+            dict with 'state' key containing qpos array, or empty dict.
+        """
+        if device_data is None:
+            return {}
+        left_qpos = np.array([device_data[m + '.pos'] for m in cls._left_motors], dtype=np.float32)
+        right_qpos = np.array([device_data[m + '.pos'] for m in cls._right_motors], dtype=np.float32)
+        return {'state': np.concatenate([left_qpos, right_qpos])}
     
     def start(self):
         """
@@ -1057,7 +1070,7 @@ if __name__ == "__main__":
     from deploy.shm_utils import SharedMemoryChannel
 
     # Load config
-    cfg_path = Path(__file__).resolve().parents[3] / "configs" / "robot" / "bi_so101_follower.yaml"
+    cfg_path = Path(__file__).resolve().parents[3] / "configs" / "robot" / "biso101.yaml"
     with open(cfg_path, "r") as f:
         raw = yaml.safe_load(f)
     device_config = raw[0] if isinstance(raw, list) else raw

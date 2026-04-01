@@ -125,8 +125,9 @@ class DirectPolicyLoader:
         with open(config_path, 'r') as f:
             config = json.load(f)
         
-        # Update args with config parameters
-        if 'chunk_size' in config:
+        # Update args with config parameters. Respect an explicit positive chunk_size
+        # override from CLI; otherwise inherit the checkpoint default.
+        if 'chunk_size' in config and getattr(args, 'chunk_size', -1) <= 0:
             args.chunk_size = config['chunk_size']
         if 'camera_names' in config:
             args.camera_names = config['camera_names']

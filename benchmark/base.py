@@ -87,7 +87,15 @@ class MetaEnv:
         self.env.close()
     
 class MetaPolicy:
-    def __init__(self, policy, action_normalizer=None, state_normalizer=None, ctrl_space='ee', ctrl_type='delta'):
+    def __init__(
+        self,
+        policy,
+        action_normalizer=None,
+        state_normalizer=None,
+        ctrl_space='ee',
+        ctrl_type='delta',
+        chunk_size: int = -1,
+    ):
         """
         MetaPolicy wrapper for policy inference.
         
@@ -101,12 +109,15 @@ class MetaPolicy:
             state_normalizer: Normalizer for states  
             ctrl_space: Control space ('ee' or 'joint')
             ctrl_type: Control type ('delta' or 'abs')
+            chunk_size: If > 0, truncate each inferred action chunk to this many
+                        steps after model output and before dispatch.
         """
         self.policy = policy
         self.ctrl_space = ctrl_space
         self.ctrl_type = ctrl_type
         self.action_normalizer = action_normalizer
         self.state_normalizer = state_normalizer
+        self.chunk_size = int(chunk_size) if chunk_size is not None else -1
 
     def meta2obs(self, samples: list):
         """
@@ -267,6 +278,14 @@ class MetaPolicy:
         policy_obs = self.meta2obs(samples)
         # inference action
         action_chunk = self.policy.select_action(policy_obs)
+        if self.chunk_size > 0:
+            if isinstance(action_chunk, torch.Tensor):
+                if action_chunk.ndim >= 3:
+                    action_chunk = action_chunk[:, :self.chunk_size, ...]
+            else:
+                action_chunk = np.asarray(action_chunk)
+                if action_chunk.ndim >= 3:
+                    action_chunk = action_chunk[:, :self.chunk_size, ...]
         # (B, chunk_size, action_dim)
         macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
         action_chunk = macts.action

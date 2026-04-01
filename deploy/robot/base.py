@@ -45,8 +45,16 @@ class AbstractRobotInterface(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def obs2meta(self, obs):
-        """Convert the observations from the robot to MetaObs"""
+    def obs2meta(self, device_data):
+        """Convert this device's SHM data to a partial obs dict.
+
+        Args:
+            device_data: dict read from this device's SharedMemoryChannel.
+
+        Returns:
+            dict with keys like 'state', 'image', etc.  The combiner
+            (create_obs2meta_func) will merge results from all devices.
+        """
         pass
 
     @abc.abstractmethod
@@ -81,9 +89,14 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
         """Convert the MetaAct to execusable actions for the robot"""
         return mact['action']
 
-    def obs2meta(self, obs):
-        """Convert the observations from the robot to MetaObs"""
-        return MetaObs(state=obs['qpos'], state_joint=obs['qpos'], image=np.stack([obs['image'][k] for k in obs['image']], axis=0).transpose(0, 3, 1, 2))
+    def obs2meta(self, device_data):
+        """Default: extract qpos as state."""
+        if device_data is None:
+            return {}
+        qpos = device_data.get('qpos')
+        if qpos is not None:
+            return {'state': np.asarray(qpos, dtype=np.float32)}
+        return {}
 
 
     def get_data(self) -> dict:

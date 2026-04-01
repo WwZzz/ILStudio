@@ -13,8 +13,22 @@ class OlderFirstManager(BasicActionManager):
             super().put(chunk, timestamp)
         else:
             with self._lock:
+                current_len = len(self._chunk_buffer)
                 threshold = int(len(self._chunk_buffer) * self.coef)
                 if self.current_step < threshold:
                     self._stats["chunks_discarded"] += 1
+                    self._log_debug(
+                        "discard incoming chunk_len={} current_step={}/{} threshold={}",
+                        len(chunk) if chunk is not None else 0,
+                        self.current_step,
+                        current_len,
+                        threshold,
+                    )
                     return
+            self._log_debug(
+                "accept incoming chunk_len={} after finishing step {}/{}",
+                len(chunk) if chunk is not None else 0,
+                self.current_step,
+                current_len,
+            )
             super().put(chunk, timestamp)

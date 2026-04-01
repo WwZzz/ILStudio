@@ -8,6 +8,7 @@ import time
 from typing import Optional, Union
 import cv2
 from deploy.base import BaseDevice
+import numpy as np
 
 def _get_cv2_backend() -> int:
     """Choose OpenCV VideoCapture backend by platform."""
@@ -141,6 +142,22 @@ class OpenCVCamera(BaseDevice):
         if self.bgr_to_rgb:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return {"image": image, "timestamp": time.perf_counter()}
+
+    @staticmethod
+    def obs2meta(device_data: dict) -> dict:
+        """Return image in CHW uint8 format for MetaObs assembly."""
+        if device_data is None:
+            return {}
+        img = device_data.get('image')
+        if img is None or not isinstance(img, np.ndarray):
+            return {}
+        if img.ndim == 3 and img.shape[-1] in (1, 3, 4):
+            img = np.ascontiguousarray(img.transpose(2, 0, 1))
+        elif img.ndim == 3 and img.shape[0] in (1, 3, 4):
+            img = np.ascontiguousarray(img)
+        else:
+            return {}
+        return {'image': img[np.newaxis]}  # (1, C, H, W)
 
     def close(self) -> None:
         super().close()

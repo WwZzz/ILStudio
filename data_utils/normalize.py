@@ -964,9 +964,14 @@ class PercentileNormalizer(BaseNormalizer):
         return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=1e-6, mask=None, *args, **kwargs):
+    # Dimensions whose raw std is below this threshold are treated as constant
+    # (zero-variance). After normalization they are forced to 0.0, matching
+    # training behaviour where (x-mean)/std = 0/0 → 0.
+    CONSTANT_DIM_STD_THRESHOLD = 0.001
+
+    def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=1e-2, mask=None, *args, **kwargs):
         super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
-        self.min_std = min_std # avoid large deviation
+        self.min_std = min_std
         
     def __str__(self):
         return "zscore"
@@ -980,8 +985,15 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        std = np.clip(stats['std'], self.min_std, np.inf)
-        normalized = (data-stats['mean'])/std
+        raw_std = stats['std']
+        std = np.clip(raw_std, self.min_std, np.inf)
+        normalized = (data - stats['mean']) / std
+
+        # Zero out dimensions that were constant during training.  Their raw
+        # std is (near-)zero, so even a tiny real-world deviation produces
+        # extreme normalized values that corrupt transformer attention.
+        constant_dims = raw_std < self.CONSTANT_DIM_STD_THRESHOLD
+        if np.any(constant_dims): normalized[..., constant_dims] = 0.0
         
         # Apply mask to selectively normalize
         result = self._apply_mask(data, normalized, self.mask)
@@ -998,7 +1010,7 @@ class ZScoreNormalizer(BaseNormalizer):
         
         # Perform denormalization
         std = np.clip(stats['std'], self.min_std, np.inf)
-        denormalized = data*std + stats['mean']
+        denormalized = data * std + stats['mean']
         
         # Apply mask to selectively denormalize
         result = self._apply_mask(data, denormalized, self.mask)

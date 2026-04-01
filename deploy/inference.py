@@ -50,6 +50,114 @@ from loguru import logger
 from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
 
 
+def _env_flag(name: str) -> bool:
+    value = str(os.getenv(name, "")).strip().lower()
+    return value not in ("", "0", "false", "no", "off")
+
+
+def _preview_array(arr: np.ndarray, max_items: int = 4) -> str:
+    arr = np.asarray(arr)
+    if arr.size == 0:
+        return f"shape={arr.shape}, dtype={arr.dtype}, empty"
+    flat = arr.reshape(-1)
+    preview_items = []
+    for item in flat[:max_items]:
+        try:
+            preview_items.append(f"{float(item):.4f}")
+        except (TypeError, ValueError):
+            preview_items.append(repr(item))
+    return (
+        f"shape={arr.shape}, dtype={arr.dtype}, "
+        f"preview=[{', '.join(preview_items)}]"
+    )
+
+
+def _summarize_state_array(arr: np.ndarray, edge_items: int = 6) -> str:
+    arr = np.asarray(arr)
+    if arr.size == 0:
+        return f"shape={arr.shape}, dtype={arr.dtype}, empty"
+    flat = arr.reshape(-1)
+    if flat.size <= edge_items * 2:
+        preview = ", ".join(f"{float(x):.4f}" for x in flat)
+        return f"shape={arr.shape}, dtype={arr.dtype}, values=[{preview}]"
+    head = ", ".join(f"{float(x):.4f}" for x in flat[:edge_items])
+    tail = ", ".join(f"{float(x):.4f}" for x in flat[-edge_items:])
+    return (
+        f"shape={arr.shape}, dtype={arr.dtype}, "
+        f"head=[{head}], tail=[{tail}]"
+    )
+
+
+def _delta_summary(curr: Optional[np.ndarray], prev: Optional[np.ndarray], label: str) -> str:
+    if curr is None:
+        return f"{label}_delta=None"
+    curr = np.asarray(curr)
+    if prev is None:
+        return f"{label}_delta=first_sample"
+    prev = np.asarray(prev)
+    if curr.shape != prev.shape:
+        return f"{label}_delta=shape_change {prev.shape}->{curr.shape}"
+    delta = curr - prev
+    return (
+        f"{label}_delta=max={float(np.max(np.abs(delta))):.4f}, "
+        f"l2={float(np.linalg.norm(delta)):.4f}"
+    )
+
+
+def _summarize_synced_data(synced_data: Optional[Dict[str, dict]]) -> str:
+    if not synced_data:
+        return "no_synced_data"
+    parts = []
+    for name, data in synced_data.items():
+        if not isinstance(data, dict):
+            parts.append(f"{name}(type={type(data).__name__})")
+            continue
+        ts = data.get("__timestamp__", data.get("timestamp", None))
+        keys = sorted(k for k in data.keys() if not k.startswith("__"))
+        ts_str = "n/a" if ts is None else f"{float(ts):.6f}"
+        parts.append(f"{name}(ts={ts_str}, keys={keys})")
+    return "; ".join(parts)
+
+
+def _summarize_mobs(mobs) -> str:
+    if mobs is None:
+        return "mobs=None"
+    state_summary = "state=None"
+    if getattr(mobs, "state", None) is not None:
+        state_summary = f"state={_summarize_state_array(mobs.state)}"
+    image = getattr(mobs, "image", None)
+    image_summary = "image=None"
+    if image is not None:
+        image_summary = f"image_shape={np.asarray(image).shape}"
+    timestep = getattr(mobs, "timestep", None)
+    timestep_summary = f"timestep={np.asarray(timestep).tolist()}" if timestep is not None else "timestep=None"
+    return f"{state_summary}; {image_summary}; {timestep_summary}"
+
+
+def _summarize_mact_list(mact_list: list) -> str:
+    if not mact_list:
+        return "chunk_len=0"
+
+    first_action = _extract_step_action(mact_list[0])
+    last_action = _extract_step_action(mact_list[-1])
+    parts = [f"chunk_len={len(mact_list)}"]
+    if first_action is not None:
+        parts.append(f"first={_preview_array(first_action)}")
+    if last_action is not None:
+        parts.append(f"last={_preview_array(last_action)}")
+    return "; ".join(parts)
+
+
+def _extract_step_action(step):
+    if isinstance(step, np.ndarray) and step.dtype == object and len(step) > 0:
+        first = step[0]
+        if isinstance(first, dict):
+            return first.get("action", None)
+    if isinstance(step, np.ndarray):
+        return step
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Inference Process (runs in subprocess)
 # ---------------------------------------------------------------------------
@@ -167,6 +275,12 @@ def inference_worker(
     
     running = True
     inference_count = 0
+    infer_debug = _env_flag("ILSTUDIO_INFER_DEBUG")
+    print_full_state = _env_flag("ILSTUDIO_INFER_PRINT_STATE")
+    last_obs_summary = "obs=unavailable"
+    prev_state_snapshot = None
+    prev_first_action = None
+    prev_last_action = None
     
     def _handle_signal(signum, frame):
         nonlocal running
@@ -179,21 +293,30 @@ def inference_worker(
     
     def _get_obs_sim():
         """Read obs from obs_shm (sim mode)."""
+        nonlocal last_obs_summary
         from benchmark.base import dict2meta
         obs_data = obs_reader.read(blocking=False)
         if obs_data is None:
+            last_obs_summary = "obs=None"
             return None, 0
         t = obs_data.get("t", 0)
         mobs_dict = {k: v for k, v in obs_data.items() if not k.startswith("__") and k != "t"}
         mobs = dict2meta(mobs_dict, mtype="obs")
+        last_obs_summary = _summarize_mobs(mobs)
         return mobs, t
     
     def _get_obs_real():
         """Read obs from device SHMs via synchronizer (real mode)."""
+        nonlocal last_obs_summary
         synced_data = synchronizer.get_synced_frame_blocking(debug=False)
         if synced_data is None:
+            last_obs_summary = "synced_data=None"
             return None, 0
         mobs = obs2meta_func(synced_data)
+        last_obs_summary = (
+            f"devices={_summarize_synced_data(synced_data)} | "
+            f"mobs={_summarize_mobs(mobs)}"
+        )
         return mobs, 0
     
     get_obs = _get_obs_real if is_real_mode else _get_obs_sim
@@ -223,7 +346,15 @@ def inference_worker(
                         # Get latest observation
                         mobs, t = get_obs()
                         if mobs is None:
-                            logger.debug(f"[InferenceWorker-{mode_str}] No obs available at trigger time")
+                            if infer_debug:
+                                logger.info(
+                                    "[InferenceWorker-{}] Skip infer epoch={} because obs unavailable: {}",
+                                    mode_str,
+                                    trigger_epoch,
+                                    last_obs_summary,
+                                )
+                            else:
+                                logger.debug(f"[InferenceWorker-{mode_str}] No obs available at trigger time")
                             continue
                         
                         # Set timestep
@@ -240,6 +371,15 @@ def inference_worker(
                         
                         inference_count += 1
                         latency_ms = (t_end - t_start) * 1000
+                        chunk_summary = _summarize_mact_list(mact_list)
+                        state_snapshot = None if mobs.state is None else np.array(mobs.state, copy=True)
+                        first_action = _extract_step_action(mact_list[0]) if mact_list else None
+                        last_action = _extract_step_action(mact_list[-1]) if mact_list else None
+                        infer_delta_summary = "; ".join([
+                            _delta_summary(state_snapshot, prev_state_snapshot, "state"),
+                            _delta_summary(first_action, prev_first_action, "first_action"),
+                            _delta_summary(last_action, prev_last_action, "last_action"),
+                        ])
                         
                         # Serialize and write (include epoch for staleness detection)
                         action_payload = serialize_mact_list(mact_list)
@@ -247,6 +387,32 @@ def inference_worker(
                         action_payload["epoch"] = trigger_epoch
                         action_payload["latency_ms"] = latency_ms
                         action_writer.write(action_payload)
+
+                        if infer_debug:
+                            logger.info(
+                                "[InferenceWorker-{}] Infer #{} epoch={} latency={:.1f}ms | {} | {}",
+                                mode_str,
+                                inference_count,
+                                trigger_epoch,
+                                latency_ms,
+                                last_obs_summary,
+                                chunk_summary,
+                            )
+                            logger.info(
+                                "[InferenceWorker-{}] Infer #{} deltas | {}",
+                                mode_str,
+                                inference_count,
+                                infer_delta_summary,
+                            )
+                            if print_full_state and mobs.state is not None:
+                                logger.info(
+                                    "[InferenceWorker-{}] Full mobs.state=\n{}",
+                                    mode_str,
+                                    np.array2string(np.asarray(mobs.state), precision=5, suppress_small=True),
+                                )
+                        prev_state_snapshot = state_snapshot
+                        prev_first_action = None if first_action is None else np.array(first_action, copy=True)
+                        prev_last_action = None if last_action is None else np.array(last_action, copy=True)
                         
                         if inference_count % 50 == 0:
                             logger.debug(f"[InferenceWorker-{mode_str}] Inference #{inference_count}, "

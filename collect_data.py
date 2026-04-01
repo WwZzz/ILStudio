@@ -90,7 +90,9 @@ def main():
     )
     args, unknown_args = parser.parse_known_args()
 
-    all_configs, all_shm_names, teleop_configs = load_device_configs(args, unknown_args)
+    all_configs, all_shm_names, teleop_configs, visualizer_configs = load_device_configs(
+        args, unknown_args
+    )
 
     # Clean orphaned SHM
     cleanup_all_shm(all_shm_names)
@@ -108,6 +110,7 @@ def main():
             device_configs=all_configs,
             get_shm_name_func=get_shm_name,
             is_camera_config_func=is_camera_config,
+            visualizer_configs=visualizer_configs,
         )
 
     # Connect to all SHM channels

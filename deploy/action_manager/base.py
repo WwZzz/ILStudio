@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -7,6 +8,11 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from deploy.inference import InferenceContext
+
+
+def _env_flag(name: str) -> bool:
+    value = str(os.getenv(name, "")).strip().lower()
+    return value not in ("", "0", "false", "no", "off")
 
 
 class AbstractActionManager(ABC):
@@ -95,7 +101,7 @@ class BasicActionManager(AbstractActionManager):
         self._buffer = None
         self._chunk_buffer = None
         self._inference_ctx: Optional["InferenceContext"] = None
-        self._debug = debug
+        self._debug = bool(debug or _env_flag("ILSTUDIO_ACTION_DEBUG"))
         
         # Lightweight statistics — always tracked, printed on reset() if debug=True
         self._stats = {
@@ -111,9 +117,36 @@ class BasicActionManager(AbstractActionManager):
         if self._debug:
             logger.info(f"[ActionManager] {self.__class__.__name__} initialized (debug=True)")
 
+    def _log_debug(self, message: str, *args):
+        if self._debug:
+            logger.info(f"[ActionManager:{self.__class__.__name__}] " + message, *args)
+
+    def _buffer_status(self):
+        with self._lock:
+            chunk_len = len(self._chunk_buffer) if self._chunk_buffer is not None else 0
+            return self.current_step, chunk_len
+
+    def _summarize_action(self, action) -> str:
+        if action is None:
+            return "action=None"
+        arr = action
+        if isinstance(action, np.ndarray) and action.dtype == object and len(action) > 0:
+            first = action[0]
+            if isinstance(first, dict):
+                arr = first.get("action", None)
+        if arr is None:
+            return "action=None"
+        arr = np.asarray(arr)
+        if arr.size == 0:
+            return f"shape={arr.shape}, empty"
+        flat = arr.reshape(-1)
+        preview = ", ".join(f"{float(x):.4f}" for x in flat[:4])
+        return f"shape={arr.shape}, preview=[{preview}]"
+
     def set_inference_context(self, inference_ctx: "InferenceContext"):
         """Set inference context for SHM-based inference."""
         self._inference_ctx = inference_ctx
+        self._log_debug("bound inference context")
 
     def select_action(self):
         """
@@ -133,6 +166,13 @@ class BasicActionManager(AbstractActionManager):
         mact_list = self._inference_ctx.poll_action_chunks()
         if mact_list:
             self._stats["chunks_received"] += 1
+            step_idx, chunk_len = self._buffer_status()
+            self._log_debug(
+                "received chunk_len={} while buffer_step={}/{}",
+                len(mact_list),
+                step_idx,
+                chunk_len,
+            )
             self.put(mact_list, timestamp=time.perf_counter())
         
         # Step 2: Check if we need to trigger inference
@@ -141,6 +181,11 @@ class BasicActionManager(AbstractActionManager):
         if buffer_empty or need_infer:
             self._inference_ctx.send_trigger(self.t)
             self._stats["triggers_sent"] += 1
+            self._log_debug(
+                "sent trigger at t={} reason={}",
+                self.t,
+                "buffer_empty" if buffer_empty else "should_infer",
+            )
         
         # Step 3: If buffer empty, block-wait for inference result
         if buffer_empty:
@@ -150,6 +195,14 @@ class BasicActionManager(AbstractActionManager):
         action = self.get()
         if action is None:
             raise RuntimeError("ActionManager returned None - no action available")
+        emit_step, emit_chunk_len = self._buffer_status()
+        self._log_debug(
+            "emit action t={} buffer_step={}/{} {}",
+            self.t,
+            emit_step,
+            emit_chunk_len,
+            self._summarize_action(action),
+        )
         
         # Step 5: Auto-increment step counter
         self.t += 1
@@ -167,6 +220,7 @@ class BasicActionManager(AbstractActionManager):
                 wait_ms = (time.perf_counter() - t_start) * 1000
                 self._stats["cumulative_wait_ms"] += wait_ms
                 self._stats["chunks_received"] += 1
+                self._log_debug("waited {:.1f}ms for chunk_len={}", wait_ms, len(mact_list))
                 self.put(mact_list, timestamp=time.perf_counter())
                 break
             
@@ -185,14 +239,19 @@ class BasicActionManager(AbstractActionManager):
     def put(self, chunk, timestamp: float = None):
         with self._lock:
             # Track how many steps were wasted in the replaced buffer
+            old_len = len(self._chunk_buffer) if self._chunk_buffer is not None else 0
             if self._chunk_buffer is not None:
-                old_len = len(self._chunk_buffer)
                 remained = max(0, old_len - self.current_step)
                 if remained > 0:
                     self._stats["total_remaining_on_replace"] += remained
                     self._stats["replace_count"] += 1
             self._chunk_buffer = chunk
             self.current_step = 0
+        self._log_debug(
+            "stored chunk_len={} replaced_old_len={}",
+            len(chunk) if chunk is not None else 0,
+            old_len,
+        )
 
     def get(self, timestamp: float = None):
         with self._lock:

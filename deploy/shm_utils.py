@@ -236,6 +236,7 @@ class SharedMemoryChannel:
         timeout: Optional[float] = None,
         return_index: bool = False,
         skip_unchanged: bool = False,
+        copy: bool = False,
     ):
         """Read data from shared memory.
 
@@ -245,6 +246,11 @@ class SharedMemoryChannel:
             return_index: If True, return (data, index) tuple.
             skip_unchanged: If True, return None when __timestamp__ hasn't changed
                             since last read (avoids returning duplicate data).
+            copy: If True, numpy arrays are copied out of the shared memory
+                buffer so that subsequent writes cannot corrupt them.  Use this
+                when the returned data will be held across writer cycles (e.g.
+                stored in an action buffer for seconds).  Default False
+                (zero-copy) for performance with large payloads like images.
         """
         if not self.shm: 
             try: self.connect(timeout=0.1)
@@ -288,7 +294,8 @@ class SharedMemoryChannel:
                 for k, meta in schema.items():
                     if meta['t'] == 'np':
                         ptr = payload_base + meta['o']
-                        result[k] = np.ndarray(meta['s'], dtype=meta['d'], buffer=self.shm.buf[ptr:ptr+meta['b']])
+                        arr = np.ndarray(meta['s'], dtype=meta['d'], buffer=self.shm.buf[ptr:ptr+meta['b']])
+                        result[k] = arr.copy() if copy else arr
                     else:
                         result[k] = meta['v']
 
@@ -405,18 +412,15 @@ class SharedMemoryDataSynchronizer:
         for name, ch in self.shm_channels:
             if ch is None:
                 continue
-            data = ch.read(blocking=False, skip_unchanged=True)
+            # Zero-copy read; we copy arrays ourselves below (one copy total).
+            data = ch.read(blocking=False, skip_unchanged=True, copy=False)
             if data is not None:
                 ts = self._get_timestamp(data)
-                # Make a copy for arrays so buffer doesn't hold shared memory references
                 data_copy = {}
                 for k, v in data.items():
                     if k in ("__timestamp__", "timestamp"):
-                        continue  # skip, we store ts separately
-                    if isinstance(v, np.ndarray):
-                        data_copy[k] = np.array(v, copy=True)
-                    else:
-                        data_copy[k] = v
+                        continue
+                    data_copy[k] = v.copy() if isinstance(v, np.ndarray) else v
                 data_copy["__timestamp__"] = ts
                 self._buffers[name].append((ts, data_copy))
 

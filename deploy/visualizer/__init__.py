@@ -4,7 +4,7 @@ Visualizer module for displaying device data from shared memory.
 Available visualizers:
 - BaseVisualizer: Base class for custom visualizers
 - CameraVisualizer: Display camera images in a grid
-- MujocoCameraVisualizer: Display named camera keys from a robot SHM
+- LowDimVisualizer: Time-series plots for low-dimensional SHM vectors (see lowdim_visualizer.py)
 """
 
 from deploy.visualizer.base import (
@@ -31,12 +31,10 @@ from deploy.visualizer.mujoco_proxy_visualizer import (
 __all__ = [
     "BaseVisualizer",
     "CameraVisualizer",
-    "MujocoCameraVisualizer",
-    "MujocoProxyVisualizer",
+    "LowDimVisualizer",
     "start_visualizer",
     "start_camera_visualizer",
-    "start_mujoco_camera_visualizer",
-    "start_mujoco_proxy_visualizer",
+    "start_lowdim_visualizer",
     "get_visualizer_class",
     "get_visualizer_type_string",
     "start_all_visualizers",

@@ -14,7 +14,8 @@ Usage:
 import time
 import importlib
 from abc import ABC, abstractmethod
-from typing import Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 from deploy.shm_utils import SharedMemoryChannel
 
@@ -206,6 +207,37 @@ def get_visualizer_class(device_type: str) -> Optional[type]:
         return None
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_non_null_float(specs: List[Dict[str, Any]], field: str, default: float) -> float:
+    for s in specs:
+        v = s.get(field)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+    return default
+
+
+def _first_non_null_int(specs: List[Dict[str, Any]], field: str, default: int) -> int:
+    for s in specs:
+        v = s.get(field)
+        if v is not None:
+            try:
+                return int(float(v))
+            except (TypeError, ValueError):
+                pass
+    return default
+
+
 def get_visualizer_type_string(device_type: str) -> Optional[str]:
     """
     Get the full type string for a device's Visualizer class.
@@ -223,61 +255,99 @@ def get_visualizer_type_string(device_type: str) -> Optional[str]:
     return None
 
 
-def is_mujoco_device_type(device_type: str) -> bool:
-    try:
-        parts = device_type.rsplit('.', 1)
-        module_path = parts[0]
-        class_name = parts[1]
-        module = importlib.import_module(module_path)
-        device_class = getattr(module, class_name)
-        from deploy.simulation.mujoco import MujocoDeviceBase
+def _lowdim_share_group_id(device_shm_name: str, share_id: int) -> str:
+    """
+    ``share_id >= 0``: same id → one LowDimVisualizer (e.g. teleop + robot both ``id: 0``).
+    ``share_id < 0`` (default when ``id`` omitted): solo, one process per device SHM.
+    """
+    if share_id >= 0:
+        return f"lowdim_share_{share_id}"
+    return f"lowdim_solo_{device_shm_name}"
 
-        return issubclass(device_class, MujocoDeviceBase)
-    except Exception:
-        return False
+
+def _parse_lowdim_visualizer_entry(cfg: dict) -> Optional[Tuple[int, Dict[str, Any]]]:
+    """
+    Top-level ``visualizer: {type: lowdim, id: ..., args: {...}}``.
+
+    Returns:
+        (share_id, merged_args_dict) or None if this device does not request lowdim viz.
+    """
+    v = cfg.get("visualizer")
+    if not isinstance(v, dict):
+        return None
+    if str(v.get("type", "")).strip().lower() != "lowdim":
+        return None
+    raw_id = v.get("id", -1)
+    try:
+        share_id = int(raw_id)
+    except (TypeError, ValueError):
+        share_id = -1
+    sub = v.get("args")
+    if not isinstance(sub, dict):
+        sub = {}
+    return share_id, sub
 
 
 def start_all_visualizers(
     device_configs: list,
     get_shm_name_func,
     is_camera_config_func,
+    visualizer_configs: Optional[list] = None,
     camera_fps: float = 30.0,
     camera_scale: float = 0.5,
+    lowdim_fps: float = 60.0,
+    lowdim_time_window_s: float = 12.0,
 ) -> list:
     """
     Start visualizers for all devices that support visualization.
-    
-    This function:
+
+    If ``visualizer_configs`` is non-empty, only those YAML entries are started
+    (each ``type`` must resolve to a class subclassing ``BaseVisualizer``, other than
+    the base class itself), each in its own subprocess; embedded device ``visualizer:``
+    blocks and auto camera batching are skipped.
+
+    Otherwise (legacy):
     1. Collects all camera devices and starts a single CameraVisualizer for them
-    2. Starts individual visualizers for other devices that have a Visualizer class
-    
+    2. Collects devices with top-level ``visualizer: {type: lowdim, id, args}``;
+       same ``id`` when ``id >= 0`` share one LowDimVisualizer; ``id`` omitted
+       (default -1) or any negative ``id`` uses a solo group per device SHM
+    3. Starts individual visualizers for other devices that have a Visualizer class
+
     Args:
         device_configs: List of device configuration dicts
         get_shm_name_func: Function to get SHM name from config
         is_camera_config_func: Function to check if config is a camera
+        visualizer_configs: Optional list of visualizer dicts from YAML
         camera_fps: FPS for camera visualizer
         camera_scale: Scale factor for camera display
-        
+        lowdim_fps: Plot redraw cap for lowdim (override ``visualizer.args.fps``; ``0`` = uncapped).
+            SHM sampling runs in a thread at device rate, independent of this.
+        lowdim_time_window_s: Default max x-axis span for lowdim (override:
+            ``visualizer.args.time_window_s``); actual window fits data up to this cap
+
     Returns:
         List of started Process objects
     """
     import multiprocessing as mp
     from loguru import logger
-    
+
+    if visualizer_configs:
+        from deploy.visualizer.runner import start_visualizer_processes
+
+        logger.info(
+            "Starting {} visualizer YAML entries (legacy embedded viz skipped)",
+            len(visualizer_configs),
+        )
+        return start_visualizer_processes(visualizer_configs)
+
     viz_procs = []
     camera_shm_names = []
-    
+    lowdim_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
     for cfg in device_configs:
         device_type = cfg.get("type", "")
         device_shm_name = get_shm_name_func(cfg)
-        device_args = cfg.get("args", {})
 
-        # Visualizer devices are standalone processes already started by start_devices().
-        # Do not recursively spawn a visualizer for a visualizer.
-        if device_type.startswith("deploy.visualizer."):
-            continue
-        
-        # Check if this is a camera device
         try:
             if is_camera_config_func(cfg):
                 camera_shm_names.append(device_shm_name)
@@ -285,49 +355,34 @@ def start_all_visualizers(
         except Exception:
             pass
 
-        if is_mujoco_device_type(device_type):
-            if not device_args.get(
-                "enable_viewer", device_args.get("enable_viewer_proxy", True)
-            ):
-                continue
-            from deploy.simulation.mujoco import (
-                get_mujoco_viewer_command_shm_name,
-                get_mujoco_viewer_state_shm_name,
+        lowdim_entry = _parse_lowdim_visualizer_entry(cfg)
+        if lowdim_entry is not None:
+            share_id, sub = lowdim_entry
+            gid = _lowdim_share_group_id(device_shm_name, share_id)
+            lowdim_groups[gid].append(
+                {
+                    "shm": device_shm_name,
+                    "dim": _optional_int(sub.get("dim") or sub.get("lowdim_dim")),
+                    "key": sub.get("array_key")
+                    or sub.get("lowdim_array_key")
+                    or sub.get("lowdim_key"),
+                    "viz_fps": sub.get("fps") or sub.get("lowdim_viz_fps"),
+                    "viz_tw": sub.get("time_window_s")
+                    or sub.get("lowdim_viz_time_window_s"),
+                    "viz_max_pts": sub.get("max_points")
+                    or sub.get("lowdim_viz_max_points"),
+                    "viz_plot_cap": sub.get("max_plot_points")
+                    or sub.get("plot_point_cap"),
+                    "viz_debug": bool(sub.get("debug")),
+                }
             )
-
-            viz_type = "deploy.visualizer.mujoco_proxy_visualizer.MujocoProxyVisualizer"
-            default_camera = device_args.get("viewer_default_camera")
-            viz_kwargs = {
-                "robot_shm_name": device_shm_name,
-                "viewer_command_shm_name": device_args.get("viewer_command_shm_name")
-                or get_mujoco_viewer_command_shm_name(device_shm_name),
-                "viewer_state_shm_name": device_args.get("viewer_state_shm_name")
-                or get_mujoco_viewer_state_shm_name(device_shm_name),
-                "default_camera_name": default_camera,
-                "auto_open": True,
-                "show_tcp_frame": device_args.get("viewer_show_tcp_frame", True),
-                "fps": float(device_args.get("viewer_proxy_fps", 15.0)),
-                "window_name": f"{device_shm_name} Viewer Proxy",
-                "show_window": bool(device_args.get("viewer_proxy_show_window", False)),
-            }
-            logger.info("Starting MuJoCo proxy visualizer for {}: {}", device_shm_name, viz_type)
-            viz_proc = mp.Process(
-                target=start_visualizer,
-                args=(viz_type, device_shm_name),
-                kwargs=viz_kwargs,
-                daemon=True
-            )
-            viz_proc.start()
-            viz_procs.append(viz_proc)
-            logger.info("MuJoCo proxy visualizer started for SHM: {}", device_shm_name)
             continue
-        
-        # Check if device module has its own Visualizer
+
         viz_class = get_visualizer_class(device_type)
         if viz_class is not None:
-            parts = device_type.rsplit('.', 1)
+            parts = device_type.rsplit(".", 1)
             viz_type = parts[0] + ".Visualizer"
-            
+
             logger.info("Starting visualizer for {}: {}", device_shm_name, viz_type)
             viz_kwargs = {
                 key: device_args[key]
@@ -337,28 +392,82 @@ def start_all_visualizers(
             viz_proc = mp.Process(
                 target=start_visualizer,
                 args=(viz_type, device_shm_name),
-                kwargs=viz_kwargs,
-                daemon=True
+                daemon=True,
             )
             viz_proc.start()
             viz_procs.append(viz_proc)
             logger.info("Visualizer subprocess started for SHM: {}", device_shm_name)
 
-    # Start a single camera visualizer for all cameras
+    # Lowdim first: starting it must not wait on importing OpenCV (camera_visualizer).
+    if lowdim_groups:
+        from deploy.visualizer.lowdim_visualizer import start_lowdim_visualizer
+
+        lowdim_ctx = mp.get_context("spawn")
+        for gid, specs in lowdim_groups.items():
+            declared_dims = {s["dim"] for s in specs if s["dim"] is not None}
+            if len(declared_dims) > 1:
+                logger.error(
+                    "lowdim group={!r}: inconsistent dim declarations {}; skip",
+                    gid,
+                    specs,
+                )
+                continue
+            expected_dim = next(iter(declared_dims)) if declared_dims else None
+            shm_entries: List[Tuple[str, Optional[str]]] = [
+                (s["shm"], s["key"] if s["key"] else None) for s in specs
+            ]
+            fps = _first_non_null_float(specs, "viz_fps", lowdim_fps)
+            tw = _first_non_null_float(specs, "viz_tw", lowdim_time_window_s)
+            max_pts = _first_non_null_int(specs, "viz_max_pts", 8000)
+            viz_plot_cap: Optional[int] = None
+            for s in specs:
+                v = s.get("viz_plot_cap")
+                if v is not None:
+                    try:
+                        viz_plot_cap = int(float(v))
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            viz_debug = any(bool(s.get("viz_debug")) for s in specs)
+
+            logger.info(
+                "Starting lowdim visualizer group={!r} shms={} expected_dim={}",
+                gid,
+                [e[0] for e in shm_entries],
+                expected_dim,
+            )
+            viz_proc = lowdim_ctx.Process(
+                target=start_lowdim_visualizer,
+                args=(shm_entries,),
+                kwargs={
+                    "group_id": gid,
+                    "expected_dim": expected_dim,
+                    "fps": fps,
+                    "time_window_s": tw,
+                    "max_points": max_pts,
+                    "max_plot_points": viz_plot_cap,
+                    "debug": viz_debug,
+                },
+                daemon=False,
+            )
+            viz_proc.start()
+            viz_procs.append(viz_proc)
+            logger.info("Lowdim visualizer subprocess started for group {!r}", gid)
+
     if camera_shm_names:
         from deploy.visualizer.camera_visualizer import start_camera_visualizer
-        
+
         logger.info("Starting camera visualizer for: {}", camera_shm_names)
         viz_proc = mp.Process(
             target=start_camera_visualizer,
             args=(camera_shm_names,),
             kwargs={"fps": camera_fps, "scale": camera_scale},
-            daemon=True
+            daemon=True,
         )
         viz_proc.start()
         viz_procs.append(viz_proc)
         logger.info("Camera visualizer started for {} cameras", len(camera_shm_names))
-    
+
     return viz_procs
 
 
