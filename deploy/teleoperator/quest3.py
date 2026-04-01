@@ -783,7 +783,17 @@ class Quest3Teleop(BaseTeleopDevice):
             "anchor_just_set": anchor_just_set,
             "go_home": go_home,
         }
-        
+        # Per-hand squeeze (dual rel_ee / bimanual robots need independent anchor refresh)
+        if self.arm_mode == "dual":
+            action_dict["left_unsqueeze_active"] = self._left_unsqueeze_active
+            action_dict["right_unsqueeze_active"] = self._right_unsqueeze_active
+        elif self.arm_mode == "left":
+            action_dict["left_unsqueeze_active"] = self._left_unsqueeze_active
+            action_dict["right_unsqueeze_active"] = False
+        else:
+            action_dict["left_unsqueeze_active"] = False
+            action_dict["right_unsqueeze_active"] = self._right_unsqueeze_active
+
         return action_dict, should_write
     
     def start(self):

@@ -19,6 +19,14 @@ from deploy.visualizer.camera_visualizer import (
     CameraVisualizer,
     start_camera_visualizer,
 )
+from deploy.visualizer.mujoco_camera_visualizer import (
+    MujocoCameraVisualizer,
+    start_mujoco_camera_visualizer,
+)
+from deploy.visualizer.mujoco_proxy_visualizer import (
+    MujocoProxyVisualizer,
+    start_mujoco_proxy_visualizer,
+)
 
 __all__ = [
     "BaseVisualizer",

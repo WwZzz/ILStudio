@@ -139,6 +139,19 @@ def default_obs2meta(synced_data: dict) -> MetaObs:
     qpos = None
     images = []
 
+    def _append_image_candidate(img_value):
+        nonlocal images
+        if isinstance(img_value, np.ndarray):
+            img = img_value
+            if img.ndim == 3:  # HWC
+                img = img.transpose(2, 0, 1)  # CHW
+                img = img[np.newaxis, :]  # BCHW
+            elif img.ndim == 4 and img.shape[-1] == 3:  # BHWC
+                img = img.transpose(0, 3, 1, 2)  # BCHW
+            else:
+                return
+            images.append(img)
+
     for dev_name, dev_data in synced_data.items():
         if not isinstance(dev_data, dict):
             continue
@@ -147,17 +160,13 @@ def default_obs2meta(synced_data: dict) -> MetaObs:
         if 'qpos' in dev_data and qpos is None:
             qpos = np.array(dev_data['qpos'], dtype=np.float32)
         
-        # Extract images
+        # Extract images from standard `image` field and flat camera-like fields.
         if 'image' in dev_data:
-            img = dev_data['image']
-            if isinstance(img, np.ndarray):
-                # Ensure BCHW format
-                if img.ndim == 3:  # HWC
-                    img = img.transpose(2, 0, 1)  # CHW
-                    img = img[np.newaxis, :]  # BCHW
-                elif img.ndim == 4 and img.shape[-1] == 3:  # BHWC
-                    img = img.transpose(0, 3, 1, 2)  # BCHW
-                images.append(img)
+            _append_image_candidate(dev_data['image'])
+        for key, value in dev_data.items():
+            if key in ("qpos", "gpos", "action", "timestamp", "__timestamp__", "image"):
+                continue
+            _append_image_candidate(value)
 
     if qpos is None:
         qpos = np.zeros(6, dtype=np.float32)

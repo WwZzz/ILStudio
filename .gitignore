@@ -10,14 +10,15 @@ core\.*
 data
 __pycache__/
 .*__pycache__/.*
-scripts/*
 \.local/
 tmp_scripts/*
+scripts/*
 !scripts/dataset_visualizer.py
 !scripts/*example*.sh
 !scripts/mp4_to_gif.py
 !scripts/push_to_hub.py
 !scripts/download_dataset.py
+!scripts/evaluate_model.py
 logs/
 vla_backup/
 .vscode/

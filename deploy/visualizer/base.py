@@ -384,6 +384,11 @@ def start_all_visualizers(
             viz_type = parts[0] + ".Visualizer"
 
             logger.info("Starting visualizer for {}: {}", device_shm_name, viz_type)
+            viz_kwargs = {
+                key: device_args[key]
+                for key in ("xml_path", "scene_name", "scene_xml_path")
+                if device_args.get(key) is not None
+            }
             viz_proc = mp.Process(
                 target=start_visualizer,
                 args=(viz_type, device_shm_name),

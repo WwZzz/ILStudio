@@ -27,7 +27,14 @@ args:
   name: so101_sim_qpos
   max_size_mb: 64
   fps: 50.0
-  control_shm_name: so101_leader  # Receives actions from SO101 Leader
+  scene_name: table_block
+  enable_viewer: true
+  camera_names: [frontview]
+  camera_width: 640
+  camera_height: 480
+  # Omit control_shm_name when using collect_data.py -t <teleop>: deploy.utils auto-fills
+  # from the first teleop device's `name` (e.g. slider_so101_qpos).
+  # For a hardware leader, set explicitly, e.g. control_shm_name: so101_leader
   control_mode: qpos              # Direct joint position control (6D)
   qpos_input_unit: normalized     # lerobot format
   

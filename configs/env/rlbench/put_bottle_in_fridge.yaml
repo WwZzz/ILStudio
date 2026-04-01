@@ -15,6 +15,7 @@ args:
   max_timesteps: 200  # Maximum steps per episode
   ctrl_space: joint  # 'joint' or 'ee'
   ctrl_type: abs     # 'abs' or 'delta'
+
   camera_names:
     - front
     - wrist

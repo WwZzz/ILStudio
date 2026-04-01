@@ -1,7 +1,7 @@
 <mujoco model="so_arm101">
-  <compiler angle="radian" meshdir="assets/"/>
+  <compiler angle="radian" meshdir="assets/" autolimits="true"/>
 
-  <option cone="elliptic" impratio="10"/>
+  <option cone="elliptic" impratio="20" timestep="0.001" iterations="100" noslip_iterations="10"/>
 
   <asset>
     <material name="orange" rgba="1.0 0.331 0.0 1.0" specular="0.1" shininess="0.1"/>
@@ -30,7 +30,7 @@
   <default>
     <default class="so_arm101">
       <joint frictionloss="0.1" armature="0.1"/>
-      <position kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158"/>
+      <position kp="50" forcerange="-35 35" ctrlrange="-3.14158 3.14158"/>
       <default class="Rotation">
         <joint axis="0 1 0" range="-2.2 2.2"/>
       </default>
@@ -58,7 +58,13 @@
       <default class="collision">
         <geom group="3" type="mesh"/>
         <default class="finger_collision">
-          <geom type="box" solimp="2 1 0.01" solref="0.01 1" friction="1 0.005 0.0001"/>
+          <geom
+            type="box"
+            condim="6"
+            solimp="0.95 0.99 0.001 0.5 2"
+            solref="0.002 1"
+            friction="3 0.15 0.02"
+          />
         </default>
       </default>
     </default>
@@ -138,14 +144,10 @@
     <position class="Elbow" name="Elbow" joint="Elbow"/>
     <position class="Wrist_Pitch" name="Wrist_Pitch" joint="Wrist_Pitch"/>
     <position class="Wrist_Roll" name="Wrist_Roll" joint="Wrist_Roll"/>
-    <position class="Jaw" name="Jaw" joint="Jaw"/>
+    <position class="Jaw" name="Jaw" joint="Jaw" kp="300" forcerange="-120 120"/>
   </actuator>
 
   <contact>
     <exclude body1="Base" body2="Rotation_Pitch"/>
   </contact>
-
-  <keyframe>
-    <key name="home" qpos="0 -1.57079 1.57079 0 0 0" ctrl="0 -1.57079 1.57079 0 0 0"/>
-  </keyframe>
 </mujoco>
