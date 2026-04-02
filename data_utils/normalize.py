@@ -95,6 +95,9 @@ def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
 
+MIN_SCALE_THRESHOLD = 1e-3
+
+
 class RunningStats:
     """Compute statistics in a streaming/running manner using Welford's algorithm.
     
@@ -428,6 +431,21 @@ class BaseNormalizer:
                 
         if is_distributed(): dist.barrier()
         if rank != 0: self.all_stats = self.load_stats()
+
+    def _safe_scale(self, scale, min_scale=None):
+        if isinstance(scale, torch.Tensor):
+            safe_scale = scale
+            if min_scale is not None:
+                safe_scale = torch.clamp(safe_scale, min=min_scale)
+            return torch.where(
+                scale.abs() <= MIN_SCALE_THRESHOLD,
+                torch.ones_like(scale),
+                safe_scale,
+            )
+        safe_scale = scale
+        if min_scale is not None:
+            safe_scale = np.clip(safe_scale, min_scale, np.inf)
+        return np.where(np.abs(scale) <= MIN_SCALE_THRESHOLD, 1.0, safe_scale)
 
     @classmethod
     def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):
@@ -870,7 +888,16 @@ class BaseNormalizer:
         raise NotImplementedError
     
 class MinMaxNormalizer(BaseNormalizer):
-    def __init__(self, dataset, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+    def __init__(
+        self,
+        dataset,
+        dataset_name=None,
+        low: float = -1,
+        high: float = 1,
+        ctrl_type='delta',
+        ctrl_space='ee',
+        mask=None,
+    ):
         super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
@@ -889,7 +916,8 @@ class MinMaxNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        normalized = (data-stats['min'])/(stats['max'] - stats['min']+1e-8)*self.delta+self.low
+        safe_range = self._safe_scale(stats['max'] - stats['min'])
+        normalized = (data - stats['min']) / safe_range * self.delta + self.low
         
         # Apply mask to selectively normalize
         result = self._apply_mask(data, normalized, self.mask)
@@ -905,7 +933,8 @@ class MinMaxNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        denormalized = ((data - self.low) / self.delta) * (stats['max'] - stats['min']+1e-8) + stats['min']
+        safe_range = self._safe_scale(stats['max'] - stats['min'])
+        denormalized = ((data - self.low) / self.delta) * safe_range + stats['min']
         
         # Apply mask to selectively denormalize
         result = self._apply_mask(data, denormalized, self.mask)
@@ -913,7 +942,16 @@ class MinMaxNormalizer(BaseNormalizer):
         return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class PercentileNormalizer(BaseNormalizer):
-    def __init__(self, dataset_dir, dataset_name=None, low:float=-1, high:float=1, ctrl_type='delta', ctrl_space='ee', mask=None):
+    def __init__(
+        self,
+        dataset_dir,
+        dataset_name=None,
+        low: float = -1,
+        high: float = 1,
+        ctrl_type='delta',
+        ctrl_space='ee',
+        mask=None,
+    ):
         super().__init__(dataset_dir, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         assert low!=high, "low is equal to high"
         self.low = low
@@ -932,7 +970,8 @@ class PercentileNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        normalized = (data-stats['q01'])/(stats['q99'] - stats['q01'])*self.delta+self.low
+        safe_range = self._safe_scale(stats['q99'] - stats['q01'])
+        normalized = (data - stats['q01']) / safe_range * self.delta + self.low
         if isinstance(normalized, torch.Tensor):
             normalized = torch.clip(normalized, self.low, self.high)
         else:
@@ -952,7 +991,8 @@ class PercentileNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        denormalized = ((data - self.low) / self.delta) * (stats['q99'] - stats['q01']) + stats['q01']
+        safe_range = self._safe_scale(stats['q99'] - stats['q01'])
+        denormalized = ((data - self.low) / self.delta) * safe_range + stats['q01']
         if isinstance(denormalized, torch.Tensor):
             denormalized = torch.clip(denormalized, stats['q01'], stats['q99'])
         else:
@@ -964,12 +1004,17 @@ class PercentileNormalizer(BaseNormalizer):
         return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
 
 class ZScoreNormalizer(BaseNormalizer):
-    # Dimensions whose raw std is below this threshold are treated as constant
-    # (zero-variance). After normalization they are forced to 0.0, matching
-    # training behaviour where (x-mean)/std = 0/0 → 0.
-    CONSTANT_DIM_STD_THRESHOLD = 0.001
-
-    def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=1e-2, mask=None, *args, **kwargs):
+    def __init__(
+        self,
+        dataset,
+        dataset_name=None,
+        ctrl_type='delta',
+        ctrl_space='ee',
+        min_std=1e-2,
+        mask=None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
         self.min_std = min_std
         
@@ -985,15 +1030,8 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        raw_std = stats['std']
-        std = np.clip(raw_std, self.min_std, np.inf)
+        std = self._safe_scale(stats['std'], self.min_std)
         normalized = (data - stats['mean']) / std
-
-        # Zero out dimensions that were constant during training.  Their raw
-        # std is (near-)zero, so even a tiny real-world deviation produces
-        # extreme normalized values that corrupt transformer attention.
-        constant_dims = raw_std < self.CONSTANT_DIM_STD_THRESHOLD
-        if np.any(constant_dims): normalized[..., constant_dims] = 0.0
         
         # Apply mask to selectively normalize
         result = self._apply_mask(data, normalized, self.mask)
@@ -1009,7 +1047,7 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        std = np.clip(stats['std'], self.min_std, np.inf)
+        std = self._safe_scale(stats['std'], self.min_std)
         denormalized = data * std + stats['mean']
         
         # Apply mask to selectively denormalize
