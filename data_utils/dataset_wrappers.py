@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, ConcatDataset
 from typing import Dict, Optional, List
 from loguru import logger
+from .normalize import MIN_SCALE_THRESHOLD
 # TensorFlow imports for RLDS dataset handling
 try:
     import tensorflow as tf
@@ -415,16 +416,21 @@ def _apply_tf_norm_from_tf_params(data, tf_params: Dict):
 
     # --- Define pure TF functions for each normalization type ---
     def zscore_fn():
-        std = tf.clip_by_value(tf_params['std'], tf_params['min_std'], tf.float32.max)
-        return (data - tf_params['mean']) / (std + 1e-8)
+        clipped_std = tf.clip_by_value(tf_params['std'], tf_params['min_std'], tf.float32.max)
+        safe_std = tf.where(tf.abs(tf_params['std']) <= MIN_SCALE_THRESHOLD, 1.0, clipped_std)
+        return (data - tf_params['mean']) / safe_std
 
     def minmax_fn():
         delta = tf_params['high'] - tf_params['low']
-        return (data - tf_params['min']) / (tf_params['max'] - tf_params['min'] + 1e-8) * delta + tf_params['low']
+        raw_range = tf_params['max'] - tf_params['min']
+        safe_range = tf.where(tf.abs(raw_range) <= MIN_SCALE_THRESHOLD, 1.0, raw_range)
+        return (data - tf_params['min']) / safe_range * delta + tf_params['low']
 
     def percentile_fn():
         delta = tf_params['high'] - tf_params['low']
-        normalized = (data - tf_params['q01']) / (tf_params['q99'] - tf_params['q01'] + 1e-8) * delta + tf_params['low']
+        raw_range = tf_params['q99'] - tf_params['q01']
+        safe_range = tf.where(tf.abs(raw_range) <= MIN_SCALE_THRESHOLD, 1.0, raw_range)
+        normalized = (data - tf_params['q01']) / safe_range * delta + tf_params['low']
         return tf.clip_by_value(normalized, tf_params['low'], tf_params['high'])
 
     # --- Use TF control flow to select the normalization branch ---
