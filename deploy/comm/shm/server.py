@@ -586,7 +586,7 @@ class SHMPolicyServer(BaseServer):
         # Batch the MetaObs
         batched_mobs = self._batch_metaobs(mobs_list)
 
-        # Run inference
+        # Uses MetaPolicy.inference only (same as TCP PolicyServer); no separate denorm path like FastAPI JSON.
         try:
             mact_list = self.policy.inference(batched_mobs)
         except Exception as e:

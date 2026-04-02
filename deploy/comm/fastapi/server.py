@@ -141,6 +141,18 @@ def _enrich_samples(samples: List[dict], payload: Dict[str, Any]) -> None:
             s["timestamp"] = ts
 
 
+def _maybe_post_process_denormalized_macts(meta_policy, macts, policy_obs):
+    """After denormalize and reshape to (B, T, dim) or (B, dim); before transpose to time-major."""
+    pol = meta_policy.policy
+    if hasattr(pol, "post_process_action") and callable(pol.post_process_action):
+        macts.action = pol.post_process_action(
+            macts.action,
+            policy_obs,
+            meta_policy.action_normalizer,
+            meta_policy.state_normalizer,
+        )
+
+
 def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
     """
     Build ILStudio standard-format samples (per `.cursor/rules/data-rule.mdc`)
@@ -161,26 +173,15 @@ def _infer_via_standard_samples(policy, mobs: MetaObs, payload: Dict[str, Any]):
     # Convert samples to model input
     policy_obs = policy.meta2obs(samples)
 
-    # Inference action chunk using underlying model
     action_chunk = policy.policy.select_action(policy_obs)
 
     # Convert to MetaAction and denormalize action (same as MetaPolicy.inference)
     macts = policy.act2meta(action_chunk, ctrl_space=policy.ctrl_space, ctrl_type=policy.ctrl_type)
-    action_chunk = macts.action
-
-    is_chunked = (len(action_chunk.shape) == 3)
-    bs = action_chunk.shape[0] if is_chunked else 1
-    ac_dim = action_chunk.shape[-1]
-
-    if is_chunked:
-        macts.action = action_chunk.reshape(-1, ac_dim)
-
     macts = policy.action_normalizer.denormalize_metaact(macts)
 
-    if is_chunked:
-        macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
-    else:
-        macts.action = macts.action[np.newaxis, :]
+    _maybe_post_process_denormalized_macts(policy, macts, policy_obs)
+
+    macts.action = macts.action[np.newaxis, :] if len(macts.action.shape)<3 else macts.action.swapaxes(0,1)
 
     from benchmark.base import MetaAction
 
@@ -431,27 +432,17 @@ class BatchedInferenceManager:
         # Convert samples to model input
         policy_obs = self.policy.meta2obs(samples)
         
-        # Inference action chunk using underlying model
         action_chunk = self.policy.policy.select_action(policy_obs)
         
         # Convert to MetaAction and denormalize action
         macts = self.policy.act2meta(action_chunk, ctrl_space=self.policy.ctrl_space, ctrl_type=self.policy.ctrl_type)
-        action_chunk = macts.action
-        
-        is_chunked = (len(action_chunk.shape) == 3)
-        bs = action_chunk.shape[0] if is_chunked else 1
-        ac_dim = action_chunk.shape[-1]
-        
-        if is_chunked:
-            macts.action = action_chunk.reshape(-1, ac_dim)
         
         macts = self.policy.action_normalizer.denormalize_metaact(macts)
+
+        _maybe_post_process_denormalized_macts(self.policy, macts, policy_obs)
         
-        if is_chunked:
-            macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
-        else:
-            macts.action = macts.action[np.newaxis, :]
-        
+        macts.action = macts.action[np.newaxis, :] if len(macts.action.shape)<3 else macts.action.swapaxes(0,1)
+
         from benchmark.base import MetaAction
         
         # Build full mact_list (batched)

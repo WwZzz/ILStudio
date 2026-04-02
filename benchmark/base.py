@@ -109,8 +109,8 @@ class MetaPolicy:
             state_normalizer: Normalizer for states  
             ctrl_space: Control space ('ee' or 'joint')
             ctrl_type: Control type ('delta' or 'abs')
-            chunk_size: If > 0, truncate each inferred action chunk to this many
-                        steps after model output and before dispatch.
+            chunk_size: Ignored for inference; kept for API compatibility. Action
+                        chunk length is handled by the environment/action_manager.
         """
         self.policy = policy
         self.ctrl_space = ctrl_space
@@ -263,43 +263,31 @@ class MetaPolicy:
         4. Run underlying policy model inference
         5. Convert output to MetaAction format
         6. Denormalize actions
+        7. Optional policy.post_process_action on denormalized (B, T, dim) [or (B, dim) if not chunked]
         
         Returns:
             List[np.ndarray]: Full mact_list — each element is an object-dtype array
-            of MetaAction dicts. Length equals the model's output chunk length.
-            No truncation is applied; chunk management is delegated to action_manager.
+            of MetaAction dicts. Length equals the model's temporal output length.
+            Chunk consumption/truncation is delegated to the action_manager.
         """
         # Normalize state before preparing samples
         normed_mobs = self.state_normalizer.normalize_metaobs(mobs, self.ctrl_space)
-        
         samples = self.normed_mobs_to_samples(normed_mobs)
-        
         # Convert samples to policy-specific format using policy's data processing
         policy_obs = self.meta2obs(samples)
         # inference action
         action_chunk = self.policy.select_action(policy_obs)
-        if self.chunk_size > 0:
-            if isinstance(action_chunk, torch.Tensor):
-                if action_chunk.ndim >= 3:
-                    action_chunk = action_chunk[:, :self.chunk_size, ...]
-            else:
-                action_chunk = np.asarray(action_chunk)
-                if action_chunk.ndim >= 3:
-                    action_chunk = action_chunk[:, :self.chunk_size, ...]
-        # (B, chunk_size, action_dim)
+        # (B, T, action_dim) or (B, action_dim); chunk trimming is left to action_manager
         macts = self.act2meta(action_chunk, ctrl_space=self.ctrl_space, ctrl_type=self.ctrl_type)
-        action_chunk = macts.action
-        is_chunked = (len(action_chunk.shape)==3)
-        bs = action_chunk.shape[0]
-        ac_dim = action_chunk.shape[-1]
-        if is_chunked:
-            macts.action = action_chunk.reshape(-1, ac_dim)
-        # denormalize action
         macts = self.action_normalizer.denormalize_metaact(macts)
-        if is_chunked:
-            macts.action = macts.action.reshape(bs, -1, ac_dim).transpose(1, 0, 2)
-        else:
-            macts.action = macts.action[np.newaxis, :]
+        if hasattr(self.policy, "post_process_action") and callable(self.policy.post_process_action):
+            macts.action = self.policy.post_process_action(
+                macts.action,
+                policy_obs,
+                self.action_normalizer,
+                self.state_normalizer,
+            )
+        macts.action = macts.action[np.newaxis, :] if len(macts.action.shape) < 3 else macts.action.swapaxes(0, 1)
         mact_list = [np.array([asdict(MetaAction(action=aii, ctrl_type=macts.ctrl_type, ctrl_space=macts.ctrl_space)) for aii in ai], dtype=object) for ai in macts.action]
         return mact_list
     

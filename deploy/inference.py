@@ -625,7 +625,8 @@ def start_inference_process(
         model_name_or_path: Path to model checkpoint.
         device: Device for inference.
         dataset_id: Dataset ID for normalizer loading.
-        chunk_size: Action chunk size.
+        chunk_size: Passed through to policy loading / MetaPolicy for compatibility;
+                    MetaPolicy no longer truncates chunks (action_manager handles it).
         obs_shm_size_mb: Size of obs SHM in MB (sim mode only).
         device_shm_names: Device SHM names (real mode). If provided, enables real mode.
         robot_module_name: Robot module name for obs2meta (real mode).
