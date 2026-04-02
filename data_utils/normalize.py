@@ -878,7 +878,10 @@ class BaseNormalizer:
     def denormalize_metaact(self, mact: MetaAction):
         assert mact.ctrl_type==self.ctrl_type, f"the contrlling type of action {mact.ctrl_type} does not match the normalizer's {self.ctrl_type}"
         assert mact.ctrl_space==self.ctrl_space, f"the space of action {mact.ctrl_type} does not match the normalizer's {self.ctrl_space}"
+        is_chunked = len(mact.action.shape) >= 3
+        if is_chunked: mact.action = mact.action.swapaxes(0, 1)
         mact.action = self.denormalize(mact.action, datatype='action')
+        if is_chunked: mact.action = mact.action.swapaxes(0, 1)
         return mact
     
     def normalize(self, *args, **kwargs):
