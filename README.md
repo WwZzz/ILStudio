@@ -62,6 +62,8 @@ uv sync
 cd third_party/lerobot
 uv pip install -e . # or `uv pip install -e ".[smolvla]"` for smolvla usage
 uv pip install numpy==1.26.4
+# Optional: XVLA uses the patched lerobot fork bundled at `./lerobot`
+# cd ../../lerobot && uv pip install -e ".[xvla]" && cd ..
 # activate the uv python environment
 source .venv/bin/activate
 ```
@@ -182,6 +184,7 @@ python start_teleop_recorder.py -c so101_follower
 | Octo                  | [[11]](https://octo-models.github.io/)    |
 | FlowMatching                  |  -    |
 | GR00T| [[12]](https://arxiv.org/abs/2503.14734)|
+| X-VLA                 | [LeRobot Docs](https://huggingface.co/docs/lerobot/main/en/xvla) |
 
 ## 🏆 Simulation Benchmark Gallery
 
