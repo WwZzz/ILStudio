@@ -746,7 +746,7 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
             if dataset_config is None:
                 dataset_config = {}
             
-            # Extract mask information from dataset config
+            # Extract normalization configuration from dataset config
             action_norm_mask = dataset_config.get('action_norm_mask', None)
             state_norm_mask = dataset_config.get('state_norm_mask', None)
             
@@ -758,24 +758,25 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
                 if state_norm_mask is not None:
                     logger.info(f"  - state_norm_mask: {state_norm_mask}")
             
+            action_normalizer_kwargs = {
+                'dataset_name': dataset_id,
+                'mask': action_norm_mask,
+            }
+            state_normalizer_kwargs = {
+                'dataset_name': dataset_id,
+                'mask': state_norm_mask,
+            }
+
             # Create normalizers with masks
-            action_normalizers[dataset_id] = action_normalizer_class(
-                dataset, 
-                dataset_name=dataset_id, 
-                mask=action_norm_mask
-            )
-            state_normalizers[dataset_id] = state_normalizer_class(
-                dataset, 
-                dataset_name=dataset_id, 
-                mask=state_norm_mask
-            )
+            action_normalizers[dataset_id] = action_normalizer_class(dataset, **action_normalizer_kwargs)
+            state_normalizers[dataset_id] = state_normalizer_class(dataset, **state_normalizer_kwargs)
     
     # Save normalization metadata
     if save_norm:
         # Build complete metadata for each dataset
         datasets_meta = []
         for dataset, dataset_config in zip(datasets, datasets_config):
-            # Extract mask info from config (same level as args)
+            # Extract normalization info from config (same level as args)
             action_norm_mask = dataset_config.get('action_norm_mask', None)
             state_norm_mask = dataset_config.get('state_norm_mask', None)
             

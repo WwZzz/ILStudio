@@ -268,8 +268,13 @@ def load_policy(args):
     return policy
 
 def print_model_trainable_information(model, rank0_print=None):
-    if rank0_print is None: rank0_print = logger.info
-    lora_para = sum(p.numel() for n, p in model.named_parameters() if (p.requires_grad and 'lora' in n))
+    if rank0_print is None:
+        rank0_print = logger.info
+    lora_para = sum(p.numel() for n, p in model.named_parameters() if p.requires_grad and "lora" in n)
     all_para = sum(p.numel() for n, p in model.named_parameters())
     train_para = sum(p.numel() for n, p in model.named_parameters() if p.requires_grad)
-    rank0_print(f"Lora parameters/trainable parameters/all parameters:{lora_para/1000000}M/{train_para/1000000}M/{(all_para-lora_para)/1000000}M")
+    frozen_para = all_para - train_para
+    rank0_print(
+        f"LoRA trainable / all trainable / total / frozen: "
+        f"{lora_para / 1e6:.3f}M / {train_para / 1e6:.3f}M / {all_para / 1e6:.3f}M / {frozen_para / 1e6:.3f}M"
+    )
