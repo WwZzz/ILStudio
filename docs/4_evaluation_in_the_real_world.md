@@ -24,7 +24,7 @@ This example shows how to run an evaluation on a real robot with the current CLI
 ```bash
 python eval_real.py \
     --model_name_or_path ckpt/act_sim_transfer_cube_scripted_zscore_example \
-    --robot_config agilex_aloha \
+    -r agilex_aloha \
     --publish_rate 50 \
     --sensing_rate 25 \
     --action_manager basic
@@ -37,9 +37,10 @@ python eval_real.py \
     *   **Example (local)**: `ckpt/act_sim_transfer_cube_scripted_zscore_example`
     *   **Example (remote)**: `192.168.1.101:5000`
 
-*   `--robot_config` (string):
-    *   **Description**: The name of the robot configuration YAML file from `configs/robot/`. This defines the robot's hardware interface, camera setup, and teleop device.
-    *   **Example**: `agilex_aloha` (refers to `configs/robot/agilex_aloha.yaml`)
+*   `-r` / `--robot` (string), same as `collect_data.py`:
+    *   **Description**: Robot configuration name under `configs/robot/` or path to a YAML. Defines hardware, cameras, etc.
+    *   **Example**: `agilex_aloha` → `configs/robot/agilex_aloha.yaml`
+    *   **Alias**: `--robot_config` / `--robot-config` still accepted for older scripts.
 
 *   `--task` (string):
     *   **Description**: The name of the task configuration YAML file from `configs/task/`. This defines the datasets, normalization, and policy settings used for training, which are needed to load the model correctly.
@@ -62,5 +63,5 @@ python eval_real.py \
 1.  ✅ **Robot On**: The robot is powered on and initialized.
 2.  ✅ **Network Connection**: Your machine can communicate with the robot (e.g., via ROS, Ethernet).
 3.  ✅ **Drivers Running**: The robot's low-level control software/drivers are running.
-4.  ✅ **Correct Configs**: The `--robot_config` and `--task` files accurately reflect your setup.
+4.  ✅ **Correct Configs**: The `-r` / `--robot` and `--task` files accurately reflect your setup.
 5.  ✅ **Safety**: The workspace is clear and you are ready to stop the robot if needed.

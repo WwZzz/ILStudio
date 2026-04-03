@@ -700,7 +700,12 @@ def start_inference_process(
     else:
         worker_kwargs["obs_shm_name"] = obs_shm_name
     
-    process = mp.Process(
+    # Use 'spawn' context for the inference process: CUDA cannot be
+    # re-initialized in a forked subprocess (the main process may have
+    # already touched CUDA via set_seed / torch.cuda.is_available).
+    # Only the inference process needs spawn; device processes stay on fork.
+    ctx = mp.get_context("spawn")
+    process = ctx.Process(
         target=inference_worker,
         kwargs=worker_kwargs,
         daemon=True,

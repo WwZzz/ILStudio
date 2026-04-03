@@ -95,7 +95,7 @@ def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
 
-MIN_SCALE_THRESHOLD = 1e-3
+MIN_SCALE_THRESHOLD = 1e-2
 
 
 class RunningStats:

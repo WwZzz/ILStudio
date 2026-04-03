@@ -64,7 +64,7 @@ python eval_sim.py \
 # Replace 192.168.1.101 with your server's IP address
 python eval_real.py \
     --model_name_or_path 192.168.1.101:5000 \
-    --robot_config agilex_aloha \
+    -r agilex_aloha \
     --task agilex_transfer_cube
 ```
 

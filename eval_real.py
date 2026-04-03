@@ -22,223 +22,24 @@ Usage:
 import deploy.shm_utils  # noqa: F401 - applies _fix_resource_tracker() on import
 
 import os
-import yaml
 import traceback
 import time
-import multiprocessing as mp
-from typing import List, Optional, Tuple
-
 import numpy as np
 from loguru import logger
 
 from data_utils.utils import set_seed
-from deploy.base import start_device, is_robot_config, is_camera_config
+from deploy.base import is_camera_config
 from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
-from deploy.utils import RateLimiter
+from deploy.utils import (
+    RateLimiter,
+    get_shm_name,
+    load_device_configs,
+    start_devices,
+)
 from deploy.action_manager import load_action_manager
 from deploy.inference import start_inference_process, stop_inference_process
 from deploy.visualizer.base import start_all_visualizers
 from configs.loader import ConfigLoader
-
-
-def _safe_name(s: str) -> str:
-    """Sanitize a string for filesystem paths."""
-    if s is None:
-        return "none"
-    s = str(s)
-    for ch in ["/", "\\", " ", ":", ";", "|", "\t", "\n", "\r"]:
-        s = s.replace(ch, "_")
-    return s
-
-
-def _as_uint8_image(arr: np.ndarray) -> Optional[np.ndarray]:
-    """
-    Convert a numpy array to an image suitable for cv2.imwrite.
-    Returns HxW, HxWx1, HxWx3, or HxWx4 numpy array, or None if not image-like.
-    """
-    if not isinstance(arr, np.ndarray):
-        return None
-
-    x = arr
-
-    # Handle common channel-first formats
-    if x.ndim == 3 and x.shape[0] in (1, 3, 4) and x.shape[-1] not in (1, 3, 4):
-        # CHW -> HWC
-        x = np.transpose(x, (1, 2, 0))
-    elif x.ndim == 4:
-        # BCHW or BHWC -> save first dimension as separate images outside this function
-        return None
-
-    # Basic shape checks
-    if x.ndim == 2:
-        pass  # grayscale HxW
-    elif x.ndim == 3 and x.shape[2] in (1, 3, 4):
-        pass  # HxWxC
-    else:
-        return None
-
-    # dtype normalization
-    if np.issubdtype(x.dtype, np.floating):
-        x_max = float(np.nanmax(x)) if x.size else 0.0
-        if x_max <= 1.0:
-            x = x * 255.0
-        x = np.clip(x, 0.0, 255.0).astype(np.uint8)
-    elif x.dtype == np.uint8:
-        pass
-    elif np.issubdtype(x.dtype, np.integer):
-        # keep uint16 as-is (useful for depth), otherwise clamp to uint8
-        if x.dtype == np.uint16:
-            return x
-        x = np.clip(x, 0, 255).astype(np.uint8)
-    else:
-        x = x.astype(np.uint8, copy=False)
-
-    return x
-
-
-def _save_images_from_value(
-    *,
-    value,
-    out_dir: str,
-    frame_idx: int,
-    device_name: str,
-    key_path: str,
-    color_order: str = "rgb",
-) -> int:
-    """
-    Save image(s) found in `value` (np.ndarray or nested dict with 'image') to disk.
-    Returns number of files saved.
-    """
-    import os
-    import cv2
-    saved = 0
-    dev = _safe_name(device_name)
-    key = _safe_name(key_path)
-
-    # Nested dict case (common: {"image": ..., "timestamp": ...})
-    if isinstance(value, dict):
-        if "image" in value and isinstance(value["image"], np.ndarray):
-            return _save_images_from_value(
-                value=value["image"],
-                out_dir=out_dir,
-                frame_idx=frame_idx,
-                device_name=device_name,
-                key_path=f"{key_path}.image" if key_path else "image",
-                color_order=color_order,
-            )
-        return 0
-
-    if not isinstance(value, np.ndarray):
-        return 0
-
-    # Batch formats
-    if value.ndim == 4:
-        # Try BHWC
-        if value.shape[-1] in (1, 3, 4):
-            for b in range(value.shape[0]):
-                img = _as_uint8_image(value[b])
-                if img is None:
-                    continue
-                if color_order == "rgb" and img.ndim == 3 and img.shape[2] in (3, 4):
-                    # cv2.imwrite expects BGR/BGRA
-                    if img.shape[2] == 3:
-                        img = img[..., ::-1]
-                    else:  # 4 channels: RGBA -> BGRA
-                        img = img[..., [2, 1, 0, 3]]
-                fp = os.path.join(out_dir, f"{frame_idx:06d}_{dev}_{key}_b{b:02d}.png")
-                if cv2.imwrite(fp, img):
-                    saved += 1
-            return saved
-        # Try BCHW
-        if value.shape[1] in (1, 3, 4):
-            for b in range(value.shape[0]):
-                img = _as_uint8_image(value[b])
-                if img is None:
-                    continue
-                if color_order == "rgb" and img.ndim == 3 and img.shape[2] in (3, 4):
-                    if img.shape[2] == 3:
-                        img = img[..., ::-1]
-                    else:
-                        img = img[..., [2, 1, 0, 3]]
-                fp = os.path.join(out_dir, f"{frame_idx:06d}_{dev}_{key}_b{b:02d}.png")
-                if cv2.imwrite(fp, img):
-                    saved += 1
-            return saved
-        return 0
-
-    img = _as_uint8_image(value)
-    if img is None:
-        return 0
-
-    if color_order == "rgb" and img.ndim == 3 and img.shape[2] in (3, 4):
-        if img.shape[2] == 3:
-            img = img[..., ::-1]
-        else:
-            img = img[..., [2, 1, 0, 3]]
-
-    fp = os.path.join(out_dir, f"{frame_idx:06d}_{dev}_{key}.png")
-    if cv2.imwrite(fp, img):
-        saved += 1
-    return saved
-
-
-def save_synced_frame_images(*, synced_data: dict, out_dir: str, frame_idx: int, color_order: str = "rgb") -> int:
-    """
-    Save all image-like arrays inside a synced_data frame to `out_dir`.
-    Returns number of images saved.
-    """
-    import os
-    import cv2  # local import so non-camera runs won't require cv2 at import time
-
-    os.makedirs(out_dir, exist_ok=True)
-    saved = 0
-
-    for dev_name, dev_data in (synced_data or {}).items():
-        if not isinstance(dev_data, dict):
-            continue
-
-        # Heuristic: prefer common keys, but also scan everything image-shaped.
-        for k, v in dev_data.items():
-            k_lower = str(k).lower()
-            likely_image = any(token in k_lower for token in ("image", "rgb", "color", "frame", "depth", "camera"))
-            if isinstance(v, dict):
-                saved += _save_images_from_value(
-                    value=v,
-                    out_dir=out_dir,
-                    frame_idx=frame_idx,
-                    device_name=str(dev_name),
-                    key_path=str(k),
-                    color_order=color_order,
-                )
-            elif isinstance(v, np.ndarray):
-                # If key doesn't look image-like, only save when array is clearly an image
-                if likely_image or (
-                    (v.ndim == 2)
-                    or (v.ndim == 3 and (v.shape[-1] in (1, 3, 4) or v.shape[0] in (1, 3, 4)))
-                    or (v.ndim == 4 and (v.shape[-1] in (1, 3, 4) or v.shape[1] in (1, 3, 4)))
-                ):
-                    saved += _save_images_from_value(
-                        value=v,
-                        out_dir=out_dir,
-                        frame_idx=frame_idx,
-                        device_name=str(dev_name),
-                        key_path=str(k),
-                        color_order=color_order,
-                    )
-
-        # Also handle known patterns like obs['head_camera']['image']
-        for cam_key in ("head_camera", "left_wrist_camera", "right_wrist_camera", "front_camera"):
-            if cam_key in dev_data and isinstance(dev_data[cam_key], dict) and "image" in dev_data[cam_key]:
-                saved += _save_images_from_value(
-                    value=dev_data[cam_key],
-                    out_dir=out_dir,
-                    frame_idx=frame_idx,
-                    device_name=str(dev_name),
-                    key_path=str(cam_key),
-                    color_order=color_order,
-                )
-
-    return saved
 
 
 def parse_param():
@@ -252,9 +53,13 @@ def parse_param():
     
     parser = argparse.ArgumentParser(description='Evaluate a policy model on real robot')
     
-    # Robot configuration (supports name or path like collect_data.py)
-    parser.add_argument('-r', '--robot_config', type=str, default='robot/so101_follower',
-                       help='Robot config (name under configs/robot or path to yaml)')
+    # Same primary flags as collect_data.py (-r / --robot); long --robot_config kept as alias.
+    parser.add_argument(
+        '-r', '--robot', '--robot-config', '--robot_config',
+        type=str,
+        default='robot/so101_follower',
+        help="Robot config (name under configs/robot or path to yaml; same as collect_data.py -r/--robot)",
+    )
     parser.add_argument('-pr', '--publish_rate', type=float, default=25,
                        help='Action publishing rate (Hz)')
     parser.add_argument('-sr', '--sensing_rate', type=float, default=20,
@@ -295,83 +100,6 @@ def parse_param():
     # Store unknown args for ConfigLoader to process
     setattr(args, 'unknown_args', unknown)
     return args
-
-
-def load_config(path: str) -> List[dict]:
-    """Load config from yaml. Returns list of device configs."""
-    with open(path, "r") as f:
-        raw = yaml.safe_load(f)
-    if isinstance(raw, list):
-        return raw
-    return [raw]
-
-
-def get_shm_name(cfg: dict) -> str:
-    """Get SHM name from device config."""
-    args = cfg.get("args", {})
-    return args.get("name") or args.get("robot_id") or cfg.get("name", "unknown")
-
-
-def start_devices(configs: List[dict], daemon: bool = True) -> List[mp.Process]:
-    """Start each device config in a separate process.
-    
-    Args:
-        configs: List of device configurations
-        daemon: If True, processes will be terminated when main process exits
-                (including crashes/segfaults). Default True for safety.
-    """
-    procs = []
-    for cfg in configs:
-        p = mp.Process(target=start_device, args=(cfg,))
-        p.daemon = daemon
-        p.start()
-        procs.append(p)
-    return procs
-
-
-def load_device_configs(args, unknown_args, cfg_loader=None) -> Tuple[List[dict], List[str], List[dict]]:
-    """
-    Load device configs from robot_config argument.
-    Sets control_shm_name to 'policy_control_shm' for robot devices.
-    Visualizer entries are stripped from the device list and returned separately.
-    """
-    from deploy.utils import partition_visualizer_configs, coerce_finalize_deploy_list
-
-    if cfg_loader is None:
-        cfg_loader = ConfigLoader(args=args, unknown_args=unknown_args)
-    robot_configs = []
-    
-    # Load robot config
-    try:
-        robot_cfg, robot_path = cfg_loader.load_robot(args.robot_config)
-        robot_configs = coerce_finalize_deploy_list(robot_cfg)
-        logger.info("Loaded robot config from: {}", robot_path)
-    except FileNotFoundError as e:
-        # Fallback to direct yaml loading for backward compatibility
-        logger.warning("ConfigLoader failed, falling back to direct YAML: {}", e)
-        robot_configs = coerce_finalize_deploy_list(load_config(args.robot_config))
-
-    # Separate visualizer entries from real device entries
-    robot_configs, visualizer_configs = partition_visualizer_configs(robot_configs)
-    
-    # Set control_shm_name to 'policy_control_shm' for robot devices
-    # This connects robot to the policy's action output
-    for cfg in robot_configs:
-        try:
-            if is_robot_config(cfg):
-                if 'args' not in cfg:
-                    cfg['args'] = {}
-                cfg['args']['control_shm_name'] = 'policy_control_shm'
-                logger.info("Set control_shm_name='policy_control_shm' for robot '{}'", 
-                           get_shm_name(cfg))
-        except Exception:
-            pass
-    
-    logger.info("Robot devices: {}", [get_shm_name(c) for c in robot_configs])
-    if visualizer_configs:
-        logger.info("Visualizer entries: {}", [v.get('name') or v.get('type') for v in visualizer_configs])
-    all_shm_names = [get_shm_name(c) for c in robot_configs]
-    return robot_configs, all_shm_names, visualizer_configs
 
 
 def main():
@@ -432,9 +160,12 @@ def main():
     # Create shared ConfigLoader instance
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'unknown_args', []))
     
-    # Load device configs (visualizer entries are separated out)
-    robot_configs, all_shm_names, visualizer_configs = load_device_configs(
-        args, getattr(args, 'unknown_args', []), cfg_loader=cfg_loader
+    # Same loader as collect_data; eval forces policy_control_shm on robots.
+    robot_configs, all_shm_names, _teleop_configs, visualizer_configs = load_device_configs(
+        args,
+        getattr(args, "unknown_args", []),
+        cfg_loader=cfg_loader,
+        force_robot_control_shm="policy_control_shm",
     )
     
     # Clean orphaned SHM
