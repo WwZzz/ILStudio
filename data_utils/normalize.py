@@ -967,7 +967,7 @@ class ZScoreNormalizer(BaseNormalizer):
     # Dimensions whose raw std is below this threshold are treated as constant
     # (zero-variance). After normalization they are forced to 0.0, matching
     # training behaviour where (x-mean)/std = 0/0 → 0.
-    CONSTANT_DIM_STD_THRESHOLD = 0.001
+    CONSTANT_DIM_STD_THRESHOLD = 0.01
 
     def __init__(self, dataset, dataset_name=None, ctrl_type='delta', ctrl_space='ee', min_std=1e-2, mask=None, *args, **kwargs):
         super().__init__(dataset, dataset_name, ctrl_type=ctrl_type, ctrl_space=ctrl_space, mask=mask)
