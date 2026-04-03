@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, ConcatDataset
 from typing import Dict, Optional, List
 from loguru import logger
-from .normalize import MIN_SCALE_THRESHOLD
+from .normalize import MIN_TINY_SCALE
 # TensorFlow imports for RLDS dataset handling
 try:
     import tensorflow as tf
@@ -417,20 +417,23 @@ def _apply_tf_norm_from_tf_params(data, tf_params: Dict):
     # --- Define pure TF functions for each normalization type ---
     def zscore_fn():
         clipped_std = tf.clip_by_value(tf_params['std'], tf_params['min_std'], tf.float32.max)
-        safe_std = tf.where(tf.abs(tf_params['std']) <= MIN_SCALE_THRESHOLD, 1.0, clipped_std)
-        return (data - tf_params['mean']) / safe_std
+        safe_std = tf.where(tf.abs(tf_params['std']) < MIN_TINY_SCALE, 1.0, clipped_std)
+        normalized = (data - tf_params['mean']) / safe_std
+        return tf.where(tf.abs(tf_params['std']) < MIN_TINY_SCALE, tf.zeros_like(normalized), normalized)
 
     def minmax_fn():
         delta = tf_params['high'] - tf_params['low']
         raw_range = tf_params['max'] - tf_params['min']
-        safe_range = tf.where(tf.abs(raw_range) <= MIN_SCALE_THRESHOLD, 1.0, raw_range)
-        return (data - tf_params['min']) / safe_range * delta + tf_params['low']
+        safe_range = tf.where(tf.abs(raw_range) < MIN_TINY_SCALE, 1.0, raw_range)
+        normalized = (data - tf_params['min']) / safe_range * delta + tf_params['low']
+        return tf.where(tf.abs(raw_range) < MIN_TINY_SCALE, tf.zeros_like(normalized), normalized)
 
     def percentile_fn():
         delta = tf_params['high'] - tf_params['low']
         raw_range = tf_params['q99'] - tf_params['q01']
-        safe_range = tf.where(tf.abs(raw_range) <= MIN_SCALE_THRESHOLD, 1.0, raw_range)
+        safe_range = tf.where(tf.abs(raw_range) < MIN_TINY_SCALE, 1.0, raw_range)
         normalized = (data - tf_params['q01']) / safe_range * delta + tf_params['low']
+        normalized = tf.where(tf.abs(raw_range) < MIN_TINY_SCALE, tf.zeros_like(normalized), normalized)
         return tf.clip_by_value(normalized, tf_params['low'], tf_params['high'])
 
     # --- Use TF control flow to select the normalization branch ---

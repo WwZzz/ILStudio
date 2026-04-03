@@ -29,16 +29,15 @@ import multiprocessing as mp
 from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
 from loguru import logger
 
 from data_utils.utils import set_seed
 from deploy.base import start_device, is_robot_config, is_camera_config
-from deploy.shm_utils import SharedMemoryDataSynchronizer, SharedMemoryChannel, cleanup_all_shm
+from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
 from deploy.utils import RateLimiter
 from deploy.action_manager import load_action_manager
-from deploy.visualizer.base import start_all_visualizers, stop_all_visualizers
-from policy.utils import load_policy
+from deploy.inference import start_inference_process, stop_inference_process
+from deploy.visualizer.base import start_all_visualizers
 from configs.loader import ConfigLoader
 
 
@@ -260,8 +259,6 @@ def parse_param():
                        help='Action publishing rate (Hz)')
     parser.add_argument('-sr', '--sensing_rate', type=float, default=20,
                        help='Sensing rate (Hz) - used by synchronizer')
-    parser.add_argument('-ir', '--infer_rate', type=float, default=10,
-                       help='Inference rate (Hz)')
     
     # Model arguments
     parser.add_argument('--device', type=str, default='cuda',
@@ -377,171 +374,9 @@ def load_device_configs(args, unknown_args, cfg_loader=None) -> Tuple[List[dict]
     return robot_configs, all_shm_names, visualizer_configs
 
 
-def inference_process(args, shm_names: List[str], device_configs: List[dict]):
-    """
-    Inference producer process.
-    Consumes observation data from SHM and produces action chunks.
-    """
-    from deploy.shm_utils import _fix_resource_tracker
-    _fix_resource_tracker()
-    from deploy.base import create_obs2meta_func
-    
-    # Load policy
-    policy = load_policy(args)
-    logger.info("[Inference Process] Policy loaded.")
-    
-    # Connect to device SHM channels
-    shm_channels: List[Tuple[str, SharedMemoryChannel]] = []
-    for name in shm_names:
-        try:
-            ch = SharedMemoryChannel(name, is_writer=False, timeout=30.0)
-            shm_channels.append((name, ch))
-            logger.info("[Inference Process] Connected to SHM: {}", name)
-        except Exception as e:
-            logger.warning("[Inference Process] Failed to connect to {}: {}", name, e)
-    
-    if not shm_channels:
-        logger.error("[Inference Process] No SHM channels connected. Exiting.")
-        return
-    
-    # Create synchronizer
-    shm_synchronizer = SharedMemoryDataSynchronizer(
-        shm_channels=shm_channels,
-        buffer_maxlen=100,
-        max_tolerance_s=0.05,
-    ) 
-    
-    # Create chunk_shm for outputting action chunks
-    chunk_shm = SharedMemoryChannel(name='chunk_shm', max_size_mb=10, is_writer=True)
-    
-    # Build composite obs2meta from per-device obs2meta methods (config order)
-    obs2meta_func = create_obs2meta_func(device_configs)
-    
-    logger.info("[Inference Process] Starting inference loop...")
-    rate_limiter = RateLimiter()
-    # IMPORTANT:
-    # MetaPolicy.select_action uses timestep `t` to decide when to (re)infer chunks
-    # and may also embed timestep into policy inputs. If `t` is always 0, many
-    # policies will repeatedly produce the "first chunk" behavior.
-    t = 0
-    frame_idx = 0
-
-    # Setup observation image dump directory (in inference process)
-    obs_image_dir = None
-    if getattr(args, "debug", False):
-        base = getattr(args, "output_dir", "") or "."
-        run_tag = time.strftime("%Y%m%d_%H%M%S")
-        obs_image_dir = os.path.join(base, f"obs_images_{run_tag}")
-        try:
-            os.makedirs(obs_image_dir, exist_ok=True)
-            logger.info("[Inference Process] Saving synced-frame images to: {}", obs_image_dir)
-        except Exception as e:
-            logger.warning("[Inference Process] Failed to create obs_image_dir '{}': {}", obs_image_dir, e)
-            obs_image_dir = None
-    
-    with torch.no_grad():
-        try:
-            while True:
-                # Read and buffer data
-                shm_synchronizer.read_and_buffer()
-                
-                # Get synced frame
-                synced_data = shm_synchronizer.get_synced_frame_blocking(debug=True)
-                if synced_data is None:
-                    time.sleep(0.001)
-                    continue
-
-                # Save the raw images that are actually used to form policy_obs
-                if obs_image_dir is not None:
-                    try:
-                        saved_n = save_synced_frame_images(
-                            synced_data=synced_data,
-                            out_dir=obs_image_dir,
-                            frame_idx=frame_idx,
-                            color_order="rgb",
-                        )
-                        if saved_n == 0 and frame_idx % 50 == 0:
-                            logger.warning("[Inference Process] No image found in synced_data at frame_idx={}", frame_idx)
-                    except Exception as e:
-                        logger.warning("[Inference Process] Failed to save obs images at frame_idx={}: {}", frame_idx, e)
-                    finally:
-                        frame_idx += 1
-                
-                # Convert to policy observation format
-                policy_obs = obs2meta_func(synced_data)
-                if policy_obs is None:
-                    continue
-                policy_obs.timestep = np.array([[t]])
-                policy_obs.to_batch()
-                
-                # Run policy inference
-                # Both MetaPolicy and PolicyClient expose .inference(mobs)
-                mact_list = policy.inference(policy_obs)
-                action = np.stack([step[0]['action'] for step in mact_list])
-                # Write action chunk to SHM
-                if action is not None:
-                    # Ensure action is a proper numpy array
-                    if isinstance(action, np.ndarray):
-                        action_arr = action
-                    elif isinstance(action, (list, tuple)):
-                        action_arr = np.array(action, dtype=np.float32)
-                    else:
-                        action_arr = np.array(action)
-                    
-                    # Skip if action is empty or invalid
-                    if action_arr.size == 0:
-                        logger.warning("[Inference] Received empty action, skipping")
-                        continue
-                    
-                    # Ensure proper dtype (not object)
-                    if action_arr.dtype == object:
-                        logger.warning("[Inference] Action has object dtype, attempting conversion")
-                        try:
-                            action_arr = np.array(action_arr.tolist(), dtype=np.float32)
-                        except Exception as e:
-                            logger.error("[Inference] Failed to convert action: {}", e)
-                            continue
-                    
-                    action_data = {
-                        'action': action_arr,
-                        'timestamp': time.perf_counter(),
-                        # Expose the policy timestep for debugging / downstream managers.
-                        'timestep': int(t),
-                    }
-                    chunk_shm.write(action_data)
-                    
-                    # Advance timestep by the number of actions produced.
-                    # This matches MetaPolicy's expectation that `t` counts action steps.
-                    try:
-                        t += int(action_arr.shape[0])
-                    except Exception:
-                        t += 1
-                
-                rate_limiter.sleep(args.infer_rate)
-                
-        except KeyboardInterrupt:
-            logger.info("[Inference Process] Exit by KeyboardInterrupt")
-        except Exception as e:
-            logger.error("[Inference Process] Error: {}", e)
-            traceback.print_exc()
-        finally:
-            # Cleanup
-            for _, ch in shm_channels:
-                try:
-                    ch.destroy()
-                except Exception:
-                    pass
-            try:
-                chunk_shm.destroy()
-            except Exception:
-                pass
-
-
 def main():
     import signal
     import atexit
-    import subprocess
-    import os
     
     set_seed(0)
     args = parse_param()
@@ -603,7 +438,7 @@ def main():
     )
     
     # Clean orphaned SHM
-    shm_to_clean = all_shm_names + ['policy_control_shm', 'chunk_shm']
+    shm_to_clean = all_shm_names + ['policy_control_shm']
     cleanup_all_shm(shm_to_clean)
     logger.info("Cleaned up orphaned SHM segments.")
     
@@ -629,120 +464,68 @@ def main():
         )
         _all_procs.extend(viz_procs)
     
-    # Start inference process
-    logger.info("Starting inference process...")
-    inference_proc = mp.Process(
-        target=inference_process,
-        args=(args, all_shm_names, robot_configs),
-        daemon=True
+    # Start inference process via deploy/inference.py (trigger-based)
+    inference_ctx = start_inference_process(
+        model_name_or_path=args.model_name_or_path,
+        device=args.device,
+        device_shm_names=all_shm_names,
+        device_configs=robot_configs,
     )
-    inference_proc.start()
-    _all_procs.append(inference_proc)
-    time.sleep(1.0)
-
-    # Connect to chunk_shm (read action chunks from inference process)
-    try:
-        chunk_shm = SharedMemoryChannel(name='chunk_shm', is_writer=False, timeout=30.0)
-        _all_shm.append(chunk_shm)
-        logger.info("Connected to chunk_shm for reading action chunks.")
-    except Exception as e:
-        logger.error("Failed to connect to chunk_shm: {}", e)
-        # Cleanup and exit - will be handled by atexit/signal handler
-        return
+    _all_procs.append(inference_ctx.process)
     
-    # Load action manager configuration
+    # Load action manager and bind to inference context
     logger.info("Loading action manager: {}", args.action_manager)
     try:
         manager_cfg, manager_cfg_path = cfg_loader.load_manager(args.action_manager)
-        logger.info("✓ Loaded config from: {}", manager_cfg_path)
-        logger.info("  Manager: {}", manager_cfg.get('manager_name', manager_cfg.get('name')))
-        params_str = ', '.join(f'{k}={v}' for k, v in manager_cfg.items() 
-                               if k not in ['name', 'manager_name', 'module_path', 'class_name'])
-        if params_str:
-            logger.info("  Parameters: {}", params_str)
+        logger.info("Loaded action manager config from: {}", manager_cfg_path)
     except Exception as e:
-        # Fallback for legacy class names
         logger.info("Using legacy loading for: {}", args.action_manager)
         manager_cfg = {'manager_name': args.action_manager}
     
     action_manager = load_action_manager(config=manager_cfg)
+    action_manager.set_inference_context(inference_ctx)
+    logger.info("ActionManager: {} (bound to InferenceContext)", action_manager.__class__.__name__)
     
     # Press Enter to start the control loop
     input("Press Enter to start the control loop...")
-
-    # Setup action chunk dump directory (main process, --debug only)
-    action_chunk_dir = None
-    if getattr(args, "debug", False):
-        base = getattr(args, "output_dir", "") or "."
-        run_tag = time.strftime("%Y%m%d_%H%M%S")
-        action_chunk_dir = os.path.join(base, f"action_chunks_{run_tag}")
-        try:
-            os.makedirs(action_chunk_dir, exist_ok=True)
-            logger.info("Saving action chunks to: {}", action_chunk_dir)
-        except Exception as e:
-            logger.warning("Failed to create action_chunk_dir '{}': {}", action_chunk_dir, e)
-            action_chunk_dir = None
     
     # Main control loop
     logger.info("="*60)
     logger.info("[Main Control Loop] Started. Press Ctrl+C to stop.")
     logger.info("  Publish rate: {} Hz", args.publish_rate)
-    logger.info("  Inference rate: {} Hz", args.infer_rate)
     logger.info("="*60)
     
     rate_limiter = RateLimiter()
     action_count = 0
     last_log_time = time.perf_counter()
-    chunk_count = 0
     
     try:
         while True:
             t = time.perf_counter()
             
-            # Only fetch a new chunk when the current one is fully consumed.
-            # This guarantees synchronous execution: the entire chunk is
-            # dispatched before any new inference result is accepted.
-            if action_manager.is_empty():
-                action_chunk = chunk_shm.read(skip_unchanged=True, blocking=False, copy=True)
-                if action_chunk is not None:
-                    chunk_action = action_chunk.get('action')
-                    if chunk_action is not None:
-                        chunk_ts = action_chunk.get('timestamp', action_chunk.get('__timestamp__', None))
-                        if not isinstance(chunk_action, np.ndarray):
-                            logger.warning("[Main] chunk_action is not ndarray: {}", type(chunk_action))
-                        elif chunk_action.dtype == object:
-                            logger.warning("[Main] chunk_action has object dtype, skipping")
-                        elif chunk_action.size == 0:
-                            logger.warning("[Main] chunk_action is empty, skipping")
-                        else:
-                            if action_chunk_dir is not None:
-                                try:
-                                    a = chunk_action.astype(np.float32, copy=False)
-                                    fname = f"chunk_{chunk_count:06d}_ts{t:.3f}.npy"
-                                    np.save(os.path.join(action_chunk_dir, fname), a)
-                                    chunk_count += 1
-                                except Exception as e:
-                                    logger.warning("Failed to save action chunk: {}", e)
-                            action_manager.put(chunk_action, timestamp=chunk_ts)
+            # select_action() handles everything:
+            # 1. Poll for new action chunks from inference subprocess
+            # 2. If buffer empty or should_infer(): send trigger
+            # 3. If buffer empty: block-wait for inference result
+            # 4. Return single-step action, auto-increment t
+            step = action_manager.select_action()
             
-            action = action_manager.get(t)
+            # Extract the action array from the mact step
+            if isinstance(step, np.ndarray) and step.dtype == object and len(step) > 0:
+                action_arr = step[0].get('action') if isinstance(step[0], dict) else step[0]
+            elif isinstance(step, dict):
+                action_arr = step.get('action', step)
+            else:
+                action_arr = step
             
-            if action is not None:
-                action_arr = action if isinstance(action, np.ndarray) else np.array(action)
-                
-                if action_arr.size == 0:
-                    continue
-                if action_arr.dtype == object:
-                    logger.warning("[Main] action has object dtype, skipping")
-                    continue
-                if action_arr.ndim == 0:
-                    action_arr = action_arr.reshape(1)
-                
-                control_shm.write({
-                    'action': action_arr,
-                    'timestamp': t,
-                })
-                action_count += 1
+            if action_arr is not None:
+                action_arr = np.asarray(action_arr)
+                if action_arr.size > 0:
+                    control_shm.write({
+                        'action': action_arr,
+                        'timestamp': t,
+                    })
+                    action_count += 1
             
             if t - last_log_time > 5.0:
                 logger.info("[Control Loop] Published {} actions in last 5s ({:.1f} Hz)", 
@@ -758,8 +541,7 @@ def main():
         logger.info("[Main Control Loop] Error: {}", e)
         traceback.print_exc()
     finally:
-        # Cleanup is handled by cleanup_all() via atexit/signal handlers
-        # But also call it explicitly here in case we reach finally normally
+        stop_inference_process(inference_ctx)
         cleanup_all()
         cleanup_all_shm(shm_to_clean)
 

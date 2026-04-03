@@ -556,7 +556,13 @@ def _create_vqa_dataset_from_config(dataset_config: dict, args):
         raise RuntimeError(f"Failed to create VQA dataset {class_path} with args {constructor_args}: {e}")
 
 
-def _create_normalizer_from_stats(normalizer_class, merged_stats: dict, dataset_id: str, datatype: str):
+def _create_normalizer_from_stats(
+    normalizer_class,
+    merged_stats: dict,
+    dataset_id: str,
+    datatype: str,
+    max_expansion: float = None,
+):
     """Create a normalizer from pre-computed merged statistics.
     
     This is used for merged datasets where stats are computed by merging
@@ -595,12 +601,15 @@ def _create_normalizer_from_stats(normalizer_class, merged_stats: dict, dataset_
     if is_distributed():
         dist.barrier()
     
-    normalizer = normalizer_class(
+    nz_kwargs = dict(
         dataset=cache_dir,
         dataset_name=dataset_id,
         ctrl_type=ctrl_type,
         ctrl_space=ctrl_space,
     )
+    if max_expansion is not None:
+        nz_kwargs['max_expansion'] = max_expansion
+    normalizer = normalizer_class(**nz_kwargs)
     
     return normalizer
 
@@ -687,6 +696,11 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
     # Get normalization types
     action_normtype = getattr(args, 'action_normalize', task_config.get('action_normalize', 'zscore'))
     state_normtype = getattr(args, 'state_normalize', task_config.get('state_normalize', 'zscore'))
+    max_expansion = getattr(args, 'max_expansion', None)
+    if max_expansion is None:
+        max_expansion = task_config.get('max_expansion', None)
+    if max_expansion is not None:
+        max_expansion = float(max_expansion)
     # Compute normalizers
     action_normalizer_class = NORMTYPE2CLASS[action_normtype]
     state_normalizer_class = NORMTYPE2CLASS[state_normtype]
@@ -715,10 +729,10 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
                 logger.info(f"  Computing stats for sub-dataset: {sub_id}")
                 
                 # Create temporary normalizer to compute stats
-                temp_normalizer = action_normalizer_class(
-                    sub_ds,
-                    dataset_name=sub_id,
-                )
+                temp_kw = {'dataset_name': sub_id}
+                if max_expansion is not None:
+                    temp_kw['max_expansion'] = max_expansion
+                temp_normalizer = action_normalizer_class(sub_ds, **temp_kw)
                 sub_stats_list.append(temp_normalizer.all_stats)
                 sub_normalizers.append(temp_normalizer)
             
@@ -730,10 +744,10 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
             # Create normalizers with merged stats
             # We need to create normalizers that use the merged stats
             action_normalizers[dataset_id] = _create_normalizer_from_stats(
-                action_normalizer_class, merged_stats, dataset_id, 'action'
+                action_normalizer_class, merged_stats, dataset_id, 'action', max_expansion=max_expansion
             )
             state_normalizers[dataset_id] = _create_normalizer_from_stats(
-                state_normalizer_class, merged_stats, dataset_id, 'state'
+                state_normalizer_class, merged_stats, dataset_id, 'state', max_expansion=max_expansion
             )
         else:
             # Regular dataset - find matching config
@@ -766,6 +780,9 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
                 'dataset_name': dataset_id,
                 'mask': state_norm_mask,
             }
+            if max_expansion is not None:
+                action_normalizer_kwargs['max_expansion'] = max_expansion
+                state_normalizer_kwargs['max_expansion'] = max_expansion
 
             # Create normalizers with masks
             action_normalizers[dataset_id] = action_normalizer_class(dataset, **action_normalizer_kwargs)
@@ -810,6 +827,8 @@ def _normalize_datasets(datasets, args, task_config, save_norm=True, merge_info=
             'state': {k: str(v) for k, v in state_normalizers.items()}, 
             'action': {k: str(v) for k, v in action_normalizers.items()}, 
         }
+        if max_expansion is not None:
+            norm_meta['max_expansion'] = max_expansion
         
         # Log mask information being saved
         has_mask = any('action_norm_mask' in ds or 'state_norm_mask' in ds for ds in datasets_meta)

@@ -170,6 +170,7 @@ def inference_worker(
     obs_shm_name: str = None,
     # Real mode: read obs from device SHMs directly
     device_shm_names: List[str] = None,
+    device_configs: List[dict] = None,
     robot_module_name: str = None,
     sync_buffer_maxlen: int = 100,
     sync_max_tolerance_s: float = 0.05,
@@ -224,8 +225,7 @@ def inference_worker(
     if is_real_mode:
         # Real mode: connect to device SHMs + synchronizer
         from deploy.shm_utils import SharedMemoryDataSynchronizer
-        from deploy.base import default_obs2meta
-        import importlib
+        from deploy.base import create_obs2meta_func, default_obs2meta
         
         shm_channels = []
         for name in device_shm_names:
@@ -246,18 +246,11 @@ def inference_worker(
             max_tolerance_s=sync_max_tolerance_s,
         )
         
-        # Load obs2meta function from robot module
-        if robot_module_name:
-            try:
-                robot_module = importlib.import_module(robot_module_name)
-                if hasattr(robot_module, 'obs2meta'):
-                    obs2meta_func = robot_module.obs2meta
-                    logger.info(f"[InferenceWorker-REAL] Using obs2meta from {robot_module_name}")
-            except Exception as e:
-                logger.warning(f"[InferenceWorker-REAL] Could not load obs2meta: {e}")
-        if obs2meta_func is None:
+        if device_configs:
+            obs2meta_func = create_obs2meta_func(device_configs)
+        else:
             obs2meta_func = default_obs2meta
-            logger.info("[InferenceWorker-REAL] Using default obs2meta function")
+            logger.info("[InferenceWorker-REAL] No device_configs, using default obs2meta")
     else:
         # Sim mode: read from obs_shm
         if obs_shm_name is None:
@@ -308,7 +301,16 @@ def inference_worker(
     def _get_obs_real():
         """Read obs from device SHMs via synchronizer (real mode)."""
         nonlocal last_obs_summary
-        synced_data = synchronizer.get_synced_frame_blocking(debug=False)
+        # For trigger-based real-world inference, using get_synced_frame_blocking()
+        # would return the earliest unread synchronized frame since the previous
+        # inference. With chunked execution this can lag by almost one whole chunk.
+        # Here we instead wait until every device has at least one fresh sample and
+        # then consume the newest unread sample from each device.
+        synced_data = None
+        while running and synced_data is None:
+            synced_data = synchronizer.get_latest_frame_nonblocking(strict_new_only=True)
+            if synced_data is None:
+                time.sleep(0.001)
         if synced_data is None:
             last_obs_summary = "synced_data=None"
             return None, 0
@@ -340,22 +342,25 @@ def inference_worker(
                         logger.info(f"[InferenceWorker-{mode_str}] Policy reset")
                         continue
                     elif cmd == "infer":
-                        # Carry epoch from trigger → action payload
+                        # Carry trigger metadata through inference.
                         trigger_epoch = ctrl_data.get("epoch", 0)
+                        trigger_t = int(ctrl_data.get("t", 0))
                         
                         # Get latest observation
-                        mobs, t = get_obs()
+                        mobs, obs_t = get_obs()
                         if mobs is None:
                             if infer_debug:
                                 logger.info(
-                                    "[InferenceWorker-{}] Skip infer epoch={} because obs unavailable: {}",
+                                    "[InferenceWorker-{}] Skip infer epoch={} t={} because obs unavailable: {}",
                                     mode_str,
                                     trigger_epoch,
+                                    trigger_t,
                                     last_obs_summary,
                                 )
                             else:
                                 logger.debug(f"[InferenceWorker-{mode_str}] No obs available at trigger time")
                             continue
+                        t = trigger_t if is_real_mode else obs_t
                         
                         # Set timestep
                         if mobs.state is not None:
@@ -610,6 +615,7 @@ def start_inference_process(
     obs_shm_size_mb: int = 64,
     # Real mode params
     device_shm_names: List[str] = None,
+    device_configs: List[dict] = None,
     robot_module_name: str = None,
     sync_buffer_maxlen: int = 100,
     sync_max_tolerance_s: float = 0.05,
@@ -629,7 +635,8 @@ def start_inference_process(
                     MetaPolicy no longer truncates chunks (action_manager handles it).
         obs_shm_size_mb: Size of obs SHM in MB (sim mode only).
         device_shm_names: Device SHM names (real mode). If provided, enables real mode.
-        robot_module_name: Robot module name for obs2meta (real mode).
+        device_configs: Device config dicts (real mode). Used to build composite obs2meta.
+        robot_module_name: Robot module name for obs2meta (real mode, legacy fallback).
         sync_buffer_maxlen: Synchronizer buffer size (real mode).
         sync_max_tolerance_s: Synchronizer tolerance (real mode).
         action_shm_size_mb: Size of action SHM in MB.
@@ -685,6 +692,7 @@ def start_inference_process(
     if is_real_mode:
         worker_kwargs.update(
             device_shm_names=device_shm_names,
+            device_configs=device_configs,
             robot_module_name=robot_module_name,
             sync_buffer_maxlen=sync_buffer_maxlen,
             sync_max_tolerance_s=sync_max_tolerance_s,
