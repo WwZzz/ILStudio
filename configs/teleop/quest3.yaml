@@ -5,8 +5,8 @@
 # Units: position in meters, rotation in radians
 #
 # Usage:
-#   - Press and hold SQUEEZE button (side grip) to send pose deltas
-#   - Use TRIGGER to control gripper (press = open, release = close)
+#   - Press and hold SQUEEZE (side grip) to send pose deltas
+#   - Gripper: A/X = open, B/Y = close (trigger not used). Frozen: B/Y edge = go_home (robot)
 #
 # Note: VR tracking already outputs in meters/radians, scale=1.0 for direct pass-through
 
@@ -20,9 +20,10 @@ args:
   position_scale: 1.0      # VR outputs meters, pass through directly
   rotation_scale: 1.0      # VR outputs radians, pass through directly
   connect_timeout: 60.0
-  gripper_default_closed: true  # Gripper closed by default, trigger opens it
-  gripper_delta_mode: true      # Use delta mode for SO101 (incremental gripper control)
-  gripper_delta_value: 1.0      # Delta value per frame (adjust for gripper speed)
+  gripper_default_closed: true
+  gripper_delta_mode: true
+  gripper_delta_value: 1.0
+  gripper_button_control: true  # Legacy key (ignored); gripper is always A/X + B/Y
   
   # Single 3x3 transform matrix: Quest (LHS) -> SO101 (RHS)
   # Handles both LHS->RHS conversion and axis remapping

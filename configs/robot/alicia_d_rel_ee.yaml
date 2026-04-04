@@ -1,37 +1,33 @@
-# Alicia-D Robot Configuration - Relative EE (Anchor) Control Mode
-# 相对末端位姿控制模式，VR解冻后锁定锚点，后续动作相对锚点应用
-# Optimized for VR teleoperation with fast Pinocchio IK (~0.3ms)
+# Alicia-D — 相对末端 (rel_ee) + Piper 风格全局优化 IK
+# VR 解冻后锚点锁定，后续动作相对锚点；无 casadi 时自动 scipy。
 
 - type: deploy.robot.alicia_d.AliciaD
   name: alicia_d_rel_ee
   args:
     name: alicia_d
     fps: 200.0
-    control_mode: rel_ee  # Relative EE control with anchor mechanism
+    control_mode: rel_ee
     port: /dev/ttyACM0
-    # Speed settings
-    speed_deg_s: 400.0      # Higher speed for responsive control
-    gripper_speed_deg_s: 483.4
-    
-    # IK settings (optimized for real-time VR teleoperation)
-    ik_eps: 0.001          # 1mm tolerance
-    ik_max_iter: 20        # ~0.3ms per solve
-    ik_dt: 1.0             # Large step for fast convergence
-    ik_rotation_weight: 0.3 
-    
-    # Relative EE scaling (tune based on your teleop device)
-    position_scale: 1.0    # meters -> meters
-    rotation_scale: 1.0    # radians -> radians
-    gripper_scale: 1.0    # Inverted: AliciaD gripper increases to close, so negate input
-    
 
-    # Smoothing: exponential low-pass filter on joint trajectory
-    smoothing_tau: 0.04  
-    
-    # Safety settings
-    max_joint_delta_deg: 30.0  # Per-action joint limit (degrees). At 200Hz allows ~2000°/s, well above servo max 439°/s.
-    
+    speed_deg_s: 400.0
+    gripper_speed_deg_s: 483.4
+
+    ik_end_frame: link6
+    ik_ee_offset_xyz: [0.0, 0.0, 0.0]
+    ik_ee_offset_rpy: [0.0, 0.0, 0.0]
+
+    ik_eps: 0.01
+    ik_max_iter: 200
+    ik_rotation_weight: 0.1
+
+    position_scale: 1.0
+    rotation_scale: 1.0
+    gripper_scale: 1.0
+
+    max_joint_delta_deg: 30.0
     debug: false
+    # 夹爪调试：true 时打 [GripperTrace:robot]，可与 teleop 的 gripper_trace 对照
+    gripper_trace: false
 
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera

@@ -508,13 +508,17 @@ AFRAME.registerComponent('controller-updater', {
           z: this.leftHand.object3D.quaternion.z, 
           w: this.leftHand.object3D.quaternion.w 
         };
-        leftController.trigger = this.leftTriggerDown ? 1 : 0;
         leftController.gripActive = this.leftGripDown;
+        let leftTriggerAnalog = null;
         
         // 采集左手柄的摇杆和按钮信息
         if (this.leftHand && this.leftHand.components && this.leftHand.components['tracked-controls']) {
             const leftGamepad = this.leftHand.components['tracked-controls'].controller?.gamepad;
             if (leftGamepad) {
+                const tv = leftGamepad.buttons[0]?.value;
+                if (typeof tv === 'number' && !isNaN(tv)) {
+                    leftTriggerAnalog = Math.max(0, Math.min(1, tv));
+                }
                 // 摇杆
                 leftController.thumbstick = {
                     x: leftGamepad.axes[2] || 0,
@@ -553,6 +557,8 @@ AFRAME.registerComponent('controller-updater', {
                 }
             }
         }
+        leftController.trigger =
+            leftTriggerAnalog !== null ? leftTriggerAnalog : (this.leftTriggerDown ? 1 : 0);
     } else {
         console.log('Left hand object not available');
     }
@@ -608,13 +614,17 @@ AFRAME.registerComponent('controller-updater', {
           z: this.rightHand.object3D.quaternion.z, 
           w: this.rightHand.object3D.quaternion.w 
         };
-        rightController.trigger = this.rightTriggerDown ? 1 : 0;
         rightController.gripActive = this.rightGripDown;
+        let rightTriggerAnalog = null;
         
         // 采集右手柄的摇杆和按钮信息
         if (this.rightHand && this.rightHand.components && this.rightHand.components['tracked-controls']) {
             const rightGamepad = this.rightHand.components['tracked-controls'].controller?.gamepad;
             if (rightGamepad) {
+                const tv = rightGamepad.buttons[0]?.value;
+                if (typeof tv === 'number' && !isNaN(tv)) {
+                    rightTriggerAnalog = Math.max(0, Math.min(1, tv));
+                }
                 // 摇杆
                 rightController.thumbstick = {
                     x: rightGamepad.axes[2] || 0,
@@ -652,6 +662,8 @@ AFRAME.registerComponent('controller-updater', {
                 }
             }
         }
+        rightController.trigger =
+            rightTriggerAnalog !== null ? rightTriggerAnalog : (this.rightTriggerDown ? 1 : 0);
     } else {
         console.log('Right hand object not available');
     }
