@@ -13,6 +13,8 @@ import numpy as np
 from typing import Optional, Literal, Dict, Any
 from scipy.spatial.transform import Rotation as R
 
+from loguru import logger
+
 from deploy.teleoperator.base import BaseTeleopDevice
 from deploy.utils import RateLimiter
 
@@ -40,9 +42,13 @@ class Quest3Teleop(BaseTeleopDevice):
       Hold to move the robot arm. When released, pose deltas are zeroed.
       In code: is_unsqueeze_pressed, _left_unsqueeze_active, _right_unsqueeze_active
       
-    - GRIPPER CONTROL:
-      * gripper_button_control=True: A/X button opens, TRIGGER closes
-      * gripper_button_control=False: TRIGGER controls gripper (original mode)
+    - GRIPPER (YAML: gripper_use_trigger, gripper_trigger_mode, gripper_a_maps_to_open, gripper_b_maps_to_close):
+      * Quest 扳机: WebXR gamepad.buttons[0].value 为 0~1 模拟量（见 XLeVR vr_app.js）；无则回退二值。
+      * gripper_trigger_mode (仅 gripper_delta_mode=True): delta_binary | analog_travel | a_open_trigger_close
+        - analog_travel: 与 delta_binary 在松/满端点一致，中间行程连续。
+        - a_open_trigger_close: A/X 张、扳机（>0.5）合；无可靠模拟量时用此，并设 gripper_a_maps_to_open: true。
+      * Alicia 典型: analog_travel + A 不参与夹爪；B = 仅 go_home。
+      * Freeze: 不读扳机夹爪；B/Y 不作夹爪闭合。
     
     Action format:
         Single arm: [dx, dy, dz, droll, dpitch, dyaw, gripper] (7D)
@@ -52,6 +58,7 @@ class Quest3Teleop(BaseTeleopDevice):
     
     # Supported teleop modes
     TELEOP_MODES = ("delta_ee", "rel_ee")
+    GRIPPER_TRIGGER_MODES = frozenset({"delta_binary", "analog_travel", "a_open_trigger_close"})
     
     def __init__(
         self,
@@ -67,8 +74,15 @@ class Quest3Teleop(BaseTeleopDevice):
         gripper_default_closed: bool = True,
         gripper_delta_mode: bool = False,
         gripper_delta_value: float = 1.0,
-        gripper_button_control: bool = False,  # Use A/B (right) or X/Y (left) buttons instead of trigger
+        gripper_button_control: bool = True,  # Ignored; kept for YAML compatibility
+        gripper_use_trigger: bool = False,
+        gripper_a_maps_to_open: bool = True,
+        gripper_b_maps_to_close: bool = True,
+        gripper_trigger_mode: Literal["delta_binary", "analog_travel", "a_open_trigger_close"] = "delta_binary",
+        gripper_trigger_analog_scale: float = 1.0,
+        gripper_trigger_analog_deadband: float = 0.06,
         debug: bool = False,
+        gripper_trace: bool = False,
         **kwargs
     ):
         """
@@ -93,19 +107,18 @@ class Quest3Teleop(BaseTeleopDevice):
                                    (as similarity transform: R_robot = T @ R_vr @ T^T)
                                    This matrix handles both axis remapping AND sign corrections.
                                    If None, no transformation is applied (identity matrix)
-            gripper_default_closed: If True, gripper is closed by default, trigger opens it
-                                    If False, gripper is open by default, trigger closes it
-            gripper_delta_mode: If True, gripper outputs delta values for incremental control
-                               (positive=open more, negative=close more)
-                               If False, gripper outputs absolute state (0=closed, 1=open)
-            gripper_delta_value: The delta value to use when gripper_delta_mode is True
-                                Default: 1.0 (adjust based on robot's gripper speed)
-            gripper_button_control: If True, use A/B buttons (right hand) or X/Y buttons (left hand)
-                                   to control gripper instead of trigger.
-                                   Right hand: A=open delta, B=close delta
-                                   Left hand: X=open delta, Y=close delta
-                                   Requires gripper_delta_mode=True
+            gripper_default_closed: With trigger+delta: trigger pressed vs released open/close convention
+            gripper_delta_mode: If True, per-frame deltas; else absolute 0/1 hints
+            gripper_delta_value: Step size for delta mode
+            gripper_button_control: Ignored (kept for YAML compatibility)
+            gripper_use_trigger: If True, trigger drives gripper while unsqueeze (ignored while frozen)
+            gripper_a_maps_to_open: If False, A/X do not add open delta (trigger-only gripper)
+            gripper_b_maps_to_close: If False, B/Y never emit close delta (use B for go_home only on Alicia)
+            gripper_trigger_mode: delta_binary | analog_travel | a_open_trigger_close (delta mode only)
+            gripper_trigger_analog_scale: Scales analog_travel contribution
+            gripper_trigger_analog_deadband: |tr-0.5| below this → no trigger delta (analog_travel)
             debug: Enable debug output
+            gripper_trace: Log [GripperTrace:teleop] on each SHM write (pair with robot gripper_trace)
         """
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps)
         
@@ -122,7 +135,19 @@ class Quest3Teleop(BaseTeleopDevice):
         self.gripper_delta_mode = gripper_delta_mode
         self.gripper_delta_value = gripper_delta_value
         self.gripper_button_control = gripper_button_control
+        self.gripper_use_trigger = gripper_use_trigger
+        self.gripper_a_maps_to_open = gripper_a_maps_to_open
+        self.gripper_b_maps_to_close = gripper_b_maps_to_close
+        if gripper_trigger_mode not in self.GRIPPER_TRIGGER_MODES:
+            raise ValueError(
+                f"Invalid gripper_trigger_mode '{gripper_trigger_mode}'. "
+                f"Must be one of {sorted(self.GRIPPER_TRIGGER_MODES)}"
+            )
+        self.gripper_trigger_mode = gripper_trigger_mode
+        self.gripper_trigger_analog_scale = float(gripper_trigger_analog_scale)
+        self.gripper_trigger_analog_deadband = float(gripper_trigger_analog_deadband)
         self.debug = debug
+        self.gripper_trace = gripper_trace
         
         # Calibration transform matrix (3x3)
         # Used for both position and rotation coordinate transformation
@@ -161,7 +186,7 @@ class Quest3Teleop(BaseTeleopDevice):
         self._right_anchor_position = None
         self._right_anchor_quaternion = None
         
-        # Robot GRIPPER states (0.0 = open, 1.0 = closed) - controlled by VR TRIGGER
+        # Legacy gripper tracking (unused for output; gripper deltas come from buttons each frame)
         self._left_gripper = 0.0
         self._right_gripper = 0.0
         
@@ -321,90 +346,123 @@ class Quest3Teleop(BaseTeleopDevice):
                 is_unsqueeze_pressed = True
             
             # ============================================================
-            # GRIPPER CONTROL - via trigger or buttons (A/B for right, X/Y for left)
+            # GRIPPER: trigger (while unsqueeze) + optional A/X open + optional B/Y close.
+            # B never affects gripper when gripper_b_maps_to_close is False (go_home only).
+            # Frozen: no trigger gripper; no B/Y close.
             # ============================================================
-            if self.gripper_button_control:
-                # Button control mode: 
-                # Right hand: A=open, B=close (or trigger=close)
-                # Left hand: X=open, Y=close (or trigger=close)
-                if is_right_hand:
-                    # Right hand: check for A button (open) and B button (close)
-                    open_button = (buttons.get("a", False) or 
-                                 buttons.get("button_a", False) or
-                                 buttons.get("A", False))
-                    close_button_btn = (buttons.get("b", False) or 
-                                      buttons.get("button_b", False) or
-                                      buttons.get("B", False))
-                else:
-                    # Left hand: check for X button (open) and Y button (close)
-                    open_button = (buttons.get("x", False) or 
-                                 buttons.get("button_x", False) or
-                                 buttons.get("X", False))
-                    close_button_btn = (buttons.get("y", False) or 
-                                      buttons.get("button_y", False) or
-                                      buttons.get("Y", False))
-                
-                # Use trigger for close (both hands) - trigger can also close
-                trigger_active = goal.metadata.get("trigger_active", False)
-                if not trigger_active:
-                    trigger_value = goal.metadata.get("trigger_value", 0.0)
-                    if trigger_value > 0.5:
-                        trigger_active = True
-                close_button = trigger_active or close_button_btn
-                
-                # Button control requires delta mode
-                if open_button:
-                    gripper_value = self.gripper_delta_value   # Open (positive delta)
-                elif close_button:
-                    gripper_value = -self.gripper_delta_value  # Close (negative delta)
-                else:
-                    gripper_value = 0.0  # No change when no button pressed
-                
-            else:
-                # Trigger control mode (original behavior)
-                trigger_active = goal.metadata.get("trigger_active", False)
-                
-                # Also check buttons dict for trigger
+            if self.gripper_delta_mode:
+                raw_tr = goal.metadata.get("trigger_value", goal.metadata.get("trigger", 0.0))
+                try:
+                    trv = float(raw_tr if raw_tr is not None else 0.0)
+                except (TypeError, ValueError):
+                    trv = 0.0
+                trv = max(0.0, min(1.0, trv))
+                trigger_active = bool(goal.metadata.get("trigger_active", False))
                 if not trigger_active and buttons:
-                    trigger_active = buttons.get("trigger", False)
-                
-                # Also check trigger_value (some VR systems report as float 0-1)
-                trigger_value = goal.metadata.get("trigger_value", 0.0)
-                if not trigger_active and trigger_value > 0.5:
+                    tb = buttons.get("trigger", False)
+                    if isinstance(tb, (int, float)):
+                        trigger_active = float(tb) > 0.5
+                    else:
+                        trigger_active = bool(tb)
+                if not trigger_active and trv > 0.5:
                     trigger_active = True
-                
-                if self.debug:
-                    print(f"[Quest3Teleop] trigger_active={trigger_active}, trigger_value={trigger_value}")
-                
-                if self.gripper_delta_mode:
-                    # Delta mode: output incremental values for robots using delta control
-                    # Positive = open more, Negative = close more
-                    if self.gripper_default_closed:
-                        # Default closing, trigger opens
-                        if trigger_active:
-                            gripper_value = self.gripper_delta_value   # Open (positive delta)
-                        else:
-                            gripper_value = -self.gripper_delta_value  # Close (negative delta)
-                    else:
-                        # Default opening, trigger closes
-                        if trigger_active:
-                            gripper_value = -self.gripper_delta_value  # Close (negative delta)
-                        else:
-                            gripper_value = self.gripper_delta_value   # Open (positive delta)
+
+                if is_right_hand:
+                    open_button = (
+                        buttons.get("a", False) or buttons.get("button_a", False) or buttons.get("A", False)
+                    )
+                    close_button = (
+                        (buttons.get("b", False) or buttons.get("button_b", False) or buttons.get("B", False))
+                        if self.gripper_b_maps_to_close
+                        else False
+                    )
                 else:
-                    # Absolute mode: output state values (0=closed, 1=open)
-                    if self.gripper_default_closed:
-                        # Default closed, trigger opens
-                        if trigger_active:
-                            gripper_value = 1.0  # Open when trigger pressed
+                    open_button = (
+                        buttons.get("x", False) or buttons.get("button_x", False) or buttons.get("X", False)
+                    )
+                    close_button = (
+                        (buttons.get("y", False) or buttons.get("button_y", False) or buttons.get("Y", False))
+                        if self.gripper_b_maps_to_close
+                        else False
+                    )
+                if not is_unsqueeze_pressed:
+                    close_button = False
+
+                g = 0.0
+                if self.gripper_use_trigger and is_unsqueeze_pressed:
+                    mode = self.gripper_trigger_mode
+                    if mode == "analog_travel":
+                        if abs(trv - 0.5) < self.gripper_trigger_analog_deadband:
+                            trig_cmd = 0.0
                         else:
-                            gripper_value = 0.0  # Closed when trigger released
+                            # (0.5 - tr): 拉满 tr→1 与松开 tr→0 相对 delta_binary 取反后的开/合方向
+                            trig_cmd = (0.5 - trv) * 2.0
+                        if not self.gripper_default_closed:
+                            trig_cmd = -trig_cmd
+                        g += trig_cmd * self.gripper_delta_value * self.gripper_trigger_analog_scale
+                    elif mode == "a_open_trigger_close":
+                        if trigger_active:
+                            g += self.gripper_delta_value
                     else:
-                        # Default open, trigger closes
-                        if trigger_active:
-                            gripper_value = 0.0  # Closed when trigger pressed
+                        if self.gripper_default_closed:
+                            g += -self.gripper_delta_value if trigger_active else self.gripper_delta_value
                         else:
-                            gripper_value = 1.0  # Open when trigger released
+                            g += self.gripper_delta_value if trigger_active else -self.gripper_delta_value
+                if open_button and self.gripper_a_maps_to_open:
+                    g += self.gripper_delta_value
+                if close_button and is_unsqueeze_pressed:
+                    g -= self.gripper_delta_value
+                if open_button and close_button and self.gripper_b_maps_to_close:
+                    g = 0.0
+                gripper_value = float(g)
+            else:
+                raw_tr = goal.metadata.get("trigger_value", goal.metadata.get("trigger", 0.0))
+                try:
+                    trv = float(raw_tr if raw_tr is not None else 0.0)
+                except (TypeError, ValueError):
+                    trv = 0.0
+                trv = max(0.0, min(1.0, trv))
+                trigger_active = bool(goal.metadata.get("trigger_active", False))
+                if not trigger_active and buttons:
+                    tb = buttons.get("trigger", False)
+                    if isinstance(tb, (int, float)):
+                        trigger_active = float(tb) > 0.5
+                    else:
+                        trigger_active = bool(tb)
+                if not trigger_active and trv > 0.5:
+                    trigger_active = True
+                if is_right_hand:
+                    open_button = (
+                        buttons.get("a", False) or buttons.get("button_a", False) or buttons.get("A", False)
+                    )
+                    close_button = (
+                        (buttons.get("b", False) or buttons.get("button_b", False) or buttons.get("B", False))
+                        if self.gripper_b_maps_to_close
+                        else False
+                    )
+                else:
+                    open_button = (
+                        buttons.get("x", False) or buttons.get("button_x", False) or buttons.get("X", False)
+                    )
+                    close_button = (
+                        (buttons.get("y", False) or buttons.get("button_y", False) or buttons.get("Y", False))
+                        if self.gripper_b_maps_to_close
+                        else False
+                    )
+                if not is_unsqueeze_pressed:
+                    close_button = False
+
+                if self.gripper_use_trigger and is_unsqueeze_pressed:
+                    if self.gripper_default_closed:
+                        gripper_value = 0.0 if trigger_active else 1.0
+                    else:
+                        gripper_value = 1.0 if trigger_active else 0.0
+                else:
+                    gripper_value = 1.0 if not self.gripper_default_closed else 0.0
+                if open_button and self.gripper_a_maps_to_open and not close_button:
+                    gripper_value = 1.0
+                elif close_button and not open_button:
+                    gripper_value = 0.0
         
         # Handle unsqueeze (side grip) state transitions - enables pose transmission
         if current_position is not None:
@@ -554,7 +612,7 @@ class Quest3Teleop(BaseTeleopDevice):
             
         Note:
             - unsqueeze (side grip): Enables pose delta transmission
-            - Gripper (A/X + trigger): Works independently, always active
+            - Gripper: A/X open, B/Y close only; trigger ignored. Frozen: B (right) / Y (left) edge = go_home
         """
         should_write = False
         has_new_data = False
@@ -565,13 +623,9 @@ class Quest3Teleop(BaseTeleopDevice):
         right_was_active = self._right_unsqueeze_active
         
         if self.arm_mode == "dual":
-            # Initialize with default gripper values
-            # Button control mode: default is 0 (no change) — only explicit button press produces delta
-            # Trigger control mode: default is close/open direction (trigger released = default state)
-            if self.gripper_button_control:
+            # No trigger: default gripper channel is no delta (delta mode) or neutral absolute
+            if self.gripper_delta_mode:
                 default_gripper = 0.0
-            elif self.gripper_delta_mode:
-                default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
             action = np.zeros(14)
@@ -643,11 +697,8 @@ class Quest3Teleop(BaseTeleopDevice):
             should_write = (has_new_data and unsqueeze_active) or just_released
             
         elif self.arm_mode == "left":
-            # Initialize with default gripper value
-            if self.gripper_button_control:
+            if self.gripper_delta_mode:
                 default_gripper = 0.0
-            elif self.gripper_delta_mode:
-                default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
             action = np.zeros(7)
@@ -685,11 +736,8 @@ class Quest3Teleop(BaseTeleopDevice):
             should_write = (has_new_data and unsqueeze_active) or just_released
             
         else:  # right
-            # Initialize with default gripper value
-            if self.gripper_button_control:
+            if self.gripper_delta_mode:
                 default_gripper = 0.0
-            elif self.gripper_delta_mode:
-                default_gripper = -self.gripper_delta_value if self.gripper_default_closed else self.gripper_delta_value
             else:
                 default_gripper = 0.0 if self.gripper_default_closed else 1.0
             action = np.zeros(7)
@@ -726,21 +774,19 @@ class Quest3Teleop(BaseTeleopDevice):
             should_write = (has_new_data and unsqueeze_active) or just_released
         
         # ============================================================
-        # Gripper is independent: always write when gripper button is active,
-        # even when unsqueeze is not pressed (arm is frozen).
+        # While frozen: still write if action carries non-zero gripper delta (e.g. trigger path
+        # is off, but A/B gripper modes may still set a6).
         # ============================================================
         final_unsqueeze_for_gripper = unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active)
         if not final_unsqueeze_for_gripper:
-            # Check if any gripper button is pressed (A/trigger for open, B/trigger for close)
+            # Non-zero gripper channel while frozen (e.g. legacy button gripper)
             gripper_value_in_action = action[6] if self.arm_mode != "dual" else (action[6] or action[13])
             if abs(gripper_value_in_action) > 1e-6:
                 should_write = True
         
         # ============================================================
-        # B button go-home detection (only when unsqueeze is NOT active)
-        # When unsqueeze is active, B button controls gripper (close).
-        # When unsqueeze is released, B button triggers go-home command.
-        # Uses edge detection: only triggers on rising edge (press, not hold).
+        # B / Y go-home (only when unsqueeze is NOT active). Rising edge only.
+        # Gripper never uses B when gripper_b_maps_to_close is False (Alicia).
         # ============================================================
         go_home = False
         final_unsqueeze = unsqueeze_active if 'unsqueeze_active' in dir() else (self._left_unsqueeze_active or self._right_unsqueeze_active)
@@ -769,7 +815,7 @@ class Quest3Teleop(BaseTeleopDevice):
                             go_home = True
                         self._left_b_was_pressed = b_pressed
         else:
-            # Reset edge detection when unsqueeze is active (B is used for gripper)
+            # Reset B/Y edge state while squeezing so go_home edge works after release
             self._right_b_was_pressed = False
             self._left_b_was_pressed = False
         
@@ -794,6 +840,18 @@ class Quest3Teleop(BaseTeleopDevice):
             action_dict["left_unsqueeze_active"] = False
             action_dict["right_unsqueeze_active"] = self._right_unsqueeze_active
 
+        if self.gripper_trace and should_write:
+            if self.arm_mode == "dual":
+                logger.info(
+                    f"[GripperTrace:teleop] shm_write L6={float(action[6]):.5f} R13={float(action[13]):.5f} "
+                    f"unsqz={final_unsqueeze} go_home={go_home} anchor_set={anchor_just_set}"
+                )
+            else:
+                logger.info(
+                    f"[GripperTrace:teleop] shm_write a6={float(action[6]):.5f} "
+                    f"unsqz={final_unsqueeze} go_home={go_home} anchor_set={anchor_just_set}"
+                )
+
         return action_dict, should_write
     
     def start(self):
@@ -801,6 +859,10 @@ class Quest3Teleop(BaseTeleopDevice):
         import signal
         
         print(f"[Quest3Teleop] Starting, name={self.name}, mode={self.arm_mode}")
+        if self.gripper_trace:
+            logger.warning(
+                "[Quest3Teleop] gripper_trace=ON: logging [GripperTrace:teleop] on each SHM write"
+            )
         
         # Connect to VR first
         if not self.connect():

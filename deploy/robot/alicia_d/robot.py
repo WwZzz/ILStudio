@@ -3,7 +3,7 @@ Alicia-D Robot for ILStudio
 
 Integrates Alicia-D robot arm with ILStudio framework using:
 - Official alicia_d_sdk for hardware communication (via pip install)
-- Custom Pinocchio-based real-time IK solver (fast, ~0.3ms per solve)
+- Piper-style global IK (Pinocchio + scipy / optional casadi+ipopt)
 - SharedMemory for observation/action communication
 
 Control modes:
@@ -26,380 +26,21 @@ from benchmark.base import MetaObs
 from loguru import logger
 
 
-# ============================================================================
-# Real-time Pinocchio IK Solver
-# ============================================================================
+def _transform_matrix_from_xyz_rpy(xyz: np.ndarray, rpy: np.ndarray) -> np.ndarray:
+    """Build a 4x4 transform matrix from xyz + rpy."""
+    roll, pitch, yaw = rpy
+    cr, sr = np.cos(roll), np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
 
-class RealtimeIKSolver:
-    """
-    Optimized Pinocchio-based IK solver for real-time VR teleoperation.
-    
-    Key optimizations:
-    - Warm start: uses previous joint configuration as initial guess
-    - Reduced iterations: small pose changes converge quickly
-    - Large step size: faster convergence for incremental motion
-    - Caches model/data to avoid repeated initialization
-    
-    Typical performance: 0.1-0.5ms per solve (>2000Hz capable)
-    """
-    
-    def __init__(
-        self, 
-        urdf_path: str, 
-        end_frame: str = "tool0",
-        arm_dof: int = 6,
-        eps: float = 1e-3,
-        max_iter: int = 20,
-        dt: float = 1.0,
-        damp: float = 1e-6,
-        rotation_weight: float = 1.0,
-    ):
-        import pinocchio as pin
-        
-        self.pin = pin
-        self.model = pin.buildModelFromUrdf(urdf_path)
-        self.data = self.model.createData()
-        self.frame_id = self.model.getFrameId(end_frame)
-        
-        self.arm_dof = arm_dof
-        self.eps = eps
-        self.max_iter = max_iter
-        self.dt = dt
-        self.damp = damp
-        self.damp_base = damp  # Store original for adaptive damping
-        
-        # Task-space weighting: position vs rotation priority.
-        #
-        # Pinocchio LOCAL frame convention for 6D spatial vectors:
-        #   pin.log(SE3).vector  = [angular(3), linear(3)]
-        #   computeFrameJacobian = [angular(3); linear(3)]  (row order)
-        #
-        # rotation_weight < 1.0 makes IK prioritize position accuracy over rotation,
-        # reducing "wrist whipping" when precise rotation alignment would require
-        # large joint movements.
-        self.rotation_weight = rotation_weight
-        # Pre-compute diagonal weight vector: [w_rot, w_rot, w_rot, 1, 1, 1]
-        self._task_weight = np.array([rotation_weight] * 3 + [1.0] * 3)
-        
-        # Warm start state
-        self._q_current = pin.neutral(self.model)
-        
-        # Pre-allocate arrays for speed
-        self._v = np.zeros(self.model.nv)
-        self._eye = np.eye(arm_dof)
-        
-        # Adaptive IK: track recent failure rate to auto-tune parameters
-        self._recent_results = []  # circular buffer of (success: bool)
-        self._recent_window = 50   # look at last 50 solves
-        self._adaptive_extra_iter = 0  # extra iterations added adaptively
-        
-    def reset(self, q: Optional[np.ndarray] = None):
-        """Reset warm start state to given or neutral configuration."""
-        if q is not None:
-            # Ensure q has full DOF (pad with zeros for gripper if needed)
-            if len(q) < self.model.nq:
-                q_full = self.pin.neutral(self.model)
-                q_full[:len(q)] = q
-                self._q_current = q_full
-            else:
-                self._q_current = q.copy()
-        else:
-            self._q_current = self.pin.neutral(self.model)
-        # Reset adaptive state so fresh start doesn't inherit old failure history
-        self._recent_results.clear()
-        self._adaptive_extra_iter = 0
-        self.damp = self.damp_base
-    
-    def get_current_pose(self) -> np.ndarray:
-        """Get current end-effector pose as 4x4 matrix (from internal IK state)."""
-        self.pin.forwardKinematics(self.model, self.data, self._q_current)
-        self.pin.updateFramePlacements(self.model, self.data)
-        pose = self.data.oMf[self.frame_id]
-        T = np.eye(4)
-        T[:3, :3] = pose.rotation
-        T[:3, 3] = pose.translation
-        return T
-    
-    def compute_fk(self, joint_angles: np.ndarray) -> np.ndarray:
-        """
-        Compute forward kinematics for given joint angles.
-        
-        This is used to get the actual EE pose from observed joint angles,
-        independent of the IK solver's internal state.
-        
-        Args:
-            joint_angles: Joint angles in radians (6D for arm)
-            
-        Returns:
-            4x4 transformation matrix of end-effector pose
-        """
-        # Pad joint angles to full DOF if needed
-        q = self.pin.neutral(self.model)
-        q[:len(joint_angles)] = joint_angles
-        
-        # Compute FK
-        self.pin.forwardKinematics(self.model, self.data, q)
-        self.pin.updateFramePlacements(self.model, self.data)
-        pose = self.data.oMf[self.frame_id]
-        
-        T = np.eye(4)
-        T[:3, :3] = pose.rotation
-        T[:3, 3] = pose.translation
-        return T
-    
-    def get_current_q(self) -> np.ndarray:
-        """Get current joint configuration (arm joints only)."""
-        return self._q_current[:self.arm_dof].copy()
-    
-    def _update_adaptive_params(self, success: bool):
-        """Update adaptive IK parameters based on recent success rate."""
-        self._recent_results.append(success)
-        if len(self._recent_results) > self._recent_window:
-            self._recent_results.pop(0)
-        
-        if len(self._recent_results) >= 10:
-            fail_rate = 1.0 - sum(self._recent_results) / len(self._recent_results)
-            # Adaptive extra iterations: scale with failure rate
-            # 0% fail → 0 extra, 50% fail → max_iter extra (double), 100% → 2x max_iter
-            self._adaptive_extra_iter = int(self.max_iter * min(fail_rate * 2.0, 2.0))
-            # Adaptive damping: increase near singularities (high fail rate)
-            # This improves convergence stability at the cost of slight accuracy
-            self.damp = self.damp_base * (1.0 + fail_rate * 100.0)
-        else:
-            self._adaptive_extra_iter = 0
-            self.damp = self.damp_base
-    
-    def solve(self, target_pose: np.ndarray) -> Tuple[bool, np.ndarray, int, float]:
-        """
-        Solve IK for target pose using warm start with weighted damped least squares.
-        
-        Features adaptive iteration count and damping:
-        - Base iterations: max_iter (e.g. 20, fast path for easy poses)
-        - Adaptive extra: 0 to 2*max_iter additional iterations based on recent failure rate
-        - Soft success: if error < 10*eps after all iterations, accept as "close enough"
-        - Adaptive damping: increases near singularities for better convergence
-        
-        Args:
-            target_pose: 4x4 transformation matrix
-            
-        Returns:
-            Tuple of (success, q_arm, iterations, error_norm)
-            
-        SAFETY: If IK fails, internal state is NOT updated to prevent cascading errors.
-        """
-        pin = self.pin
-        target = pin.SE3(target_pose[:3, :3], target_pose[:3, 3])
-        q = self._q_current.copy()
-        w = self._task_weight  # [w_rot, w_rot, w_rot, 1, 1, 1]
-        
-        total_iter = self.max_iter + self._adaptive_extra_iter
-        err_norm = float('inf')
-        best_q = q.copy()
-        best_err = float('inf')
-        
-        for i in range(total_iter):
-            pin.forwardKinematics(self.model, self.data, q)
-            pin.updateFramePlacements(self.model, self.data)
-            
-            dMi = self.data.oMf[self.frame_id].actInv(target)
-            err = pin.log(dMi).vector
-            
-            # Weighted error: scale rotation components down
-            err_w = w * err
-            err_norm = np.linalg.norm(err_w)
-            
-            # Track best solution seen so far
-            if err_norm < best_err:
-                best_err = err_norm
-                best_q = q.copy()
-            
-            if err_norm < self.eps:
-                # SUCCESS: update state and return
-                self._q_current = q
-                self._update_adaptive_params(True)
-                return True, q[:self.arm_dof].copy(), i + 1, err_norm
-            
-            # Compute Jacobian (only arm joints)
-            J = pin.computeFrameJacobian(
-                self.model, self.data, q, self.frame_id, 
-                pin.ReferenceFrame.LOCAL
-            )[:, :self.arm_dof]
-            
-            # Weighted Jacobian: scale rotation rows down
-            J_w = w[:, None] * J
-            
-            # Weighted damped least squares
-            v_arm = np.linalg.solve(J_w.T @ J_w + self._eye * self.damp, J_w.T @ err_w)
-            
-            # Update
-            self._v[:self.arm_dof] = v_arm
-            self._v[self.arm_dof:] = 0
-            q = pin.integrate(self.model, q, self._v * self.dt)
-            q = np.clip(q, self.model.lowerPositionLimit, self.model.upperPositionLimit)
-        
-        # Soft success: accept if best error is within 10x eps.
-        # Many "failures" have err ~1e-3 to 1e-2 which is still very usable
-        # (sub-centimeter position error). Rejecting these causes unnecessary
-        # re-anchoring and stuttering.
-        if best_err < self.eps * 10.0:
-            self._q_current = best_q
-            self._update_adaptive_params(True)
-            return True, best_q[:self.arm_dof].copy(), total_iter, best_err
-        
-        # FAILED: DO NOT update _q_current - keep previous valid state
-        self._update_adaptive_params(False)
-        return False, best_q[:self.arm_dof].copy(), total_iter, best_err
-    
-    def solve_delta(self, delta_pos: np.ndarray, delta_rot: np.ndarray) -> Tuple[bool, np.ndarray, int, float]:
-        """
-        Solve IK for incremental motion (common in VR teleoperation).
-        
-        Args:
-            delta_pos: Position delta [dx, dy, dz] in meters
-            delta_rot: Rotation delta as axis-angle [rx, ry, rz] in radians
-            
-        Returns:
-            Tuple of (success, q_arm, iterations, error_norm)
-        """
-        # Get current pose
-        current_T = self.get_current_pose()
-        
-        # Apply delta
-        target_T = current_T.copy()
-        target_T[:3, 3] += delta_pos
-        if np.linalg.norm(delta_rot) > 1e-10:
-            delta_R = self.pin.exp3(delta_rot)
-            target_T[:3, :3] = current_T[:3, :3] @ delta_R
-        
-        return self.solve(target_T)
+    rot_x = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+    rot_y = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+    rot_z = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
 
-
-# ============================================================================
-# Action Smoother (Joint-space Low-pass Filter)
-# ============================================================================
-
-class ActionSmoother:
-    """
-    Time-aware exponential low-pass filter with velocity clamping for joint-space trajectories.
-    
-    Produces smooth, continuous motion at the robot's full control rate (e.g. 200Hz),
-    even when IK targets arrive at a much lower rate (e.g. teleop at 50Hz).
-    
-    Two-stage smoothing pipeline per step():
-      1. Exponential smoothing: q_smooth += alpha * (q_target - q_smooth)
-         alpha = 1 - exp(-dt / tau)
-      2. Velocity clamping: limit per-joint change to max_vel_rad_s * dt
-         This is the HARD safety guarantee — no matter how the target jumps,
-         the output velocity is physically bounded.
-    
-    Properties:
-    - Frame-rate independent: same physical behavior regardless of loop frequency
-    - Zero overshoot: always converges monotonically toward target
-    - Velocity-safe: output joint velocity never exceeds max_vel_rad_s
-    - 63% convergence in tau seconds, 95% in ~3*tau seconds (when not velocity-limited)
-    - Negligible computational cost (~1us per call)
-    
-    Recommended tau values:
-    - 0.02s: Light smoothing, very responsive (good for skilled teleop)
-    - 0.04s: Medium smoothing, balanced (recommended starting point)
-    - 0.08s: Heavy smoothing, very smooth but noticeable lag
-    """
-    
-    def __init__(self, ndof: int = 7, tau: float = 0.04, max_vel_deg_s: float = 360.0):
-        """
-        Args:
-            ndof: Number of degrees of freedom (6 joints + 1 gripper)
-            tau: Smoothing time constant in seconds. Larger = smoother but laggier.
-                 Set to 0 to disable smoothing (pass-through, velocity clamp still active).
-            max_vel_deg_s: Maximum allowed joint velocity in degrees/second.
-                           Applied per-joint per-step as a hard clamp on the output delta.
-                           Default 360°/s is below servo max (439°/s) with safety margin.
-        """
-        self.ndof = ndof
-        self.tau = tau
-        self.max_vel_rad_s = np.deg2rad(max_vel_deg_s)
-        self._target = None    # Latest IK target
-        self._current = None   # Current smoothed output (= last published position)
-        self._last_time = None
-    
-    def set_target(self, target: np.ndarray):
-        """
-        Set a new target from IK solution.
-        
-        No rejection logic here — velocity clamping in step() guarantees safety
-        regardless of how far the target jumps.
-        """
-        target = np.asarray(target, dtype=np.float64)
-        if self._current is None:
-            # First target ever: snap to it immediately
-            self._current = target.copy()
-            self._last_time = time.perf_counter()
-        self._target = target.copy()
-    
-    def hold(self):
-        """
-        Hold at current smoothed position.
-        Call when control is paused (e.g. unsqueeze released) to prevent
-        the smoother from continuing to drift toward a stale target.
-        """
-        if self._current is not None:
-            self._target = self._current.copy()
-    
-    def reset(self):
-        """Reset all state. Next set_target() will snap."""
-        self._target = None
-        self._current = None
-        self._last_time = None
-    
-    def step(self) -> Optional[np.ndarray]:
-        """
-        Advance one smoothing step. Call every loop iteration.
-        
-        Pipeline:
-          1. Exponential smoothing toward target (respects tau)
-          2. Velocity clamping on the delta from _current (hard safety limit)
-        
-        Returns:
-            Smoothed + velocity-clamped action array, or None if no target has been set.
-        """
-        if self._target is None or self._current is None:
-            return None
-        
-        now = time.perf_counter()
-        dt = now - self._last_time if self._last_time is not None else 0.0
-        self._last_time = now
-        
-        if dt <= 0:
-            return self._current.copy()
-        
-        # Stage 1: Exponential smoothing
-        if self.tau > 1e-6:
-            alpha = 1.0 - np.exp(-dt / self.tau)
-            desired = self._current + alpha * (self._target - self._current)
-        else:
-            desired = self._target.copy()
-        
-        # Stage 2: Velocity clamping on arm joints (indices 0:6)
-        # This is the hard safety guarantee — even if desired jumps far,
-        # the actual output change per step is bounded.
-        delta = desired - self._current
-        max_delta = self.max_vel_rad_s * dt  # max radians this step
-        
-        # Clamp arm joints (first 6)
-        arm_delta = delta[:6]
-        arm_delta_clamped = np.clip(arm_delta, -max_delta, max_delta)
-        
-        # Apply clamped delta
-        self._current[:6] += arm_delta_clamped
-        # Gripper (index 6) — no velocity clamp, just smooth
-        if self.ndof > 6:
-            self._current[6:] = desired[6:]
-        
-        return self._current.copy()
-    
-    @property
-    def has_target(self) -> bool:
-        return self._target is not None
+    T = np.eye(4)
+    T[:3, :3] = rot_z @ rot_y @ rot_x
+    T[:3, 3] = xyz
+    return T
 
 
 # ============================================================================
@@ -414,7 +55,7 @@ class AliciaD(BaseRobot):
     
     Supports three control modes:
     1. "qpos" (default): Direct joint position control (7D: 6 arm + 1 gripper)
-    2. "delta_ee": 7D delta EE control with fast Pinocchio IK
+    2. "delta_ee": 7D delta EE control with global IK
     3. "rel_ee": 7D relative EE control with IK (relative to anchor pose)
     """
     
@@ -431,53 +72,29 @@ class AliciaD(BaseRobot):
         urdf_path: Optional[str] = None,
         control_mode: str = "qpos",
         gripper_type: str = "50mm",
-        # IK settings
-        ik_eps: float = 2e-3,    # Relaxed to 2mm for better stability
-        ik_max_iter: int = 100,  # Increased from 20 to 100
-        ik_dt: float = 0.5,      # Reduced from 1.0 to reduce oscillation
-        ik_damp: float = 2e-2,   # Increased damping (0.02) to prevent wrist whipping near singularities
-        ik_rotation_weight: float = 0.3,  # Rotation weight in IK (< 1.0 prioritizes position over rotation)
-        # Delta EE scaling
+        ik_end_frame: str = "link6",
+        ik_ee_offset_xyz: Optional[list] = None,
+        ik_ee_offset_rpy: Optional[list] = None,
+        ik_ee_offset_matrix: Optional[list] = None,
+        ik_eps: float = 2e-3,
+        ik_max_iter: int = 100,
+        ik_rotation_weight: float = 0.3,
         position_scale: float = 1.0,
         rotation_scale: float = 1.0,
         gripper_scale: float = 1.0,
-        # Speed settings
         speed_deg_s: float = 30.0,
         gripper_speed_deg_s: float = 483.4,
-        # Smoothing
-        smoothing_tau: float = 0.04,  # Joint trajectory smoothing time constant (seconds). 0 = disabled.
-        # Safety settings
-        max_joint_delta_deg: float = 10.0,  # Per-action joint limit (degrees). At 200Hz this allows ~2000°/s.
+        max_joint_delta_deg: float = 10.0,
         debug: bool = False,
+        gripper_trace: bool = False,
         **kwargs
     ):
-        """
-        Initialize Alicia-D Robot.
-        
-        Args:
-            name: Name for shared memory
-            max_size_mb: Maximum shared memory size in MB
-            fps: Control frequency in Hz
-            control_shm_name: Name of control shared memory (for receiving actions)
-            port: Serial port for robot (empty string for auto-detect)
-            urdf_path: Path to URDF file (auto-detected if None)
-            control_mode: "qpos" for joint control, "delta_ee" or "rel_ee" for IK-based EE control
-            gripper_type: Gripper type ("50mm" or "100mm")
-            ik_eps: IK convergence tolerance (meters)
-            ik_max_iter: Maximum IK iterations
-            ik_dt: IK step size
-            position_scale: Scale for position deltas in delta_ee/rel_ee mode
-            rotation_scale: Scale for rotation deltas in delta_ee/rel_ee mode
-            gripper_scale: Scale for gripper deltas in delta_ee/rel_ee mode
-            speed_deg_s: Default arm speed in deg/s
-            gripper_speed_deg_s: Default gripper speed in deg/s
-            max_joint_delta_deg: Safety limit - max joint change per action in degrees
-            debug: Enable debug output
-        """
+        """Initialize Alicia-D Robot. Extra YAML keys (legacy realtime IK) are ignored."""
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps, control_shm_name=control_shm_name)
         
         self.port = port
         self.debug = debug
+        self.gripper_trace = gripper_trace
         self.gripper_type = gripper_type
         
         # Control mode
@@ -496,9 +113,6 @@ class AliciaD(BaseRobot):
         
         # Safety settings
         self.max_joint_delta_rad = np.deg2rad(max_joint_delta_deg)
-        
-        # Smoothing
-        self.smoothing_tau = smoothing_tau
         
         # Find URDF path
         if urdf_path is None:
@@ -521,13 +135,19 @@ class AliciaD(BaseRobot):
         # Robot driver instance (initialized in connect())
         self._driver = None
         
-        # IK solver (lazy initialized)
-        self._ik_solver: Optional[RealtimeIKSolver] = None
+        if ik_ee_offset_matrix is not None:
+            ee_offset_matrix = np.array(ik_ee_offset_matrix, dtype=np.float64)
+        else:
+            ee_offset_xyz = np.array(ik_ee_offset_xyz or [0.0, 0.0, 0.0], dtype=np.float64)
+            ee_offset_rpy = np.array(ik_ee_offset_rpy or [0.0, 0.0, 0.0], dtype=np.float64)
+            ee_offset_matrix = _transform_matrix_from_xyz_rpy(ee_offset_xyz, ee_offset_rpy)
+
+        self._ik_solver = None
         self._ik_settings = {
+            'end_frame': ik_end_frame,
+            'ee_offset_matrix': ee_offset_matrix,
             'eps': ik_eps,
             'max_iter': ik_max_iter,
-            'dt': ik_dt,
-            'damp': ik_damp,
             'rotation_weight': ik_rotation_weight,
         }
         
@@ -559,23 +179,34 @@ class AliciaD(BaseRobot):
         logger.info(f"[AliciaD] Initialized with control_mode={control_mode}, fps={fps}")
         if control_mode in ("delta_ee", "rel_ee"):
             logger.info(f"[AliciaD] Delta EE scales: pos={position_scale}, rot={rotation_scale}, gripper={gripper_scale}")
+            logger.info(
+                f"[AliciaD] IK (piper_global): end_frame={ik_end_frame}, "
+                f"eps={ik_eps}, max_iter={ik_max_iter}, rotation_weight={ik_rotation_weight}"
+            )
     
     @property
-    def ik_solver(self) -> RealtimeIKSolver:
-        """Lazy-initialize IK solver."""
+    def ik_solver(self):
+        """Lazy-initialize Piper-style global IK solver."""
         if self._ik_solver is None:
-            self._ik_solver = RealtimeIKSolver(
+            from deploy.robot.alicia_d.piper_global_ik import PiperStyleGlobalIKSolver
+
+            s = self._ik_settings
+            self._ik_solver = PiperStyleGlobalIKSolver(
                 urdf_path=self.urdf_path,
-                end_frame="link6",
-                arm_dof=6,
-                eps=self._ik_settings['eps'],
-                max_iter=self._ik_settings['max_iter'],
-                dt=self._ik_settings['dt'],
-                rotation_weight=self._ik_settings['rotation_weight'],
+                end_frame=s['end_frame'],
+                ee_offset_matrix=s['ee_offset_matrix'],
+                position_weight=1.0,
+                rotation_weight=max(float(s['rotation_weight']), 1e-6),
+                total_cost_scale=20.0,
+                regularization_weight=0.01,
+                max_iterations=s['max_iter'],
+                tol=max(float(s['eps']), 1e-6),
+                jump_reset_threshold_deg=np.rad2deg(self.max_joint_delta_rad),
             )
             logger.info(
-                f"[AliciaD] IK solver initialized: eps={self._ik_settings['eps']}, "
-                f"max_iter={self._ik_settings['max_iter']}, rotation_weight={self._ik_settings['rotation_weight']}"
+                f"[AliciaD] IK solver initialized (piper_global): "
+                f"eps={s['eps']}, max_iter={s['max_iter']}, end_frame={s['end_frame']}, "
+                f"rotation_weight={s['rotation_weight']}"
             )
         return self._ik_solver
     
@@ -627,6 +258,7 @@ class AliciaD(BaseRobot):
             # Initialize IK solver with current joint angles
             if self.control_mode in ("delta_ee", "rel_ee") and self._current_joint_angles is not None:
                 self.ik_solver.reset(self._current_joint_angles)
+                self.ik_solver.set_reference(self._current_joint_angles)
                 logger.info(f"[AliciaD] IK solver initialized with joints (deg): {np.rad2deg(self._current_joint_angles)}")
             
             self._connected = True
@@ -714,9 +346,9 @@ class AliciaD(BaseRobot):
             return action_dict
         
         # Parse action: [dx, dy, dz, droll, dpitch, dyaw, dgripper]
+        # Gripper delta is applied in start() before this call (delta_ee / rel_ee).
         pos_component = action[:3] * self.position_scale
         euler_component = action[3:6] * self.rotation_scale
-        gripper_component = action[6] * self.gripper_scale
         
         # Check if action is essentially zero
         if np.allclose(action, 0, atol=1e-6):
@@ -771,8 +403,8 @@ class AliciaD(BaseRobot):
                     R_delta_base = R.from_euler('xyz', euler_component).as_matrix()
                     target_T[:3, :3] = R_delta_base @ current_T[:3, :3]
                 
-                # Gripper: accumulate delta
-                new_gripper = np.clip(self._target_gripper + gripper_component * 1000, 0, 1000)
+                # Gripper: _target_gripper already includes this frame's teleop delta (see start() loop).
+                new_gripper = float(np.clip(self._target_gripper, 0, 1000))
                 
             elif self.control_mode == "rel_ee":
                 try:
@@ -843,8 +475,8 @@ class AliciaD(BaseRobot):
                     self._rel_ee_last_raw_pos = pos_component.copy()
                     self._rel_ee_last_raw_euler = euler_component.copy()
                     
-                    # Gripper: accumulate delta (same as delta_ee mode)
-                    new_gripper = np.clip(self._target_gripper + gripper_component * 1000, 0, 1000)
+                    # Gripper: _target_gripper already includes this frame's teleop delta (see start() loop).
+                    new_gripper = float(np.clip(self._target_gripper, 0, 1000))
                     
                 except Exception as e:
                     logger.error(f"[AliciaD] rel_ee process error: {e}")
@@ -934,6 +566,7 @@ class AliciaD(BaseRobot):
             fk_pose = self.ik_solver.compute_fk(joints)
             self._rel_ee_anchor_pose = fk_pose.copy()
             self.ik_solver.reset(joints)
+            self.ik_solver.set_reference(joints, fk_pose)
     
     def _warning_throttled_ik(self, msg: str):
         """Throttled IK warning to avoid spamming at 200Hz."""
@@ -985,6 +618,7 @@ class AliciaD(BaseRobot):
                 fk_pose = self.ik_solver.compute_fk(joints_to_use)
                 self._rel_ee_anchor_pose = fk_pose.copy()
                 self.ik_solver.reset(joints_to_use)
+                self.ik_solver.set_reference(joints_to_use, fk_pose)
             else:
                 logger.warning("[AliciaD] refresh_anchor failed: No joints available")
                 return False
@@ -1110,17 +744,18 @@ class AliciaD(BaseRobot):
         self.is_running = True
         rate_limiter = RateLimiter()
         
-        # Action smoother: smooths IK output + velocity clamp for continuous, jerk-free motion
-        # max_vel_deg_s is set below servo max (439°/s) with margin for smooth operation
-        smoother = ActionSmoother(ndof=7, tau=self.smoothing_tau, max_vel_deg_s=360.0)
-        
         logger.info(
-            f"[AliciaD] Starting main loop (mode={self.control_mode}, fps={self.fps}, "
-            f"smoothing_tau={self.smoothing_tau}s, max_vel=360°/s)"
+            f"[AliciaD] Starting main loop (mode={self.control_mode}, fps={self.fps})"
         )
+        if self.gripper_trace:
+            logger.warning(
+                "[AliciaD] gripper_trace=ON: logging [GripperTrace:robot] lines; "
+                "disable via gripper_trace: false in robot YAML after debugging."
+            )
         
         # Idle counter for auto-resetting unsqueeze state
         _action_idle_count = 0
+        _trace_prev_unsqueeze: Optional[bool] = None
         
         while self.is_running:
             # Read and process action from teleop (arrives at teleop rate, e.g. 50Hz)
@@ -1131,55 +766,85 @@ class AliciaD(BaseRobot):
                 # Check for go_home command (e.g. B button on VR controller)
                 if action.get('go_home', False):
                     logger.info("[AliciaD] Go-home command received, moving to home position...")
+                    if self.gripper_trace:
+                        logger.info(
+                            f"[GripperTrace:robot] GO_HOME rx: tgt_pre={self._target_gripper:.1f} "
+                            f"cur_hw={self._current_gripper}"
+                        )
                     self.set_home(speed_deg_s=self.speed_deg_s)
-                    smoother.reset()
                     # Reset IK / anchor state so next movement starts fresh
                     self._ik_initialized = False
                     self._rel_ee_anchor_pose = None
                     self._rel_ee_vr_unsqueeze_active = False
-                    self._target_qpos = None
                     self._rel_ee_pos_offset = np.zeros(3)
                     self._rel_ee_rot_offset = np.zeros(3)
+                    if self.gripper_trace:
+                        logger.info(
+                            f"[GripperTrace:robot] GO_HOME after set_home: tgt={self._target_gripper:.1f} "
+                            f"tq0={self._target_qpos[:3] if self._target_qpos is not None else None}"
+                        )
                     continue
                 
+                unsqz = bool(action.get("unsqueeze_active", False))
+                if self.gripper_trace and _trace_prev_unsqueeze is not None and unsqz != _trace_prev_unsqueeze:
+                    edge = "UNFREEZE" if unsqz else "FREEZE"
+                    ra6 = None
+                    raw = action.get("action")
+                    if raw is not None and len(raw) >= 7:
+                        ra6 = float(raw[6])
+                    logger.info(
+                        f"[GripperTrace:robot] {edge}: tgt={self._target_gripper:.1f} raw_a6={ra6} "
+                        f"go_home={action.get('go_home')} anchor_set={action.get('anchor_just_set')}"
+                    )
+                _trace_prev_unsqueeze = unsqz
+
                 # Extract gripper delta BEFORE process_action, so gripper works
                 # independently of IK success/failure and unsqueeze state.
-                # Gripper is a standalone joint — it should never be blocked by IK.
+                # (delta_ee / rel_ee only — qpos passes absolute gripper in process_action path.)
                 raw_action = action.get('action', None)
-                if raw_action is not None and len(raw_action) >= 7:
+                tg_before = float(self._target_gripper)
+                if (
+                    self.control_mode in ("delta_ee", "rel_ee")
+                    and raw_action is not None
+                    and len(raw_action) >= 7
+                ):
                     gripper_delta = float(raw_action[6]) * self.gripper_scale
                     self._target_gripper = float(np.clip(
                         self._target_gripper + gripper_delta * 1000, 0, 1000
                     ))
+                    if self.gripper_trace and (
+                        abs(gripper_delta) > 1e-9 or abs(self._target_gripper - tg_before) > 0.5
+                    ):
+                        logger.info(
+                            f"[GripperTrace:robot] accum: raw6={float(raw_action[6]):.5f} "
+                            f"scale={self.gripper_scale} d_scaled={gripper_delta:.5f} "
+                            f"tgt {tg_before:.1f}->{self._target_gripper:.1f}"
+                        )
                 
                 action = self.process_action(action)
                 action_array = action.get('action', None)
                 if action_array is not None:
-                    # New IK target: feed to smoother (gripper in action_array
-                    # is already set by process_action, but we override with our
-                    # independently tracked value below)
-                    smoother.set_target(action_array)
-                elif not action.get('unsqueeze_active', True):
-                    # Unsqueeze released: hold at current position to prevent drift
-                    smoother.hold()
-                # else: IK failed / rejected — do NOT hold. Let smoother continue
-                # converging toward the last valid target. Velocity clamping ensures
-                # the output is always safe. This avoids the "freeze then jump" pattern.
+                    out = np.asarray(action_array, dtype=np.float64).copy()
+                    if self.control_mode == "qpos":
+                        pass  # gripper already absolute in teleop command
+                    else:
+                        out[6] = self._target_gripper / 1000.0
+                    if self.gripper_trace:
+                        logger.info(
+                            f"[GripperTrace:robot] publish: out6={out[6]:.4f} tgt_raw={self._target_gripper:.1f} "
+                            f"unsqz={action.get('unsqueeze_active')}"
+                        )
+                    self.publish_action(out)
+                elif self.gripper_trace and self.control_mode in ("delta_ee", "rel_ee"):
+                    ra6 = float(raw_action[6]) if raw_action is not None and len(raw_action) >= 7 else None
+                    logger.info(
+                        f"[GripperTrace:robot] no_publish (IK/skip): tgt={self._target_gripper:.1f} raw6={ra6}"
+                    )
             else:
                 _action_idle_count += 1
                 # If idle for >0.1s (20 frames at 200Hz), assume teleop stopped sending
                 if _action_idle_count > 20 and self._rel_ee_vr_unsqueeze_active:
                     self._rel_ee_vr_unsqueeze_active = False
-            
-            # Advance smoother and publish on EVERY iteration (200Hz),
-            # even when no new IK target arrived. This interpolates between
-            # sparse teleop frames for smooth, continuous motion.
-            smoothed = smoother.step()
-            if smoothed is not None:
-                # Override gripper with independently tracked value.
-                # Gripper is a standalone joint that bypasses IK and smoother.
-                smoothed[6] = self._target_gripper / 1000.0
-                self.publish_action(smoothed)
             
             # Get observation and write to shm
             data = self.get_data()
@@ -1202,15 +867,21 @@ class AliciaD(BaseRobot):
     # ==================== Convenience Methods ====================
     
     def set_home(self, speed_deg_s: float = 10.0):
-        """Move robot to home position (all zeros)."""
+        """Move robot to home position (all zeros) with gripper fully open (1000)."""
         if self._driver is not None:
             home_joints = [0.0] * 6
-            # Use default gripper value (1000)
+            gripper_open = 1000
             self._driver.set_joint_and_gripper(
-                joint_angles=home_joints, 
-                gripper_value=1000,
-                speed_deg_s=speed_deg_s
+                joint_angles=home_joints,
+                gripper_value=gripper_open,
+                speed_deg_s=speed_deg_s,
             )
+            # Keep command state in sync — otherwise the next publish_action uses a stale
+            # _target_gripper (e.g. pre-home closed) and immediately re-clamps the gripper
+            # even when the teleop sends zero gripper delta.
+            self._target_qpos = np.zeros(6, dtype=np.float64)
+            self._target_gripper = float(gripper_open)
+            self._current_gripper = float(gripper_open)
     
     def set_joints(self, joint_angles: np.ndarray, gripper: Optional[float] = None):
         """

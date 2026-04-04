@@ -24,10 +24,10 @@ args:
   connect_timeout: 60.0    # VR connection timeout in seconds
   gripper_default_closed: true  # Gripper closed by default
   gripper_delta_mode: true      # Use delta mode (incremental gripper control)
-  gripper_delta_value: 0.1     # Delta value per frame (adjust for gripper speed)
-  gripper_button_control: true  # Use A/B buttons (right) or X/Y buttons (left) instead of trigger
-                                # Right hand: A=open, B=close
-                                # Left hand: X=open, Y=close
+  gripper_delta_value: 0.1
+  gripper_use_trigger: true
+  gripper_a_maps_to_open: false
+  gripper_b_maps_to_close: false
   
   # Single 3x3 transform matrix: Quest (LHS) -> AliciaD (RHS)
   # Handles both LHS->RHS conversion and axis remapping

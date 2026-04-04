@@ -6,9 +6,8 @@
 # Compatible with: so101_sim.yaml (delta_ee mode), so101_ee.yaml
 #
 # Usage:
-#   - Press and hold SQUEEZE button (side grip) to send pose deltas
-#   - Use TRIGGER to control gripper (press = open, release = close)
-#   - When SQUEEZE is released, no data is written to shared memory
+#   - Press and hold SQUEEZE (side grip) to send pose deltas
+#   - Gripper: A = open, B = close (trigger not used). When frozen, B rising edge = go_home
 #
 # Note: VR tracking already outputs in meters/radians, scale=1.0 for direct pass-through
 
@@ -22,9 +21,10 @@ args:
   position_scale: 1.0      # VR outputs meters, pass through directly
   rotation_scale: 1.0      # VR outputs radians, pass through directly
   connect_timeout: 60.0    # VR connection timeout in seconds
-  gripper_default_closed: true  # Gripper closed by default, trigger opens it
-  gripper_delta_mode: true      # Use delta mode for SO101 (incremental gripper control)
-  gripper_delta_value: 0.01      # Delta value per frame (adjust for gripper speed)
+  gripper_default_closed: true
+  gripper_delta_mode: true
+  gripper_delta_value: 0.01
+  gripper_button_control: true
   
   # Single 3x3 transform matrix: Quest (LHS) -> SO101 (RHS)
   # Handles both LHS->RHS conversion and axis remapping
