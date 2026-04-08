@@ -40,112 +40,15 @@ import os
 import time
 import signal
 import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, List
 
 import numpy as np
 import torch
 from loguru import logger
 
 from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
-
-
-def _env_flag(name: str) -> bool:
-    value = str(os.getenv(name, "")).strip().lower()
-    return value not in ("", "0", "false", "no", "off")
-
-
-def _preview_array(arr: np.ndarray, max_items: int = 4) -> str:
-    arr = np.asarray(arr)
-    if arr.size == 0:
-        return f"shape={arr.shape}, dtype={arr.dtype}, empty"
-    flat = arr.reshape(-1)
-    preview_items = []
-    for item in flat[:max_items]:
-        try:
-            preview_items.append(f"{float(item):.4f}")
-        except (TypeError, ValueError):
-            preview_items.append(repr(item))
-    return (
-        f"shape={arr.shape}, dtype={arr.dtype}, "
-        f"preview=[{', '.join(preview_items)}]"
-    )
-
-
-def _summarize_state_array(arr: np.ndarray, edge_items: int = 6) -> str:
-    arr = np.asarray(arr)
-    if arr.size == 0:
-        return f"shape={arr.shape}, dtype={arr.dtype}, empty"
-    flat = arr.reshape(-1)
-    if flat.size <= edge_items * 2:
-        preview = ", ".join(f"{float(x):.4f}" for x in flat)
-        return f"shape={arr.shape}, dtype={arr.dtype}, values=[{preview}]"
-    head = ", ".join(f"{float(x):.4f}" for x in flat[:edge_items])
-    tail = ", ".join(f"{float(x):.4f}" for x in flat[-edge_items:])
-    return (
-        f"shape={arr.shape}, dtype={arr.dtype}, "
-        f"head=[{head}], tail=[{tail}]"
-    )
-
-
-def _delta_summary(curr: Optional[np.ndarray], prev: Optional[np.ndarray], label: str) -> str:
-    if curr is None:
-        return f"{label}_delta=None"
-    curr = np.asarray(curr)
-    if prev is None:
-        return f"{label}_delta=first_sample"
-    prev = np.asarray(prev)
-    if curr.shape != prev.shape:
-        return f"{label}_delta=shape_change {prev.shape}->{curr.shape}"
-    delta = curr - prev
-    return (
-        f"{label}_delta=max={float(np.max(np.abs(delta))):.4f}, "
-        f"l2={float(np.linalg.norm(delta)):.4f}"
-    )
-
-
-def _summarize_synced_data(synced_data: Optional[Dict[str, dict]]) -> str:
-    if not synced_data:
-        return "no_synced_data"
-    parts = []
-    for name, data in synced_data.items():
-        if not isinstance(data, dict):
-            parts.append(f"{name}(type={type(data).__name__})")
-            continue
-        ts = data.get("__timestamp__", data.get("timestamp", None))
-        keys = sorted(k for k in data.keys() if not k.startswith("__"))
-        ts_str = "n/a" if ts is None else f"{float(ts):.6f}"
-        parts.append(f"{name}(ts={ts_str}, keys={keys})")
-    return "; ".join(parts)
-
-
-def _summarize_mobs(mobs) -> str:
-    if mobs is None:
-        return "mobs=None"
-    state_summary = "state=None"
-    if getattr(mobs, "state", None) is not None:
-        state_summary = f"state={_summarize_state_array(mobs.state)}"
-    image = getattr(mobs, "image", None)
-    image_summary = "image=None"
-    if image is not None:
-        image_summary = f"image_shape={np.asarray(image).shape}"
-    timestep = getattr(mobs, "timestep", None)
-    timestep_summary = f"timestep={np.asarray(timestep).tolist()}" if timestep is not None else "timestep=None"
-    return f"{state_summary}; {image_summary}; {timestep_summary}"
-
-
-def _summarize_mact_list(mact_list: list) -> str:
-    if not mact_list:
-        return "chunk_len=0"
-
-    first_action = _extract_step_action(mact_list[0])
-    last_action = _extract_step_action(mact_list[-1])
-    parts = [f"chunk_len={len(mact_list)}"]
-    if first_action is not None:
-        parts.append(f"first={_preview_array(first_action)}")
-    if last_action is not None:
-        parts.append(f"last={_preview_array(last_action)}")
-    return "; ".join(parts)
 
 
 def _extract_step_action(step):
@@ -179,6 +82,7 @@ def inference_worker(
     device: str = "cuda",
     dataset_id: str = "",
     chunk_size: int = -1,
+    worker_ready_event: Optional[object] = None,
 ):
     """
     Unified inference worker for both sim and real modes.
@@ -192,6 +96,11 @@ def inference_worker(
     # Re-apply resource_tracker patch in subprocess
     from deploy.shm_utils import _fix_resource_tracker
     _fix_resource_tracker()
+
+    # Spawn children often line-buffer stderr only when attached to a TTY; flush so logs
+    # align with real time and users do not think inference "reconnects" in one burst.
+    import sys
+    logger.info(f"[InferenceWorker] subprocess pid={os.getpid()} (loading...)")
     
     import configs  # noqa: side-effects
     from data_utils.utils import set_seed
@@ -223,18 +132,31 @@ def inference_worker(
     obs2meta_func = None
     
     if is_real_mode:
-        # Real mode: connect to device SHMs + synchronizer
+        # Real mode: connect to device SHMs + synchronizer (parallel attach to reduce wall time)
         from deploy.shm_utils import SharedMemoryDataSynchronizer
         from deploy.base import create_obs2meta_func, default_obs2meta
-        
-        shm_channels = []
-        for name in device_shm_names:
+
+        def _connect_one_device_shm(name: str):
             try:
                 ch = SharedMemoryChannel(name, is_writer=False, timeout=30.0)
-                shm_channels.append((name, ch))
-                logger.info(f"[InferenceWorker-REAL] Connected to device SHM: {name}")
+                return name, ch, None
             except Exception as e:
-                logger.warning(f"[InferenceWorker-REAL] Failed to connect to {name}: {e}")
+                return name, None, e
+
+        name_to_ch = {}
+        n_dev = len(device_shm_names)
+        max_workers = max(1, n_dev)
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(_connect_one_device_shm, n): n for n in device_shm_names}
+            for fut in as_completed(futures):
+                name, ch, err = fut.result()
+                if err is None:
+                    name_to_ch[name] = ch
+                    logger.info(f"[InferenceWorker-REAL] Connected to device SHM: {name}")
+                else:
+                    logger.warning(f"[InferenceWorker-REAL] Failed to connect to {name}: {err}")
+
+        shm_channels = [(n, name_to_ch[n]) for n in device_shm_names if n in name_to_ch]
         
         if not shm_channels:
             logger.error("[InferenceWorker-REAL] No device SHM channels connected. Exiting.")
@@ -268,12 +190,6 @@ def inference_worker(
     
     running = True
     inference_count = 0
-    infer_debug = _env_flag("ILSTUDIO_INFER_DEBUG")
-    print_full_state = _env_flag("ILSTUDIO_INFER_PRINT_STATE")
-    last_obs_summary = "obs=unavailable"
-    prev_state_snapshot = None
-    prev_first_action = None
-    prev_last_action = None
     
     def _handle_signal(signum, frame):
         nonlocal running
@@ -281,48 +197,55 @@ def inference_worker(
     
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
-    
-    logger.info(f"[InferenceWorker-{mode_str}] Ready, waiting for triggers...")
-    
+
     def _get_obs_sim():
-        """Read obs from obs_shm (sim mode)."""
-        nonlocal last_obs_summary
+        """Read obs from obs_shm (sim mode). Returns (mobs, timestep, synced_dict_or_none)."""
         from benchmark.base import dict2meta
         obs_data = obs_reader.read(blocking=False)
         if obs_data is None:
-            last_obs_summary = "obs=None"
-            return None, 0
+            return None, 0, None
         t = obs_data.get("t", 0)
         mobs_dict = {k: v for k, v in obs_data.items() if not k.startswith("__") and k != "t"}
         mobs = dict2meta(mobs_dict, mtype="obs")
-        last_obs_summary = _summarize_mobs(mobs)
-        return mobs, t
+        return mobs, t, None
     
     def _get_obs_real():
-        """Read obs from device SHMs via synchronizer (real mode)."""
-        nonlocal last_obs_summary
+        """Read obs from device SHMs via synchronizer (real mode). Returns (mobs, 0, synced_data)."""
         # For trigger-based real-world inference, using get_synced_frame_blocking()
         # would return the earliest unread synchronized frame since the previous
         # inference. With chunked execution this can lag by almost one whole chunk.
         # Here we instead wait until every device has at least one fresh sample and
         # then consume the newest unread sample from each device.
         synced_data = None
+        wait_t0 = time.perf_counter()
+        last_warn_t = 0.0
         while running and synced_data is None:
             synced_data = synchronizer.get_latest_frame_nonblocking(strict_new_only=True)
             if synced_data is None:
+                now = time.perf_counter()
+                if now - wait_t0 > 2.0 and now - last_warn_t > 5.0:
+                    logger.warning(
+                        "[InferenceWorker-REAL] Still waiting for a fresh synced observation from "
+                        "ALL device SHMs (strict_new_only). If the robot or a camera stops writing "
+                        "for a moment, inference will block here without publishing actions."
+                    )
+                    last_warn_t = now
                 time.sleep(0.001)
         if synced_data is None:
-            last_obs_summary = "synced_data=None"
-            return None, 0
+            return None, 0, None
         mobs = obs2meta_func(synced_data)
-        last_obs_summary = (
-            f"devices={_summarize_synced_data(synced_data)} | "
-            f"mobs={_summarize_mobs(mobs)}"
-        )
-        return mobs, 0
+        return mobs, 0, synced_data
     
     get_obs = _get_obs_real if is_real_mode else _get_obs_sim
-    
+
+    logger.info(f"[InferenceWorker-{mode_str}] Ready, waiting for triggers...")
+    if worker_ready_event is not None:
+        worker_ready_event.set()
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
+
     try:
         with torch.inference_mode():
             while running:
@@ -347,19 +270,11 @@ def inference_worker(
                         trigger_t = int(ctrl_data.get("t", 0))
                         
                         # Get latest observation
-                        mobs, obs_t = get_obs()
+                        mobs, obs_t, _ = get_obs()
                         if mobs is None:
-                            if infer_debug:
-                                logger.info(
-                                    "[InferenceWorker-{}] Skip infer epoch={} t={} because obs unavailable: {}",
-                                    mode_str,
-                                    trigger_epoch,
-                                    trigger_t,
-                                    last_obs_summary,
-                                )
-                            else:
-                                logger.debug(f"[InferenceWorker-{mode_str}] No obs available at trigger time")
+                            logger.debug(f"[InferenceWorker-{mode_str}] No obs available at trigger time")
                             continue
+
                         t = trigger_t if is_real_mode else obs_t
                         
                         # Set timestep
@@ -376,15 +291,6 @@ def inference_worker(
                         
                         inference_count += 1
                         latency_ms = (t_end - t_start) * 1000
-                        chunk_summary = _summarize_mact_list(mact_list)
-                        state_snapshot = None if mobs.state is None else np.array(mobs.state, copy=True)
-                        first_action = _extract_step_action(mact_list[0]) if mact_list else None
-                        last_action = _extract_step_action(mact_list[-1]) if mact_list else None
-                        infer_delta_summary = "; ".join([
-                            _delta_summary(state_snapshot, prev_state_snapshot, "state"),
-                            _delta_summary(first_action, prev_first_action, "first_action"),
-                            _delta_summary(last_action, prev_last_action, "last_action"),
-                        ])
                         
                         # Serialize and write (include epoch for staleness detection)
                         action_payload = serialize_mact_list(mact_list)
@@ -393,32 +299,6 @@ def inference_worker(
                         action_payload["latency_ms"] = latency_ms
                         action_writer.write(action_payload)
 
-                        if infer_debug:
-                            logger.info(
-                                "[InferenceWorker-{}] Infer #{} epoch={} latency={:.1f}ms | {} | {}",
-                                mode_str,
-                                inference_count,
-                                trigger_epoch,
-                                latency_ms,
-                                last_obs_summary,
-                                chunk_summary,
-                            )
-                            logger.info(
-                                "[InferenceWorker-{}] Infer #{} deltas | {}",
-                                mode_str,
-                                inference_count,
-                                infer_delta_summary,
-                            )
-                            if print_full_state and mobs.state is not None:
-                                logger.info(
-                                    "[InferenceWorker-{}] Full mobs.state=\n{}",
-                                    mode_str,
-                                    np.array2string(np.asarray(mobs.state), precision=5, suppress_small=True),
-                                )
-                        prev_state_snapshot = state_snapshot
-                        prev_first_action = None if first_action is None else np.array(first_action, copy=True)
-                        prev_last_action = None if last_action is None else np.array(last_action, copy=True)
-                        
                         if inference_count % 50 == 0:
                             logger.debug(f"[InferenceWorker-{mode_str}] Inference #{inference_count}, "
                                        f"latency={latency_ms:.1f}ms, chunk_size={len(mact_list)}")
@@ -705,6 +585,8 @@ def start_inference_process(
     # already touched CUDA via set_seed / torch.cuda.is_available).
     # Only the inference process needs spawn; device processes stay on fork.
     ctx = mp.get_context("spawn")
+    worker_ready_event = ctx.Event()
+    worker_kwargs["worker_ready_event"] = worker_ready_event
     process = ctx.Process(
         target=inference_worker,
         kwargs=worker_kwargs,
@@ -715,7 +597,7 @@ def start_inference_process(
     
     # Connect to action SHM (created by inference process)
     action_reader = None
-    for attempt in range(300):  # Up to 30 seconds
+    for attempt in range(1800):  # Up to ~180s (heavy policy load / slow disk)
         try:
             action_reader = SharedMemoryChannel(
                 name=action_shm_name,
@@ -738,6 +620,22 @@ def start_inference_process(
         ctrl_writer.destroy()
         cleanup_all_shm(all_shm_names)
         raise RuntimeError("Timeout waiting for inference process to create action SHM")
+
+    # Wait until worker has bound get_obs and entered the main loop (avoids racing triggers).
+    if not worker_ready_event.wait(timeout=300.0):
+        if not process.is_alive():
+            if obs_writer is not None:
+                obs_writer.destroy()
+            ctrl_writer.destroy()
+            cleanup_all_shm(all_shm_names)
+            raise RuntimeError("Inference process died before signaling ready")
+        if obs_writer is not None:
+            obs_writer.destroy()
+        ctrl_writer.destroy()
+        cleanup_all_shm(all_shm_names)
+        raise RuntimeError(
+            "Timeout waiting for inference worker ready signal (policy load / SHM init too slow?)"
+        )
     
     logger.info(f"✓ Inference process ready ({mode_str} mode)")
     

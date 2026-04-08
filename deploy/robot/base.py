@@ -81,6 +81,19 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
         else:
             return None
 
+    def handle_control_message(self, message: Optional[dict]) -> bool:
+        """Handle non-action control messages sent through control SHM."""
+        if not isinstance(message, dict):
+            return False
+
+        cmd = message.get("cmd", None)
+        if cmd == "reset":
+            logger.info(f"[{self.name}] Received reset command")
+            self.reset()
+            return True
+
+        return False
+
     def process_action(self, x):
         """Process the action (may be slow, e.g., IK computation)"""
         return x
@@ -143,6 +156,8 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
             self.write_data(data)
         while self.is_running:
             action = self.read_action()
+            if self.handle_control_message(action):
+                action = None
             if action is not None:
                 action = self.process_action(action)
                 action_array = action.get('action', None)
@@ -153,7 +168,10 @@ class BaseRobot(BaseDevice, AbstractRobotInterface):
                 self.write_data(data)
             rate_limiter.sleep(self.fps)
 
-
+    def reset(self):
+        """Reset the robot to home pose"""
+        pass
+        
 # def make_robot(robot_cfg: Dict, args, max_connect_retry: int = 5):
 #     """
 #     Factory function to create a robot instance from a config dictionary.

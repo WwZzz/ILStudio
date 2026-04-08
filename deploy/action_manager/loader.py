@@ -12,6 +12,7 @@ import os
 import importlib
 from pathlib import Path
 from typing import Dict, Any, Union, Optional
+from loguru import logger
 
 
 # Config search paths
@@ -118,7 +119,7 @@ def load_action_manager(manager_name_or_path: str = None, config: Dict[str, Any]
         
         with open(config_path, 'r') as f:
             manager_config = yaml.safe_load(f) or {}
-        print(f"Loaded action manager config from: {config_path}")
+        logger.info("Loaded action manager config from: {}", config_path)
     
     else:
         # Default to basic
@@ -127,11 +128,11 @@ def load_action_manager(manager_name_or_path: str = None, config: Dict[str, Any]
         if config_path:
             with open(config_path, 'r') as f:
                 manager_config = yaml.safe_load(f) or {}
-            print(f"No action manager specified, using default: basic")
+            logger.info("No action manager specified, using default: basic")
         else:
             # Fallback to hardcoded BasicActionManager
             from .base import BasicActionManager
-            print("No action manager specified, using default: BasicActionManager")
+            logger.info("No action manager specified, using default: BasicActionManager")
             return BasicActionManager()
     
     # Get the type field (required)
@@ -156,7 +157,7 @@ def load_action_manager(manager_name_or_path: str = None, config: Dict[str, Any]
     # Instantiate manager with args as kwargs
     try:
         manager = manager_class(**args)
-        print(f"Successfully loaded action manager: {manager_class.__name__}")
+        logger.info("Successfully loaded action manager: {}", manager_class.__name__)
         return manager
     except Exception as e:
         raise RuntimeError(

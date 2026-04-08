@@ -41,7 +41,7 @@ import time
 from typing import List, Optional, Tuple
 from loguru import logger
 from deploy.base import is_camera_config
-from deploy.controller import KBHit
+from deploy.runtime import KBHit
 from deploy.shm_utils import SharedMemoryChannel, SharedMemoryDataSynchronizer, cleanup_all_shm
 from deploy.utils import (
     RateLimiter,
@@ -101,7 +101,7 @@ def main():
     # Start all devices
     logger.info("Starting all devices...")
     all_procs = start_devices(all_configs)
-    time.sleep(2.0)
+    time.sleep(1.0)
     
     # Start visualizer subprocesses if requested
     viz_procs = []

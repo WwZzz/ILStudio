@@ -8,6 +8,7 @@ Subprocess entry for visualizer YAML rows (``type`` → class or callable).
 from __future__ import annotations
 
 import importlib
+import os
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -93,7 +94,13 @@ def start_visualizer_processes(configs: List[Dict[str, Any]]) -> List[Any]:
 
     from loguru import logger
 
-    ctx = mp.get_context("spawn")
+    if os.name != "nt":
+        try:
+            ctx = mp.get_context("fork")
+        except ValueError:
+            ctx = mp.get_context("spawn")
+    else:
+        ctx = mp.get_context("spawn")
     procs = []
     for cfg in configs:
         vtype = cfg.get("type")

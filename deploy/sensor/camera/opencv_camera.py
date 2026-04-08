@@ -9,6 +9,7 @@ from typing import Optional, Union
 import cv2
 from deploy.base import BaseDevice
 import numpy as np
+from loguru import logger
 
 def _get_cv2_backend() -> int:
     """Choose OpenCV VideoCapture backend by platform."""
@@ -180,7 +181,9 @@ class OpenCVCamera(BaseDevice):
             fourcc_str = "".join([chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4)])
             w = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            print(f"[{self.name}] Camera opened: {w}x{h} @ {actual_fps:.1f}fps, fourcc={fourcc_str}")
+            logger.info(
+                f"[{self.name}] Camera opened: {w}x{h} @ {actual_fps:.1f}fps, fourcc={fourcc_str}"
+            )
         while self.is_running:
             data = self.get_data()
             if data is not None:

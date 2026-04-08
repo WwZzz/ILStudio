@@ -5,7 +5,7 @@
   name: biso101_cameras
   args:
     shm_names:
-      - top_camera
+      # - top_camera
       - head_camera
       - left_wrist_camera
       - right_wrist_camera
@@ -34,18 +34,19 @@
     # This avoids re-calibration when switching between single and bimanual configs
     left_arm_id: so101_left_arm     # Same as so101_follower.yaml's robot_id
     right_arm_id: so101_right_arm    # Unique ID for right arm
+    home_qpos: [-4.094430099594248, -97.98319327731093, 100.0, 71.20756338633433, -53.69841681806385, 2.9277813923227063, -4.309392265193367, -96.13282891971417, 100.0, 70.41685342895562, -55.01171569903671, 3.3159947984395317]
 
-- type: deploy.sensor.camera.opencv_camera.OpenCVCamera
-  name: top_camera
-  args:
-    name: top_camera
-    index_or_path: /dev/top_camera
-    width: 640
-    height: 480
-    fps: 30
-    max_size_mb: 10
-    fourcc: MJPG
-    bgr_to_rgb: true
+# - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
+#   name: top_camera
+#   args:
+#     name: top_camera
+#     index_or_path: /dev/top_camera
+#     width: 640
+#     height: 480
+#     fps: 30
+#     max_size_mb: 10
+#     fourcc: MJPG
+#     bgr_to_rgb: true
 
 - type: deploy.sensor.camera.opencv_camera.OpenCVCamera
   name: head_camera

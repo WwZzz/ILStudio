@@ -47,6 +47,7 @@ import cv2
 import numpy as np
 import time
 from typing import List, Optional, Tuple
+from loguru import logger
 
 from deploy.shm_utils import SharedMemoryChannel
 
@@ -68,6 +69,9 @@ class CameraVisualizer(BaseVisualizer):
         fps: float = 30.0,
         grid_cols: Optional[int] = None,
         scale: float = 1.0,
+        reconnect_interval_s: float = 1.0,
+        initial_connect_timeout_s: float = 5.0,
+        per_camera_connect_timeout_s: float = 0.2,
         **kwargs
     ):
         """
@@ -100,6 +104,31 @@ class CameraVisualizer(BaseVisualizer):
         
         # SHM channels
         self.shm_channels: List[Optional[SharedMemoryChannel]] = [None] * n_cameras
+        self.reconnect_interval_s = float(reconnect_interval_s)
+        self.initial_connect_timeout_s = float(initial_connect_timeout_s)
+        self.per_camera_connect_timeout_s = float(per_camera_connect_timeout_s)
+        self._last_reconnect_ts = 0.0
+        self._missing_once: set[str] = set()
+
+    def _try_connect_missing_channels(self) -> int:
+        """Try to connect any missing camera SHM without blocking startup for all cameras."""
+        connected_now = 0
+        for i, name in enumerate(self.shm_names):
+            if self.shm_channels[i] is not None:
+                continue
+            try:
+                self.shm_channels[i] = SharedMemoryChannel(
+                    name,
+                    is_writer=False,
+                    timeout=self.per_camera_connect_timeout_s,
+                )
+                logger.info(f"[CameraVisualizer] Connected to camera SHM: {name}")
+                connected_now += 1
+            except Exception:
+                if name not in self._missing_once:
+                    logger.info(f"[CameraVisualizer] Waiting for camera SHM '{name}'...")
+                    self._missing_once.add(name)
+        return connected_now
         
     def connect(self, timeout: float = 30.0) -> bool:
         """
@@ -111,24 +140,18 @@ class CameraVisualizer(BaseVisualizer):
         Returns:
             True if at least one camera connected
         """
+        deadline = time.time() + timeout
         connected_count = 0
-        
+        while time.time() < deadline:
+            connected_count += self._try_connect_missing_channels()
+            if any(ch is not None for ch in self.shm_channels):
+                return True
+            time.sleep(0.1)
+
         for i, name in enumerate(self.shm_names):
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                try:
-                    self.shm_channels[i] = SharedMemoryChannel(name, is_writer=False, timeout=1.0)
-                    print(f"[CameraVisualizer] Connected to camera SHM: {name}")
-                    connected_count += 1
-                    break
-                except Exception as e:
-                    print(f"[CameraVisualizer] Waiting for camera SHM '{name}'...")
-                    time.sleep(0.5)
-            
             if self.shm_channels[i] is None:
-                print(f"[CameraVisualizer] Failed to connect to camera SHM: {name}")
-        
-        return connected_count > 0
+                logger.warning(f"[CameraVisualizer] Failed to connect to camera SHM: {name}")
+        return False
     
     def setup(self) -> bool:
         """Setup OpenCV window."""
@@ -234,6 +257,10 @@ class CameraVisualizer(BaseVisualizer):
         Returns:
             True to continue, False to stop
         """
+        if time.time() - self._last_reconnect_ts >= self.reconnect_interval_s:
+            self._last_reconnect_ts = time.time()
+            self._try_connect_missing_channels()
+
         images = []
         
         for i, shm in enumerate(self.shm_channels):
@@ -271,20 +298,22 @@ class CameraVisualizer(BaseVisualizer):
     
     def start(self):
         """Main loop: connect, setup, and continuously display camera images."""
-        if not self.connect():
-            print("[CameraVisualizer] No cameras connected, exiting")
+        if not self.connect(timeout=self.initial_connect_timeout_s):
+            logger.error("[CameraVisualizer] No cameras connected, exiting")
             return
         
         if not self.setup():
-            print("[CameraVisualizer] Setup failed")
+            logger.error("[CameraVisualizer] Setup failed")
             return
         
         self.is_running = True
         frame_interval = 1.0 / self.fps
         last_frame_time = 0.0
         
-        print(f"[CameraVisualizer] Started with {len(self.shm_names)} cameras at {self.fps} FPS")
-        print("[CameraVisualizer] Press 'q' or ESC to close")
+        logger.info(
+            f"[CameraVisualizer] Started with {len(self.shm_names)} cameras at {self.fps} FPS; "
+            "press 'q' or ESC to close"
+        )
         
         try:
             while self.is_running:
@@ -301,7 +330,7 @@ class CameraVisualizer(BaseVisualizer):
                     break
                     
         except KeyboardInterrupt:
-            print("\n[CameraVisualizer] Interrupted")
+            logger.info("[CameraVisualizer] Interrupted")
         finally:
             self.cleanup()
             for shm in self.shm_channels:
@@ -310,7 +339,7 @@ class CameraVisualizer(BaseVisualizer):
                         shm.destroy()
                     except Exception:
                         pass
-            print("[CameraVisualizer] Stopped")
+            logger.info("[CameraVisualizer] Stopped")
     
     def stop(self):
         """Stop the visualization loop."""
@@ -343,9 +372,7 @@ if __name__ == "__main__":
     import multiprocessing as mp
     
     # Test with dummy camera names
-    print("Testing CameraVisualizer...")
-    print("This will fail to connect since no cameras are running.")
-    print("Use with collect_data.py for actual camera visualization.")
+    logger.info("Testing CameraVisualizer (will fail to connect if no cameras are running).")
     
     visualizer = CameraVisualizer(
         shm_names=["test_camera_1", "test_camera_2"],
