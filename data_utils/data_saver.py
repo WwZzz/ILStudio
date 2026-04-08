@@ -511,7 +511,6 @@ class HDF5DataSaver(BaseDataSaver):
             )
             self._stream_thread.start()
             
-            logger.debug("Started HDF5 streaming to episode {}", episode_idx)
             return True
             
         except Exception as e:
@@ -678,7 +677,6 @@ class HDF5DataSaver(BaseDataSaver):
         if not save:
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink()
-            logger.debug("Discarded HDF5 streaming episode {}", episode_idx)
             return frame_count
         
         if frame_count == 0:
@@ -692,7 +690,6 @@ class HDF5DataSaver(BaseDataSaver):
             final_path.unlink()
         tmp_path.rename(final_path)
         
-        logger.debug("Saved HDF5 streaming episode {} ({} frames)", episode_idx, frame_count)
         return frame_count
     
     def finalize(self) -> None:
@@ -941,7 +938,6 @@ class LeRobotV30DataSaver(BaseDataSaver):
             )
             self._stream_thread.start()
             
-            logger.debug("Started LeRobot v3.0 streaming to episode {}", episode_idx)
             return True
             
         except Exception as e:
@@ -1022,13 +1018,11 @@ class LeRobotV30DataSaver(BaseDataSaver):
                     self.dataset.clear_episode_buffer()
                 except Exception:
                     pass
-            logger.debug("Discarded LeRobot v3.0 streaming episode")
             return frame_count if not save else 0
         
         # Save episode
         try:
             self.dataset.save_episode()
-            logger.debug("Saved LeRobot v3.0 streaming episode ({} frames)", frame_count)
             return frame_count
         except Exception as e:
             logger.exception("Failed to save LeRobot v3.0 episode: {}", e)
@@ -1898,7 +1892,6 @@ class LeRobotV21DataSaver(BaseDataSaver):
             )
             self._stream_thread.start()
             
-            logger.debug("Started streaming to episode {}", episode_idx)
             return True
             
         except Exception as e:
@@ -1945,7 +1938,6 @@ class LeRobotV21DataSaver(BaseDataSaver):
             # Discard: delete temp file
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink()
-            logger.debug("Discarded streaming episode {}", episode_idx)
             return frame_count
         
         if frame_count == 0:
@@ -1998,7 +1990,6 @@ class LeRobotV21DataSaver(BaseDataSaver):
         # Update aggregated statistics
         self._update_aggregated_stats_after_episode(episode_stats, old_episode_stats)
         
-        logger.debug("Saved streaming episode {} ({} frames)", episode_idx, frame_count)
         return frame_count
     
     def _streaming_writer_thread(

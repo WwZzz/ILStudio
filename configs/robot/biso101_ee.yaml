@@ -54,6 +54,7 @@
     # Enable safety validation before sending actions to real robot
     safety_check: true      # Set to false ONLY after thorough testing
     max_joint_delta: 0.15   # Max allowed joint change per step (radians, ~8.6 degrees)
+    home_qpos: [-4.094430099594248, -97.98319327731093, 100.0, 71.20756338633433, -53.69841681806385, 2.9277813923227063, -4.309392265193367, -96.13282891971417, 100.0, 70.41685342895562, -55.01171569903671, 3.3159947984395317]
     ik_tolerance: 0.05      # Max allowed FK-IK round-trip error (radians, ~2.9 degrees)
     # =====================================================
     

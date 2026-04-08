@@ -24,6 +24,7 @@ except ImportError:
 from .bi_so101_follower import BiSO101FollowerConfig, BiSO101Follower
 from deploy.robot.base import BaseRobot
 from benchmark.base import MetaObs
+from loguru import logger
 
 # Import kinematics from so101_sim (shared implementation)
 from deploy.robot.so101.kinematics import create_so101, lerobot_FK, lerobot_IK
@@ -39,6 +40,23 @@ DEFAULT_GLIMIT_MAX = [0.340, 0.4, 0.23, 2.0, 1.57, 1.5]
 
 # Default joint signs (1 = normal, -1 = reversed)
 DEFAULT_JOINT_SIGNS = [1, 1, 1, 1, 1, 1]
+
+# Home pose (normalized qpos): [left(6), right(6)].
+# Measured from the current real robot startup pose.
+DEFAULT_HOME_QPOS = [
+    -4.094430099594248,
+    -97.98319327731093,
+    100.0,
+    71.20756338633433,
+    -53.69841681806385,
+    2.9277813923227063,
+    -4.309392265193367,
+    -96.13282891971417,
+    100.0,
+    70.41685342895562,
+    -55.01171569903671,
+    3.3159947984395317,
+]
 
 
 def _camera_frame_to_chw_u8(frame: np.ndarray) -> np.ndarray:
@@ -101,6 +119,10 @@ class BiSo101Follower(BaseRobot):
                  right_delta_signs: Optional[List[int]] = None,
                  safety_check: bool = True,
                  max_joint_delta: float = 0.15,
+                 home_qpos: Optional[List[float]] = DEFAULT_HOME_QPOS,
+                 reset_step_rad: Optional[float] = None,
+                 reset_step_sleep: float = 0.03,
+                 reset_final_hold_s: float = 0.2,
                  ik_tolerance: float = 0.05,
                  zero_threshold: float = 0.01,
                  debug: bool = False,
@@ -171,6 +193,9 @@ class BiSo101Follower(BaseRobot):
         # Safety parameters
         self.safety_check = safety_check
         self.max_joint_delta = max_joint_delta
+        self.reset_step_rad = float(reset_step_rad) if reset_step_rad is not None else min(max_joint_delta, 0.08)
+        self.reset_step_sleep = float(reset_step_sleep)
+        self.reset_final_hold_s = float(reset_final_hold_s)
         self.ik_tolerance = ik_tolerance
         self._left_safety_verified = False
         self._right_safety_verified = False
@@ -200,18 +225,35 @@ class BiSo101Follower(BaseRobot):
         self._sync_threshold = 0.1  # Sync if joint error > threshold (radians, ~5.7 degrees)
         self._last_left_real_qpos_rad = None
         self._last_right_real_qpos_rad = None
+        self.home_qpos = None if home_qpos is None else np.asarray(home_qpos, dtype=np.float64)
+        if self.home_qpos is not None:
+            if self.home_qpos.shape != (12,):
+                raise ValueError(f"home_qpos must be shape (12,), got {self.home_qpos.shape}")
+            self.left_home_qpos = self.home_qpos[:6].copy()
+            self.right_home_qpos = self.home_qpos[6:12].copy()
+            self.left_home_qpos_rad = self._normalized_to_radians(self.left_home_qpos)
+            self.right_home_qpos_rad = self._normalized_to_radians(self.right_home_qpos)
+        else:
+            self.left_home_qpos = None
+            self.right_home_qpos = None
+            self.left_home_qpos_rad = None
+            self.right_home_qpos_rad = None
         
         # Debug mode
         self.debug = debug
         self._debug_step = 0
         
-        print(f"[BiSo101Follower] Control mode: {control_mode}")
+        logger.info("[BiSo101Follower] Control mode: {}", control_mode)
         if control_mode == "delta_ee":
-            print(f"[BiSo101Follower] Action dimension: 14D (7D left + 7D right)")
+            logger.info("[BiSo101Follower] Action dimension: 14D (7D left + 7D right)")
         else:
-            print(f"[BiSo101Follower] Action dimension: 12D (6D left + 6D right)")
+            logger.info("[BiSo101Follower] Action dimension: 12D (6D left + 6D right)")
         if safety_check:
-            print(f"[BiSo101Follower] Safety check ENABLED: max_joint_delta={max_joint_delta:.3f} rad, ik_tolerance={ik_tolerance:.3f} rad")
+            logger.info(
+                "[BiSo101Follower] Safety check ENABLED: max_joint_delta={:.3f} rad, ik_tolerance={:.3f} rad",
+                max_joint_delta,
+                ik_tolerance,
+            )
         
         # Create camera configurations
         self.camera_configs_dict = {}
@@ -234,7 +276,7 @@ class BiSo101Follower(BaseRobot):
         retry_counts = 0
         max_connect_retry = 10
         while not self.connect():
-            print(f"Retrying for {retry_counts} time...")
+            logger.info("Retrying for {} time...", retry_counts)
             retry_counts += 1
             if retry_counts > max_connect_retry:
                 raise RuntimeError("Failed to connect to robot after max retries")
@@ -246,13 +288,13 @@ class BiSo101Follower(BaseRobot):
             if not self._robot.is_connected:
                 self._robot.connect()
         except DeviceAlreadyConnectedError as e:
-            print(f"Robot already connected: {e}")
+            logger.info("Robot already connected: {}", e)
             pass
         except Exception as e:
-            print(f"Failed to connect to robot due to {e}")
+            logger.error("Failed to connect to robot due to {}", e)
             traceback.print_exc()
             return False
-        print("Robot connected")
+        logger.info("Robot connected")
         return True
     
     def get_action_dim(self):
@@ -401,23 +443,90 @@ class BiSo101Follower(BaseRobot):
             print(f"              Offset is small (max={max_offset:.4f}), calibration looks good.")
         
         return offset, True
+
+    def _extract_arm_qpos_from_obs(self, obs: dict) -> tuple[np.ndarray, np.ndarray]:
+        """Extract left/right 6D normalized joint positions from robot observation."""
+        left_qpos = np.array([obs[m + '.pos'] for m in self._left_motors], dtype=np.float64)
+        right_qpos = np.array([obs[m + '.pos'] for m in self._right_motors], dtype=np.float64)
+        return left_qpos, right_qpos
+
+    def _read_joint_state(self):
+        """Read the latest robot joint state in both normalized and radian space."""
+        obs = self._robot.get_observation()
+        left_qpos, right_qpos = self._extract_arm_qpos_from_obs(obs)
+        left_qpos_rad = self._normalized_to_radians(left_qpos)
+        right_qpos_rad = self._normalized_to_radians(right_qpos)
+        return obs, left_qpos, right_qpos, left_qpos_rad, right_qpos_rad
+
+    def _clear_pending_action(self) -> None:
+        """Drop any queued action so reset is not immediately overwritten."""
+        pending_lock = getattr(self, "_pending_action_lock", None)
+        if pending_lock is not None and hasattr(self, "_pending_action"):
+            with pending_lock:
+                self._pending_action = None
+
+    def reset(self):
+        """Return both arms to the configured home pose with joint interpolation."""
+        self._clear_pending_action()
+        if self.left_home_qpos is None or self.right_home_qpos is None:
+            raise RuntimeError("home_qpos is not configured; cannot reset robot.")
+
+        _, left_qpos, right_qpos, left_qpos_rad, right_qpos_rad = self._read_joint_state()
+
+        home_left_qpos = self.left_home_qpos.copy()
+        home_right_qpos = self.right_home_qpos.copy()
+        home_left_qpos_rad = self.left_home_qpos_rad.copy()
+        home_right_qpos_rad = self.right_home_qpos_rad.copy()
+
+        max_rad_delta = max(
+            float(np.max(np.abs(home_left_qpos_rad - left_qpos_rad))),
+            float(np.max(np.abs(home_right_qpos_rad - right_qpos_rad))),
+        )
+        step_rad = max(float(self.reset_step_rad), 1e-4)
+        n_steps = max(1, int(np.ceil(max_rad_delta / step_rad)))
+
+        logger.info(
+            "[BiSo101Follower] Resetting to home pose with {} interpolation steps "
+            "(max_delta={:.4f} rad, step={:.4f} rad)",
+            n_steps,
+            max_rad_delta,
+            step_rad,
+        )
+
+        for alpha in np.linspace(0.0, 1.0, n_steps + 1, dtype=np.float64)[1:]:
+            target_left = left_qpos + (home_left_qpos - left_qpos) * alpha
+            target_right = right_qpos + (home_right_qpos - right_qpos) * alpha
+            self.publish_action(np.concatenate([target_left, target_right]))
+            time.sleep(self.reset_step_sleep)
+
+        self.publish_action(np.concatenate([home_left_qpos, home_right_qpos]))
+        time.sleep(self.reset_final_hold_s)
+
+        try:
+            _, _, _, final_left_qpos_rad, final_right_qpos_rad = self._read_joint_state()
+        except Exception:
+            final_left_qpos_rad = home_left_qpos_rad
+            final_right_qpos_rad = home_right_qpos_rad
+
+        with self._lock:
+            self.left_target_qpos_rad = final_left_qpos_rad.copy()
+            self.right_target_qpos_rad = final_right_qpos_rad.copy()
+            self.left_target_gpos = lerobot_FK(final_left_qpos_rad[1:5], robot=self.robot_kin)
+            self.right_target_gpos = lerobot_FK(final_right_qpos_rad[1:5], robot=self.robot_kin)
+
+        self._last_left_real_qpos_rad = final_left_qpos_rad.copy()
+        self._last_right_real_qpos_rad = final_right_qpos_rad.copy()
+        logger.info("[BiSo101Follower] Reset to home pose finished")
     
     def get_observation(self):
         """Get complete observation data (including camera images)"""
         try:
-            obs = self._robot.get_observation()
-            left_qpos = np.array([obs[m+'.pos'] for m in self._left_motors], dtype=np.float64)
-            right_qpos = np.array([obs[m+'.pos'] for m in self._right_motors], dtype=np.float64)
+            obs, left_qpos, right_qpos, left_qpos_rad, right_qpos_rad = self._read_joint_state()
+            self._last_left_real_qpos_rad = left_qpos_rad.copy()
+            self._last_right_real_qpos_rad = right_qpos_rad.copy()
             
             # Update internal state for delta_ee mode
             if self.control_mode == "delta_ee":
-                left_qpos_rad = self._normalized_to_radians(left_qpos)
-                right_qpos_rad = self._normalized_to_radians(right_qpos)
-                
-                # Store real positions for sync
-                self._last_left_real_qpos_rad = left_qpos_rad.copy()
-                self._last_right_real_qpos_rad = right_qpos_rad.copy()
-                
                 # Calibration for each arm
                 if not self._left_is_norm_calibrated:
                     self._left_norm_offset, self._left_is_norm_calibrated = self._calibrate_normalization(
@@ -783,15 +892,20 @@ class BiSo101Follower(BaseRobot):
                 data = self.get_data()
                 if data is not None:
                     self.write_data(data)
+
+                # 2. Read control message / raw action and handle reset commands first
+                raw_action = self.read_action()
+                if self.handle_control_message(raw_action):
+                    rate_limiter.sleep(self.fps)
+                    continue
                 
-                # 2. Execute any pending processed action
+                # 3. Execute any pending processed action
                 with self._pending_action_lock:
                     if self._pending_action is not None:
                         self.publish_action(self._pending_action)
                         self._pending_action = None
                 
-                # 3. Read new raw action and send to IK thread (non-blocking)
-                raw_action = self.read_action()
+                # 4. Read new raw action and send to IK thread (non-blocking)
                 if raw_action is not None:
                     try:
                         # Clear old action, keep only latest
@@ -841,15 +955,22 @@ class BiSo101Follower(BaseRobot):
                 data = self.get_data()
                 if data is not None:
                     self.write_data(data)
+
+                # 2. Handle control commands before executing / queuing actions
+                raw_action = self.read_action()
+                if self.handle_control_message(raw_action):
+                    pending_result = None
+                    rate_limiter.sleep(self.fps)
+                    continue
                 
-                # 2. Check for processed result from IK process (non-blocking)
+                # 3. Check for processed result from IK process (non-blocking)
                 try:
                     while not action_out_queue.empty():
                         pending_result = action_out_queue.get_nowait()
                 except:
                     pass
                 
-                # 3. Execute pending action and update state
+                # 4. Execute pending action and update state
                 if pending_result is not None:
                     processed_action = pending_result.get('action', {})
                     action_array = processed_action.get('action', None) if processed_action else None
@@ -868,8 +989,7 @@ class BiSo101Follower(BaseRobot):
                     
                     pending_result = None
                 
-                # 4. Read new raw action and send to IK process with state (non-blocking)
-                raw_action = self.read_action()
+                # 5. Read new raw action and send to IK process with state (non-blocking)
                 if raw_action is not None:
                     # Package action with current state for IK worker
                     with self._lock:

@@ -115,11 +115,12 @@ class BasicActionManager(AbstractActionManager):
         }
         
         if self._debug:
-            logger.info(f"[ActionManager] {self.__class__.__name__} initialized (debug=True)")
+            logger.trace(f"[ActionManager] {self.__class__.__name__} initialized (debug=True)")
 
     def _log_debug(self, message: str, *args):
+        """Verbose tracing; off by default (loguru INFO). Enable with ILSTUDIO_ACTION_DEBUG=1 and LOGURU_LEVEL=TRACE."""
         if self._debug:
-            logger.info(f"[ActionManager:{self.__class__.__name__}] " + message, *args)
+            logger.trace(f"[ActionManager:{self.__class__.__name__}] " + message, *args)
 
     def _buffer_status(self):
         with self._lock:

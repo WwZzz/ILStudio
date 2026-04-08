@@ -6,6 +6,7 @@ Real robot evaluation with policy inference:
 1. Start robot/camera devices in subprocesses (like collect_data.py)
 2. Run inference process to produce action chunks
 3. Use action manager to select and publish actions
+4. After start: Enter pauses policy publishing; Enter again resumes (same idea as collect_data.py)
 
 Usage:
     # Local model evaluation
@@ -16,6 +17,9 @@ Usage:
     
     # Dummy policy for testing pipeline
     python eval_real.py -r robot/so101_follower -m __dummy-random_7x16
+
+    # With -o: manifest + optional dataset (--save-as-dataset) and/or mosaic MP4 under video/
+    # (recorder subprocess only; main process does not read device SHM for recording).
 """
 
 # CRITICAL: Import shm_utils FIRST to patch resource_tracker before multiprocessing
@@ -37,7 +41,19 @@ from deploy.utils import (
     start_devices,
 )
 from deploy.action_manager import load_action_manager
-from deploy.inference import start_inference_process, stop_inference_process
+from deploy.inference import (
+    _extract_step_action,
+    start_inference_process,
+    stop_inference_process,
+)
+from deploy.runtime import (
+    EvalRealRuntime,
+    KBHit,
+    eval_real_pause_menu_step,
+    setup_eval_real_output_dir,
+    try_enter_eval_real_pause_menu,
+    validate_eval_real_save_as_dataset,
+)
 from deploy.visualizer.base import start_all_visualizers
 from configs.loader import ConfigLoader
 
@@ -73,19 +89,30 @@ def parse_param():
     parser.add_argument('-m', '--model_name_or_path', type=str, 
                        default='localhost:5000',
                        help='Path to model checkpoint OR server address (host:port) for remote policy server')
-    parser.add_argument('-o', '--output_dir', type=str, default='',
-                       help='Directory to save results (videos will be saved here)')
-    parser.add_argument('-i', '--episode_id', type=int, default=-1,
-                       help='Episode ID for video naming (auto-increment if -1)')
-    parser.add_argument('--image_size', type=int, default=None,
-                       help='Image size for policy')
-
-    # Debug: save obs images and action chunks to -o directory
     parser.add_argument(
-        '--debug', action='store_true', default=False,
-        help='Save observation images and action chunks to output_dir for debugging.',
+        '-o', '--output_dir', type=str, default='',
+        help='If set: create dir, write eval_real_manifest.json, and spawn a dedicated process that '
+             'records synchronized device data (using DataSaver) plus one mosaic MP4 per episode '
+             '(video/real_eval_episode_XXXX.mp4) from device SHM only; main process does not read '
+             'device SHM for recording, so control / inference path stays unchanged.',
     )
-    
+    parser.add_argument('-i', '--episode_id', type=int, default=-1,
+                       help='Episode ID for eval data recording (-1 means append after existing episodes)')
+    parser.add_argument(
+        '--save-as-dataset',
+        type=str,
+        default=None,
+        metavar='FORMAT',
+        help='With -o: save synced data in this format (lerobotv21, lerobotv30, hdf5). '
+             'If -o is set but this is omitted or empty, only mosaic MP4 under video/ is written.',
+    )
+    parser.add_argument(
+        '--task',
+        type=str,
+        default='',
+        help='Optional task description stored in eval recording dataset.',
+    )
+
     # Action manager
     parser.add_argument('-am', '--action_manager', type=str, default='basic',
                        help='Action manager config name or path to config file')
@@ -96,67 +123,22 @@ def parse_param():
     
     # Parse arguments (allow unknown for dotted overrides)
     args, unknown = parser.parse_known_args()
-    
+    validate_eval_real_save_as_dataset(args, parser)
+
     # Store unknown args for ConfigLoader to process
     setattr(args, 'unknown_args', unknown)
     return args
 
 
 def main():
-    import signal
-    import atexit
-    
     set_seed(0)
     args = parse_param()
     args.is_training = False
-    
-    # Global process tracking for cleanup
-    _all_procs = []
-    _all_shm = []
-    _cleanup_done = False
-    
-    def cleanup_all():
-        """Cleanup function to be called on exit."""
-        nonlocal _cleanup_done
-        if _cleanup_done:
-            return
-        _cleanup_done = True
-        
-        logger.info("Running cleanup...")
-        
-        # Terminate all tracked processes
-        for p in _all_procs:
-            if p.is_alive():
-                p.terminate()
-        
-        # Wait for graceful shutdown
-        for p in _all_procs:
-            p.join(timeout=3.0)
-            if p.is_alive():
-                logger.warning("Process {} did not exit gracefully, killing...", p.pid)
-                p.kill()
-                p.join(timeout=1.0)
-        
-        # Cleanup SHM
-        for shm in _all_shm:
-            try:
-                shm.destroy()
-            except Exception:
-                pass
-        
-        logger.info("Cleanup complete.")
-    
-    def signal_handler(signum, frame):
-        """Handle SIGINT/SIGTERM in main process."""
-        logger.info("Received signal {}, cleaning up...", signum)
-        cleanup_all()
-        exit(0)
-    
-    # Register signal handlers and atexit
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(cleanup_all)
-    
+
+    output_dir = setup_eval_real_output_dir(args)
+    rt = EvalRealRuntime()
+    rt.register_exit_hooks()
+
     # Create shared ConfigLoader instance
     cfg_loader = ConfigLoader(args=args, unknown_args=getattr(args, 'unknown_args', []))
     
@@ -175,14 +157,20 @@ def main():
     
     # Create policy control SHM (main process writes actions here)
     control_shm = SharedMemoryChannel(name='policy_control_shm', max_size_mb=1, is_writer=True)
-    _all_shm.append(control_shm)
+    rt.all_shm.append(control_shm)
     logger.info("Created policy_control_shm for action publishing.")
+
+    def send_robot_reset() -> None:
+        """Ask robot subprocesses to execute their reset() implementation."""
+        control_shm.write({
+            'cmd': 'reset',
+        })
+        logger.info("[Pause] Sent robot reset command through policy_control_shm.")
     
     # Start all devices in subprocesses
     logger.info("Starting all devices...")
     device_procs = start_devices(robot_configs)
-    _all_procs.extend(device_procs)
-    time.sleep(2.0)
+    rt.all_procs.extend(device_procs)
     
     # Start visualizer subprocesses if requested
     viz_procs = []
@@ -193,8 +181,10 @@ def main():
             is_camera_config_func=is_camera_config,
             visualizer_configs=visualizer_configs,
         )
-        _all_procs.extend(viz_procs)
-    
+        rt.all_procs.extend(viz_procs)
+
+    time.sleep(1.0)
+
     # Start inference process via deploy/inference.py (trigger-based)
     inference_ctx = start_inference_process(
         model_name_or_path=args.model_name_or_path,
@@ -202,7 +192,7 @@ def main():
         device_shm_names=all_shm_names,
         device_configs=robot_configs,
     )
-    _all_procs.append(inference_ctx.process)
+    rt.all_procs.append(inference_ctx.process)
     
     # Load action manager and bind to inference context
     logger.info("Loading action manager: {}", args.action_manager)
@@ -216,39 +206,88 @@ def main():
     action_manager = load_action_manager(config=manager_cfg)
     action_manager.set_inference_context(inference_ctx)
     logger.info("ActionManager: {} (bound to InferenceContext)", action_manager.__class__.__name__)
-    
-    # Press Enter to start the control loop
-    input("Press Enter to start the control loop...")
-    
-    # Main control loop
-    logger.info("="*60)
-    logger.info("[Main Control Loop] Started. Press Ctrl+C to stop.")
-    logger.info("  Publish rate: {} Hz", args.publish_rate)
-    logger.info("="*60)
-    
-    rate_limiter = RateLimiter()
-    action_count = 0
-    last_log_time = time.perf_counter()
-    
+
+    rt.start_session_recorder(
+        output_dir=output_dir,
+        device_shm_names=list(all_shm_names),
+        dataset_format=getattr(args, "save_as_dataset", None),
+        task=args.task,
+        episode_id=args.episode_id,
+        sensing_rate=float(getattr(args, "sensing_rate", 20.0)),
+        initial_recording_active=False,
+        wait_until_ready=False,
+    )
+
+    # Inference subprocess is already in its main loop (start_inference_process waits for
+    # worker ready after policy load + device SHM attach + action/ctrl channels).
+    # Recorder child logs SHM connect/skips asynchronously; brief pause so that noise
+    # appears before the Enter prompt (otherwise users miss the instruction).
+    time.sleep(2.0)
+
+    kb = None
+
     try:
+        kb = KBHit()
+        kb.set_curses_term()
+
+        logger.info(
+            "\n{}\n  Press Enter to start the control loop\n{}\n",
+            "=" * 60,
+            "=" * 60,
+        )
+        while kb.get_input() is None:
+            time.sleep(0.001)
+        while kb.get_input() is not None:
+            pass
+        rt.post_recorder_cmd("resume_recording")
+
+        # Main control loop
+        logger.info("="*60)
+        logger.info(
+            "[Main Control Loop] Started. Publish rate: {} Hz. "
+            "Enter=pause (>>> menu: save/reset then plain Enter=resume), Ctrl+C=stop.",
+            args.publish_rate,
+        )
+        logger.info("="*60)
+
+        rate_limiter = RateLimiter()
+        action_count = 0
+        last_log_time = time.perf_counter()
+        paused = False
+
         while True:
+            if not paused and try_enter_eval_real_pause_menu(kb, rt):
+                paused = True
+
+            if paused:
+                outcome = eval_real_pause_menu_step(
+                    kb,
+                    rt,
+                    action_manager,
+                    on_reset=send_robot_reset,
+                )
+                if outcome == "idle":
+                    time.sleep(0.01)
+                    continue
+                if outcome == "resumed":
+                    paused = False
+                    continue
+                if outcome == "exit":
+                    break
+                continue
+
             t = time.perf_counter()
-            
+
             # select_action() handles everything:
             # 1. Poll for new action chunks from inference subprocess
             # 2. If buffer empty or should_infer(): send trigger
             # 3. If buffer empty: block-wait for inference result
             # 4. Return single-step action, auto-increment t
             step = action_manager.select_action()
-            
-            # Extract the action array from the mact step
-            if isinstance(step, np.ndarray) and step.dtype == object and len(step) > 0:
-                action_arr = step[0].get('action') if isinstance(step[0], dict) else step[0]
-            elif isinstance(step, dict):
-                action_arr = step.get('action', step)
-            else:
-                action_arr = step
-            
+            # One step from BasicActionManager: np.ndarray(dtype=object) of MetaAction dicts
+            # (same layout as MetaPolicy.inference); see deserialize_mact_list / _extract_step_action.
+            action_arr = _extract_step_action(step)
+
             if action_arr is not None:
                 action_arr = np.asarray(action_arr)
                 if action_arr.size > 0:
@@ -265,15 +304,20 @@ def main():
                 last_log_time = t
             
             rate_limiter.sleep(args.publish_rate)
-            
+
     except KeyboardInterrupt:
         logger.info("[Main Control Loop] Exit by KeyboardInterrupt Ctrl+C")
     except Exception as e:
         logger.info("[Main Control Loop] Error: {}", e)
         traceback.print_exc()
     finally:
+        if kb is not None:
+            try:
+                kb.set_normal_term()
+            except Exception:
+                pass
         stop_inference_process(inference_ctx)
-        cleanup_all()
+        rt.cleanup_all()
         cleanup_all_shm(shm_to_clean)
 
 

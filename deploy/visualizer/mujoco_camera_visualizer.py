@@ -47,6 +47,7 @@ import cv2
 import numpy as np
 import time
 from typing import List, Optional
+from loguru import logger
 
 from deploy.shm_utils import SharedMemoryChannel
 
@@ -103,10 +104,10 @@ class MujocoCameraVisualizer:
         while time.time() - start_time < timeout:
             try:
                 self.robot_shm = SharedMemoryChannel(self.robot_shm_name, is_writer=False, timeout=1.0)
-                print(f"[MujocoCameraVisualizer] Connected to robot SHM: {self.robot_shm_name}")
+                logger.info(f"[MujocoCameraVisualizer] Connected to robot SHM: {self.robot_shm_name}")
                 return True
             except Exception:
-                print(f"[MujocoCameraVisualizer] Waiting for robot SHM '{self.robot_shm_name}'...")
+                logger.info(f"[MujocoCameraVisualizer] Waiting for robot SHM '{self.robot_shm_name}'...")
                 time.sleep(0.5)
         print(f"[MujocoCameraVisualizer] Failed to connect to robot SHM: {self.robot_shm_name}")
         return False
@@ -116,7 +117,7 @@ class MujocoCameraVisualizer:
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
             return True
         except cv2.error as e:
-            print(f"[MujocoCameraVisualizer] OpenCV GUI unavailable: {e}")
+            logger.error(f"[MujocoCameraVisualizer] OpenCV GUI unavailable: {e}")
             return False
 
     def _create_grid_image(self, images: List[Optional[np.ndarray]]) -> np.ndarray:
@@ -225,7 +226,7 @@ class MujocoCameraVisualizer:
             print("[MujocoCameraVisualizer] No robot SHM connected, exiting")
             return
         if not self.setup():
-            print("[MujocoCameraVisualizer] Setup failed")
+            logger.error("[MujocoCameraVisualizer] Setup failed")
             return
 
         self.is_running = True
@@ -248,7 +249,7 @@ class MujocoCameraVisualizer:
                 if not self.visualize():
                     break
         except KeyboardInterrupt:
-            print("\n[MujocoCameraVisualizer] Interrupted")
+            logger.info("[MujocoCameraVisualizer] Interrupted")
         finally:
             self.cleanup()
             if self.robot_shm is not None:
@@ -256,7 +257,7 @@ class MujocoCameraVisualizer:
                     self.robot_shm.destroy()
                 except Exception:
                     pass
-            print("[MujocoCameraVisualizer] Stopped")
+            logger.info("[MujocoCameraVisualizer] Stopped")
 
     def stop(self):
         self.is_running = False
