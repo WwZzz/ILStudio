@@ -1,0 +1,29 @@
+# LeRobot v3 Video Dataset task config
+#
+# Uses LeRobotVideoDataset which configures lerobot's delta_timestamps to
+# include camera keys, so the library natively returns T frames per camera.
+# Requires the lerobot package to be installed.
+
+datasets:
+  - type: data_utils.datasets.wm.LeRobotVideoDataset
+    name: lerobot_wm
+    args:
+      dataset_path_list:
+        - ""                  # HuggingFace repo id
+      camera_names: []        # empty = use all cameras
+      chunk_size: 24
+      image_size:
+        - 256
+        - 256
+      tolerance_s: 0.1
+      state_key: observation.state
+      action_key: action
+      horizon: 16
+      frame_skip: 1
+      input_steps: 1
+
+meta:
+  action_dim: 7
+  state_dim: 14
+  action_normalize: zscore
+  state_normalize: zscore

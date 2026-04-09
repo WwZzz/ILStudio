@@ -1,0 +1,32 @@
+# ALOHA Sim + DreamZero task config
+#
+# Uses AlohaSimVideoDataset with horizon=33 to match DreamZero's
+# num_video_frames.  Single top camera → side_by_side view is identity.
+#
+# Usage:
+#   python train.py -p dreamzero -t wm/aloha_sim_dreamzero \
+#       --task.datasets.0.args.dataset_path_list='["sim_transfer_cube_scripted"]'
+
+datasets:
+  - type: data_utils.datasets.wm.AlohaSimVideoDataset
+    name: aloha_sim_wm
+    args:
+      dataset_path_list:
+        - sim_transfer_cube_scripted   # auto-downloads from HuggingFace
+      camera_names:
+        - top
+      chunk_size: 24
+      image_size:
+        - 256
+        - 256
+      ctrl_space: joint
+      ctrl_type: abs
+      horizon: 33
+      frame_skip: 1
+      input_steps: 1
+
+meta:
+  action_dim: 14
+  state_dim: 14
+  action_normalize: minmax
+  state_normalize: minmax

@@ -1,0 +1,36 @@
+# LIBERO Video Dataset task config
+#
+# Uses LiberoVideoDataset which batch-reads T consecutive frames from
+# LIBERO's multi-demo HDF5 files with a single fancy-index call per camera.
+#
+# Robot:   Panda (single arm, parallel-jaw gripper)
+# Control: OSC_POSE (Cartesian EE delta, 20 Hz)
+# State:   8-dim  [ee_pos(3), ee_ori(4), gripper(1)]
+# Action:  7-dim  [ee_delta_pose(6), gripper(1)]
+# Cameras: agentview (third-person) + eye_in_hand (wrist)
+
+datasets:
+  - type: data_utils.datasets.wm.LiberoVideoDataset
+    name: libero_wm_spatial
+    args:
+      root: ""                # set via CLI: --task.datasets.0.args.root=/path/to/libero
+      split:
+        - spatial
+      camera_names:
+        - image_primary
+        - image_wrist
+      chunk_size: 24
+      image_size:
+        - 256
+        - 256
+      ctrl_space: ee
+      ctrl_type: delta
+      horizon: 16
+      frame_skip: 1
+      input_steps: 1
+
+meta:
+  action_dim: 7
+  state_dim: 8
+  action_normalize: zscore
+  state_normalize: zscore

@@ -1,0 +1,28 @@
+# LeRobot v2.1 Video Dataset task config
+#
+# Uses LeRobotV21VideoDataset which batch-decodes T consecutive video frames
+# per camera in a single video decode pass (torchcodec / pyav).
+# Reads parquet + video files directly (no lerobot library needed).
+
+datasets:
+  - type: data_utils.datasets.wm.LeRobotV21VideoDataset
+    name: lerobotv21_wm
+    args:
+      dataset_path_list:
+        - ""                  # HuggingFace repo id or local path
+      camera_names: []        # empty = use all cameras in the dataset
+      chunk_size: 24
+      image_size:
+        - 256
+        - 256
+      state_key: observation.state
+      action_key: action
+      horizon: 16
+      frame_skip: 1
+      input_steps: 1
+
+meta:
+  action_dim: 7
+  state_dim: 14
+  action_normalize: zscore
+  state_normalize: zscore

@@ -1,0 +1,29 @@
+# HDF5 Video Dataset task config
+#
+# Uses HDF5VideoDataset which batch-reads T consecutive frames per HDF5 file
+# with a single fancy-index call.
+#
+# Works with standard one-episode-per-file HDF5 datasets.
+
+datasets:
+  - type: data_utils.datasets.wm.HDF5VideoDataset
+    name: hdf5_wm
+    args:
+      dataset_path_list: []    # set via CLI: list of HDF5 file paths
+      camera_names:
+        - primary
+      chunk_size: 24
+      image_size:
+        - 256
+        - 256
+      ctrl_space: ee
+      ctrl_type: delta
+      horizon: 16
+      frame_skip: 1
+      input_steps: 1
+
+meta:
+  action_dim: 7
+  state_dim: 8
+  action_normalize: zscore
+  state_normalize: zscore
