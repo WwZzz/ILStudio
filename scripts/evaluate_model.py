@@ -398,7 +398,7 @@ def masked_mean_mse_mae(
             else:
                 mse = all_mse.mean()
                 mae = all_mae.mean()
-              return mse.item(), mae.item(), int(pred.numel())
+                return mse.item(), mae.item(), int(pred.numel())
             num_valid = int(mask.sum().item())
             if num_valid <= 0:
                 return None
