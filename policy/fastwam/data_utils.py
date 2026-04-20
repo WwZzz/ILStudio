@@ -5,8 +5,11 @@ into the dict format expected by FastWAM's ``build_inputs`` / ``infer_*``.
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from loguru import logger
+
+from data_utils.datasets.wm.video_meta import convert_image_to_video
 
 
 class FastWAMDataProcessor:
@@ -23,14 +26,28 @@ class FastWAMDataProcessor:
     def __init__(
         self,
         num_views: int = 1,
-        horizon: int = 1,
-        image_height: int = 224,
-        image_width: int = 224,
+        image_size: int | tuple[int, int] | list[int] = (224, 224),
     ):
         self.num_views = num_views
-        self.horizon = horizon
-        self.image_height = image_height
-        self.image_width = image_width
+        if isinstance(image_size, (list, tuple)):
+            self._resize_size = (int(image_size[0]), int(image_size[1]))
+        else:
+            s = int(image_size)
+            self._resize_size = (s, s)
+
+    def _resize_chw(self, img: torch.Tensor) -> torch.Tensor:
+        """Match training resolution (same as AlohaSimVideoDataset cv2.resize to image_size)."""
+        if img.ndim != 3:
+            return img
+        th, tw = self._resize_size
+        if th <= 0 or tw <= 0:
+            return img
+        _, h, w = img.shape
+        if h == th and w == tw:
+            return img
+        x = img.unsqueeze(0)
+        x = F.interpolate(x, size=(th, tw), mode="bilinear", align_corners=False)
+        return x.squeeze(0)
 
     def __call__(self, sample: dict) -> dict:
         out = {}
@@ -49,24 +66,30 @@ class FastWAMDataProcessor:
                 video_meta = sample["reasoning"].get("video")
 
             if video_meta is not None:
-                T = video_meta["horizon"]
-                K = video_meta["num_views"]
-                frames = image.view(T, K, *image.shape[1:])
+                frames = convert_image_to_video(image, video_meta, is_batch=False)
+                T, K = int(frames.shape[0]), int(frames.shape[1])
                 if K > 1:
-                    frames = torch.cat([frames[:, k] for k in range(K)], dim=-1)
+                    resized = []
+                    for k in range(K):
+                        resized.append(
+                            torch.stack([self._resize_chw(frames[t, k]) for t in range(T)])
+                        )
+                    frames = torch.cat(resized, dim=-1)
                 else:
-                    frames = frames[:, 0]  # (T, C, H, W)
+                    frames = torch.stack(
+                        [self._resize_chw(frames[t, 0]) for t in range(T)]
+                    )
                 out["video"] = frames.permute(1, 0, 2, 3)  # (C, T, H, W)
                 out["_video_is_pad"] = video_meta.get("is_pad", None)
             elif image.ndim == 4:
                 K = image.shape[0]
                 if K > 1:
-                    image = torch.cat([image[k] for k in range(K)], dim=-1)
+                    image = torch.cat([self._resize_chw(image[k]) for k in range(K)], dim=-1)
                 else:
-                    image = image[0]  # (C, H, W)
+                    image = self._resize_chw(image[0])  # (C, H, W)
                 out["image_single"] = image
             elif image.ndim == 3:
-                out["image_single"] = image
+                out["image_single"] = self._resize_chw(image)
             else:
                 out["image_single"] = image
 

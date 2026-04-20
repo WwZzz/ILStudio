@@ -98,7 +98,7 @@ class PolicyServer(BaseServer):
                         logger.info(f"  Client #{client_id}: {request_count} requests processed")
                     
                 except Exception as e:
-                    logger.error(f"✗ Inference error for client #{client_id}: {e}")
+                    logger.error(f"✗ Inference error for client #{client_id}:\n{traceback.format_exc()}")
                     # Send empty list on error
                     self.send_mact_list(client_socket, [])
                     

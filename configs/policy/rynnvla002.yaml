@@ -1,0 +1,62 @@
+type: policy.rynnvla002
+name: rynnvla002
+args:
+  # Action / state dimensions (override per-task)
+  action_dim: 7
+  state_dim: 8
+
+  # Action prediction horizon (number of future action steps)
+  time_horizon: 5
+
+  # History: number of frames (including current) the model sees
+  history_len: 2
+  with_state: true
+  with_wrist: true
+
+  # Image resolution fed to VQGAN tokenizer
+  image_size:
+    - 256
+    - 256
+
+  # Chameleon backbone settings
+  max_seq_len: 4096
+  mask_image_logits: true
+  dropout: 0.0
+  z_loss_weight: 0.0
+  model_size: "7B"
+
+  # Loss weight for continuous action head (L1)
+  loss_ct_weight: 1.0
+
+  # Discretization bins for action/state tokens
+  n_bins: 256
+
+  # Paths — same layout as policy/rynnvla002/README.md (under cloned RynnVLA-002).
+  # Relative paths are resolved against policy/rynnvla002/ (see policy.rynnvla002.load_model).
+  #
+  # Local (after Step 0 in upstream README / ILStudio README “Download checkpoints”):
+  #   starting_point, chameleon/tokenizer, models--Alpha-VLLM--Lumina-mGPT-7B-768
+  #
+  # Or use Hugging Face instead of starting_point, e.g.:
+  #   pretrained_path: Alibaba-DAMO-Academy/RynnVLA-002
+  #   (VLA subsets: .../VLA_model_256/libero_goal etc., see upstream Model Zoo)
+  pretrained_path: RynnVLA-002/rynnvla-002/ckpts/starting_point
+
+  # Lumina-mGPT tokenizer directory (tokenizer.json). Leave empty to auto-detect
+  # .../ckpts/models--Alpha-VLLM--Lumina-mGPT-7B-768/snapshots/<revision>/.
+  tokenizer_path: ""
+
+  # Chameleon VQGAN + text tokenizer files (vqgan.yaml, vqgan.ckpt, text_tokenizer.json).
+  chameleon_tokenizer_dir: RynnVLA-002/rynnvla-002/ckpts/chameleon/tokenizer
+
+  # When true (default), missing Step-0 assets are downloaded from Hugging Face on first use:
+  # WorldVLA (chameleon/tokenizer + chameleon/starting_point) and Lumina-mGPT tokenizer files.
+  # Disable with false or env ILSTUDIO_RYNN_NO_AUTO_DOWNLOAD=1 / HF_HUB_OFFLINE=1.
+  auto_download_ckpts: true
+
+  # Training precision
+  pytorch_training_precision: bfloat16
+
+trainer_class: Trainer
+data_processor: get_data_processor
+data_collator: get_data_collator

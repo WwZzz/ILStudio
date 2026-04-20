@@ -2,22 +2,36 @@
 
 FastWAM (Fast World-Action Model) integrates a WAN 2.2 video diffusion backbone with an action expert via Mixture-of-Transformers (MoT) for joint video-action generation.
 
-## Installation
+## Upstream dependency (git submodule)
 
-FastWAM lives in the `FastWAM/` directory at the project root and must be installed as a dependency:
+Like `policy/openpi/openpi`, the upstream library lives **inside this policy folder**:
+
+- **Path:** `policy/fastwam/FastWAM`
+- **Registered in:** `.gitmodules` → `https://github.com/yuantianyuan01/FastWAM.git`
+
+After cloning ILStudio, fetch the submodule and install into your ILStudio venv:
 
 ```bash
-cd FastWAM
-uv venv
-source .venv/bin/activate
+git submodule update --init --recursive
+pip install -e policy/fastwam/FastWAM
+```
+
+Alternatively, use `uv` inside the submodule (see upstream `FastWAM/README.md`):
+
+```bash
+git submodule update --init --recursive
+cd policy/fastwam/FastWAM
 uv sync
 ```
 
-Alternatively, install directly into the ILStudio environment:
+If you still have a legacy copy at the **ILStudio repository root** (`./FastWAM`) and cannot reach GitHub yet, you can point the expected submodule path at it (symlink; do not commit):
 
 ```bash
-pip install -e FastWAM/
+# from ILStudio repo root:
+ln -sfn FastWAM policy/fastwam/FastWAM
 ```
+
+After `git submodule update` succeeds, remove the symlink and let Git check out the real submodule there.
 
 ## WAN Weight Download
 
@@ -26,10 +40,12 @@ WAN backbone weights are downloaded **automatically** on first use. Control the 
 - `huggingface` (default) -- downloads from Hugging Face Hub
 - `modelscope` -- downloads from ModelScope
 
-Override the local cache directory:
+**Storage location:** weights are stored under **`$HF_HOME/fastwam_wan_models/<model_id>/`** (not `./checkpoints` in the project directory). `HF_HOME` follows Hugging Face conventions (defaults to `~/.cache/huggingface`).
+
+Override the root directory if needed:
 
 ```bash
-export DIFFSYNTH_MODEL_BASE_PATH=/path/to/checkpoints
+export DIFFSYNTH_MODEL_BASE_PATH=/path/to/your/cache
 ```
 
 ## Attention Modes

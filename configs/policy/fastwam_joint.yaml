@@ -1,24 +1,37 @@
 type: policy.fastwam
 name: fastwam_joint
+config_class: FastWAMPolicyConfig
+model_class: FastWAMPolicy
 args:
-  # --- Attention mode: joint (action attends to all video tokens) ---
+  # --- Attention mode ---
+  # "joint": action attends to all video tokens (fastwam_joint.py); requires action_conditioned: false
   attention_mode: joint
 
   # --- WAN backbone (auto-downloaded on first use) ---
   model_id: Wan-AI/Wan2.2-TI2V-5B
   tokenizer_model_id: Wan-AI/Wan2.1-T2V-1.3B
   tokenizer_max_len: 128
-  load_text_encoder: true
+  load_text_encoder: true           # required to encode raw_lang prompts
   redirect_common_files: true
   download_source: huggingface      # "huggingface" or "modelscope"
 
   # --- Proprio ---
-  proprio_dim: null
+  proprio_dim: null                 # set to state_dim if using proprio
+
+  # --- Inference I/O (must match training task when loading a checkpoint without full task merge) ---
+  # Eval with ``-t <task>`` normally fills these via ConfigLoader; set here for checkpoint-only deploy.
+  action_dim: 14
+  state_dim: 14
+  chunk_size: 16
+  image_size: [224, 224]
+  num_views: 1
+  # horizon: 17   # video / WM: set to match training temporal length (default in code is 1)
 
   # --- MoT / DiT checkpoints ---
   mot_checkpoint_mixed_attn: true
-  action_dit_pretrained_path: null
+  action_dit_pretrained_path: null  # path to preprocessed ActionDiT backbone
   skip_dit_load_from_pretrain: false
+  # inference_mode: set True only by load_model when eval/deploy (skip ActionDiT pretrain load)
 
   # --- Video DiT config ---
   video_dit_config:
@@ -40,10 +53,12 @@ args:
     fuse_vae_embedding_in_latents: true
     use_gradient_checkpointing: true
     video_attention_mask_mode: first_frame_causal
-    action_conditioned: false       # required false for joint mode
+    action_conditioned: false       # required false for joint (FastWAMJoint)
+    # action_dim: auto-set from task config
 
   # --- Action DiT config ---
   action_dit_config:
+    # action_dim: auto-set from task config
     hidden_dim: 1024
     ffn_dim: 4096
     num_heads: 24
@@ -71,9 +86,8 @@ args:
     lambda_action: 1.0
 
   # --- Inference settings ---
-  generate_video: false
-  action_horizon: null
-  num_video_frames: 17              # required for joint infer_action
+  generate_video: false             # set true to also generate video during inference
+  num_video_frames: 17              # required for joint infer_joint / infer_action
   num_inference_steps: 20
   sigma_shift: null
   seed: null

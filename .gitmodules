@@ -22,3 +22,12 @@
 [submodule "benchmark/bigym/bigym"]
 	path = benchmark/bigym/bigym
 	url = https://github.com/NeuracoreAI/bigym
+[submodule "policy/fastwam/FastWAM"]
+	path = policy/fastwam/FastWAM
+	url = https://github.com/yuantianyuan01/FastWAM.git
+[submodule "policy/dreamzero/dreamzero"]
+	path = policy/dreamzero/dreamzero
+	url = https://github.com/dreamzero0/dreamzero.git
+[submodule "policy/rynnvla002/RynnVLA-002"]
+	path = policy/rynnvla002/RynnVLA-002
+	url = https://github.com/alibaba-damo-academy/RynnVLA-002.git

@@ -1,4 +1,7 @@
-# sim_transfer_cube_scripted – Video (world-model) variant for FastWAM
+# sim_transfer_cube_scripted – Video (world-model) variant with minmax normalization
+#
+# Same as sim_transfer_cube_scripted_wm.yaml, but action/state use minmax → [-1, 1],
+# which matches DreamZero / WANPolicyHead expectations (actions in [-1, 1]).
 #
 # Robot:   Bimanual ALOHA (2x Viper-X 300 6DOF)
 # Control: joint (14-dim absolute joint positions)
@@ -31,5 +34,5 @@ datasets:
 meta:
   action_dim: 14
   state_dim: 14
-  action_normalize: zscore
-  state_normalize: zscore
+  action_normalize: minmax
+  state_normalize: minmax

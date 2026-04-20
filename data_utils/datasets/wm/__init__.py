@@ -7,9 +7,16 @@ but reading consecutive frames at the I/O level.
 
 Sample image format:  (T * num_views, C, H, W)  uint8
 Video metadata:       reasoning["video"] = { num_views, horizon, is_pad, freq }
+
+Use :func:`convert_image_to_video` / :func:`flat_image_to_video_btchw` to recover
+``(T, K, C, H, W)`` or ``(B, T, C, H, W)`` without reimplementing layout math.
 """
 
-from .video_meta import build_video_meta
+from .video_meta import (
+    build_video_meta,
+    convert_image_to_video,
+    flat_image_to_video_btchw,
+)
 from .hdf5 import HDF5VideoDataset
 from .libero import LiberoVideoDataset
 from .aloha_sim import AlohaSimVideoDataset
@@ -25,4 +32,6 @@ __all__ = [
     "LeRobotV20VideoDataset",
     "LeRobotVideoDataset",
     "build_video_meta",
+    "flat_image_to_video_btchw",
+    "convert_image_to_video",
 ]

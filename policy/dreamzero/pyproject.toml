@@ -1,0 +1,22 @@
+[project]
+name = "ilstd-dreamzero"
+version = "0.1.0"
+description = "DreamZero world-model VLA policy for ILStudio"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "einops",
+    "peft",
+    "safetensors",
+    "huggingface_hub",
+    "dm-tree",
+    "decord",
+    "loguru",
+    "tianshou==0.2.0",
+]
+
+[tool.uv]
+default-groups = []

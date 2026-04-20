@@ -26,7 +26,10 @@ class Trainer(BaseTrainer):
         if self.state.global_step % max(int(self.args.logging_steps), 1) == 0:
             logger.info(
                 f"step={self.state.global_step}  "
-                + "  ".join(f"{k}={v:.5f}" for k, v in loss_dict.items())
+                + "  ".join(
+                    f"{k}={(v.detach().mean().item() if isinstance(v, torch.Tensor) else float(v)):.5f}"
+                    for k, v in loss_dict.items()
+                )
             )
         if return_outputs:
             return loss, loss_dict
@@ -67,7 +70,8 @@ class Trainer(BaseTrainer):
         """Save FastWAM checkpoint in its native format (MoT + proprio_encoder).
 
         HF Trainer calls this at every ``save_steps`` and at the end of training.
-        We bypass ``save_pretrained`` because FastWAM is not an HF PreTrainedModel.
+        Weights use FastWAM's native ``.pt`` format; :class:`~policy.fastwam.modeling.FastWAMPolicyConfig`
+        is saved as ``config.json`` for ILStudio / ``direct_loader`` reload (``action_dim``, etc.).
         """
         if output_dir is None:
             output_dir = self.args.output_dir
@@ -76,6 +80,9 @@ class Trainer(BaseTrainer):
         inner = self.model
         while hasattr(inner, "module"):
             inner = inner.module
+
+        if hasattr(inner, "config") and inner.config is not None:
+            inner.config.save_pretrained(output_dir)
 
         ckpt_path = os.path.join(output_dir, "fastwam_checkpoint.pt")
         if hasattr(inner, "save_checkpoint"):

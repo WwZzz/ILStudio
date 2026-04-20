@@ -1,5 +1,7 @@
 type: policy.fastwam
 name: fastwam
+config_class: FastWAMPolicyConfig
+model_class: FastWAMPolicy
 args:
   # --- Attention mode ---
   # "original": action attends only to first-frame video tokens (fastwam.py)
@@ -18,10 +20,20 @@ args:
   # --- Proprio ---
   proprio_dim: null                 # set to state_dim if using proprio
 
+  # --- Inference I/O (must match training task when loading a checkpoint without full task merge) ---
+  # Eval with ``-t <task>`` normally fills these via ConfigLoader; set here for checkpoint-only deploy.
+  action_dim: 14
+  state_dim: 14
+  chunk_size: 16
+  image_size: [224,224]
+  num_views: 1
+  # horizon: 17   # video / WM: set to match training temporal length (default in code is 1)
+
   # --- MoT / DiT checkpoints ---
   mot_checkpoint_mixed_attn: true
   action_dit_pretrained_path: null  # path to preprocessed ActionDiT backbone
   skip_dit_load_from_pretrain: false
+  # inference_mode: set True only by load_model when eval/deploy (skip ActionDiT pretrain load)
 
   # --- Video DiT config ---
   video_dit_config:
@@ -77,7 +89,6 @@ args:
 
   # --- Inference settings ---
   generate_video: false             # set true to also generate video during inference
-  action_horizon: null              # auto-derived from task chunk_size when null
   num_video_frames: 17
   num_inference_steps: 20
   sigma_shift: null

@@ -1,0 +1,57 @@
+type: policy.dreamzero
+name: dreamzero
+args:
+  # Action / state dimensions (override per-task)
+  action_dim: 7
+  state_dim: 8
+  action_horizon: 24
+  num_video_frames: 33
+  max_action_dim: 64
+  max_state_dim: 64
+  state_horizon: 8
+
+  # Diffusion inference
+  num_inference_steps: 10
+  cfg_scale: 5.0
+
+  # Architecture
+  lora_rank: 4
+  lora_alpha: 4
+  train_architecture: lora
+  skip_component_loading: false
+  use_gradient_checkpointing: true
+  compute_dtype: bfloat16
+
+  # WAN backbone paths (auto-downloaded from HF if empty)
+  wan_model_path: ""
+  vae_path: ""
+  text_encoder_path: ""
+  image_encoder_path: ""
+
+  # Tokenizer for text conditioning
+  tokenizer_path: google/umt5-xxl
+  max_text_len: 512
+
+  # Multi-embodiment
+  embodiment_tag_mapping: {}
+  embodiment_id: 0
+  num_views: 2
+  view_layout: side_by_side
+  language_prefix: ""
+
+  # Video / tiling
+  image_size:
+    - 256
+    - 256
+  tiled: true
+  tile_size_height: 34
+  tile_size_width: 34
+
+  # Noise schedule
+  decouple_video_action_noise: false
+  use_high_noise_emphasis: false
+
+  # Training precision
+  pytorch_training_precision: bfloat16
+
+trainer_class: Trainer

@@ -98,13 +98,17 @@ def main(args):
     all_ckpts = [os.path.join(training_args.output_dir, ckpt_name) for ckpt_name in os.listdir(training_args.output_dir) if ckpt_name.startswith('checkpoint-') and os.path.isdir(os.path.join(training_args.output_dir, ckpt_name))]
     if len(all_ckpts)==0: training_args.resume_from_checkpoint = None
     
-    # Save policy metadata to output dir
-    metadata_path = os.path.join(training_args.output_dir, 'policy_metadata.json')
-    with open(metadata_path, 'w') as f:
-        json.dump({
-                'policy_module': policy_config['module_path'],
-                'policy_name': policy_config['name'],
-            }, f, indent=2)
+    # Save policy metadata to output dir (policy id only; dims/I/O live in policy YAML / task)
+    metadata_path = os.path.join(training_args.output_dir, "policy_metadata.json")
+    with open(metadata_path, "w") as f:
+        json.dump(
+            {
+                "policy_module": policy_config["module_path"],
+                "policy_name": policy_config["name"],
+            },
+            f,
+            indent=2,
+        )
     
     # Load model 
     logger.info(f"Loading policy config: {config_paths['policy']}")
