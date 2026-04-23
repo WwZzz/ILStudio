@@ -25,6 +25,11 @@ Tabletop-Sim 官方提供 **LeRobot v3.0** 格式数据集（也提供 RLDS / HD
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
+hf download --repo-type dataset jellyho/aloha_dish_drainer
+hf download --repo-type dataset jellyho/aloha_handover_box
+hf download --repo-type dataset jellyho/aloha_shoes_table
+hf download --repo-type dataset jellyho/aloha_lift_box
+hf download --repo-type dataset jellyho/aloha_box_into_pot_easy
 ```
 
 ## 3. 观测 / 动作格式
@@ -43,7 +48,7 @@ cd /home/xudawei/ILStudio
 source .venv/bin/activate
 MUJOCO_GL=egl python eval_sim.py \
   -m __dummy-14random \
-  -e tabletop_sim/dish_drainer \
+  -e tabletop_sim.dish_drainer \
   --batch_size 0 \
   --num_rollout 1 \
   -o results/tabletop_sim_dummy
