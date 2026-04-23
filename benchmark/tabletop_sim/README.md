@@ -58,10 +58,10 @@ MUJOCO_GL=egl python eval_sim.py \
 
 ```bash
 # ==== Train ====
-MUJOCO_GL=egl python train.py -p act_tabletop_sim -t tabletop_sim.dish_drainer -c act -o results/act_tabletop_dish_drainer
+MUJOCO_GL=egl python train.py -p act_tabletop_sim -t tabletop_sim.dish_drainer -c act -o ckpt/act_tabletop_dish_drainer
 
 # ==== Evaluate ====
-MUJOCO_GL=egl python eval_sim.py -m results/act_tabletop_dish_drainer -e tabletop_sim.dish_drainer --batch_size 0 --num_rollout 20
+MUJOCO_GL=egl python eval_sim.py -m ckpt/act_tabletop_dish_drainer/checkpoint-10000 -e tabletop_sim.dish_drainer -o results/test_ --batch_size 0 --num_rollout 20
 ```
 
 `--batch_size 0` 使用 `SequentialVectorEnv`，避开 MuJoCo / EGL 下多进程可能出现的上下文问题，与 `benchmark/robotwin` 做法一致。如果机器对并行 EGL 友好，可尝试 `--batch_size 2`（或更大）。
