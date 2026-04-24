@@ -20,6 +20,7 @@ from .rlbench_dataset import RLBenchDataset
 # LeRobot standalone wrappers (no lerobot dependency)
 from .lerobotv20_wrapper import WrappedLerobotV20Dataset
 from .lerobotv21_wrapper import WrappedLerobotV21Dataset
+from .lerobotv30_wrapper import WrappedLerobotV30Dataset
 
 __all__ = [
     'EpisodicDataset',
@@ -34,4 +35,5 @@ __all__ = [
     # LeRobot standalone wrappers
     "WrappedLerobotV20Dataset",
     "WrappedLerobotV21Dataset",
+    "WrappedLerobotV30Dataset",
 ]

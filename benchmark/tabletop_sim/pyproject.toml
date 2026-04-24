@@ -1,0 +1,30 @@
+[project]
+name = "ilstd-tabletop-sim"
+version = "0.1.0"
+description = "Tabletop-Sim (bimanual ALOHA dm_control) integration for ILStudio"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+
+# NOTE: 为了最大程度复用 ILStudio 主仓的 `.venv`，本模块默认不建立单独的 uv
+# 环境——主 .venv 里的依赖（升级到 mujoco==3.2.0 / dm_control==1.0.21 之后）
+# 即可同时运行 Tabletop-Sim 与其它 dm_control 任务。
+# 只有当需要把 Tabletop-Sim 与其它不兼容的依赖隔离时，才需要
+# 在本目录执行 `uv venv && uv sync`。
+dependencies = [
+    "mujoco==3.2.0",
+    "dm_control==1.0.21",
+    "numpy<2",
+    "opencv-python",
+    "einops",
+    "packaging",
+    "pyyaml",
+    "pexpect",
+    "h5py",
+    "matplotlib",
+    "scipy",
+    "tianshou==0.2.0",
+    "loguru",
+]
+
+[tool.uv]
+default-groups = []
