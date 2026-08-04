@@ -38,9 +38,12 @@ from torch.utils.data._utils.collate import default_collate
 
 CACHE_FORMAT_VERSION = 1
 DEFAULT_CACHE_FORMAT = "npy"
+DEFAULT_CACHE_LEVEL = "collator"
 SUPPORTED_CACHE_FORMATS = {"npy", "hdf5"}
+SUPPORTED_CACHE_LEVELS = {"collator", "processor"}
 DEFAULT_MAX_OPEN_SHARDS = 16
 _CACHE_CONFIG_KEYS = {
+    "level",
     "root",
     "policy_name",
     "format",
@@ -688,10 +691,16 @@ class _CacheBuildCollator:
         processor: Any,
         collator: Any,
         image_storage: Optional[Mapping[str, Any]],
+        cache_level: str,
     ):
         self.processor = processor
         self.collator = collator
         self.image_storage = image_storage
+        self.cache_level = cache_level
+        if cache_level not in SUPPORTED_CACHE_LEVELS:
+            raise ValueError(
+                f"Unsupported task cache level: {cache_level!r}"
+            )
 
     def __call__(self, indexed_samples: Sequence[tuple[int, Any]]) -> tuple[int, str, Any]:
         if len(indexed_samples) != 1:
@@ -701,13 +710,16 @@ class _CacheBuildCollator:
             )
         index, sample = indexed_samples[0]
         processed = self.processor(sample) if self.processor is not None else sample
-        batch = (
-            self.collator([processed])
-            if self.collator is not None
-            else default_collate([processed])
-        )
-        batch = _to_cpu(_encode_image_storage(batch, self.image_storage))
-        return int(index), _episode_id(sample, fallback=index), batch
+        if self.cache_level == "processor":
+            payload = processed
+        else:
+            payload = (
+                self.collator([processed])
+                if self.collator is not None
+                else default_collate([processed])
+            )
+        payload = _to_cpu(_encode_image_storage(payload, self.image_storage))
+        return int(index), _episode_id(sample, fallback=index), payload
 
 
 def _iter_cache_records(
@@ -717,6 +729,7 @@ def _iter_cache_records(
     image_storage: Optional[Mapping[str, Any]],
     num_workers: int,
     prefetch_factor: int,
+    cache_level: str = DEFAULT_CACHE_LEVEL,
 ) -> Iterator[tuple[int, str, Any]]:
     """Yield processed records in source order using a non-shuffling DataLoader."""
     if not hasattr(dataset, "__len__") or not hasattr(dataset, "__getitem__"):
@@ -725,7 +738,9 @@ def _iter_cache_records(
                 "Task-cache source is not map-style; falling back to a sequential "
                 "iterator because parallel workers cannot partition it safely"
             )
-        build_collator = _CacheBuildCollator(processor, collator, image_storage)
+        build_collator = _CacheBuildCollator(
+            processor, collator, image_storage, cache_level
+        )
         for index, sample in enumerate(iter(dataset)):
             yield build_collator([(index, sample)])
         return
@@ -735,7 +750,9 @@ def _iter_cache_records(
         "batch_size": 1,
         "shuffle": False,
         "num_workers": num_workers,
-        "collate_fn": _CacheBuildCollator(processor, collator, image_storage),
+        "collate_fn": _CacheBuildCollator(
+            processor, collator, image_storage, cache_level
+        ),
         "drop_last": False,
         "pin_memory": False,
     }
@@ -745,7 +762,7 @@ def _iter_cache_records(
         # process cleanup and provide no next-epoch benefit.
         loader_kwargs["persistent_workers"] = False
     logger.info(
-        "Building task cache with DataLoader(shuffle=False, batch_size=1, "
+        f"Building {cache_level}-level task cache with DataLoader(shuffle=False, batch_size=1, "
         f"num_workers={num_workers}, prefetch_factor="
         f"{prefetch_factor if num_workers else None})"
     )
@@ -835,6 +852,7 @@ def _build_hdf5_cache(
     image_storage: Optional[Mapping[str, Any]] = None,
     num_workers: int = 0,
     prefetch_factor: int = 2,
+    cache_level: str = DEFAULT_CACHE_LEVEL,
 ) -> Dict[str, Any]:
     descriptor.cache_dir.mkdir(parents=True, exist_ok=True)
     temporary = descriptor.cache_file.with_name(
@@ -850,16 +868,17 @@ def _build_hdf5_cache(
             h5_file.attrs["format_version"] = CACHE_FORMAT_VERSION
             h5_file.attrs["complete"] = False
             writer = _PayloadWriter(h5_file)
-            for index, episode_id, batch in _iter_cache_records(
+            for index, episode_id, payload in _iter_cache_records(
                 dataset,
                 processor,
                 collator,
                 image_storage,
                 num_workers,
                 prefetch_factor,
+                cache_level,
             ):
                 episode_ids.append(episode_id)
-                writer.append(batch, episode_id)
+                writer.append(payload, episode_id)
                 if (index + 1) % 1000 == 0:
                     logger.info(
                         f"Task cache '{descriptor.name}': processed {index + 1:,} samples"
@@ -882,6 +901,7 @@ def _build_hdf5_cache(
         **common_manifest,
         "format_version": CACHE_FORMAT_VERSION,
         "cache_format": "hdf5",
+        "cache_level": cache_level,
         "complete": True,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "dataset": {
@@ -921,6 +941,7 @@ def _build_npy_cache(
     image_storage: Optional[Mapping[str, Any]] = None,
     num_workers: int = 0,
     prefetch_factor: int = 2,
+    cache_level: str = DEFAULT_CACHE_LEVEL,
 ) -> Dict[str, Any]:
     """Build mmap-friendly payload and offset ``.npy`` shard pairs.
 
@@ -979,13 +1000,14 @@ def _build_npy_cache(
         raw_stream = raw_path.open("wb")
 
     try:
-        for index, episode_id, batch in _iter_cache_records(
+        for index, episode_id, payload in _iter_cache_records(
             dataset,
             processor,
             collator,
             image_storage,
             num_workers,
             prefetch_factor,
+            cache_level,
         ):
             if (
                 record_count
@@ -994,7 +1016,7 @@ def _build_npy_cache(
                 and episode_id != previous_episode
             ):
                 flush_shard()
-            record = pickle.dumps(batch, protocol=pickle.HIGHEST_PROTOCOL)
+            record = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
             raw_stream.write(record)
             record_bytes += len(record)
             record_count += 1
@@ -1016,6 +1038,7 @@ def _build_npy_cache(
         **common_manifest,
         "format_version": CACHE_FORMAT_VERSION,
         "cache_format": "npy",
+        "cache_level": cache_level,
         "complete": True,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "dataset": {
@@ -1058,6 +1081,7 @@ def _build_cache(
     image_storage: Optional[Mapping[str, Any]] = None,
     num_workers: int = 0,
     prefetch_factor: int = 2,
+    cache_level: str = DEFAULT_CACHE_LEVEL,
 ) -> Dict[str, Any]:
     if cache_format == "npy":
         return _build_npy_cache(
@@ -1070,11 +1094,12 @@ def _build_cache(
             image_storage,
             num_workers,
             prefetch_factor,
+            cache_level,
         )
     if cache_format == "hdf5":
         return _build_hdf5_cache(
             dataset, processor, collator, descriptor, common_manifest, image_storage,
-            num_workers, prefetch_factor
+            num_workers, prefetch_factor, cache_level
         )
     raise ValueError(f"Unsupported task cache format: {cache_format}")
 
@@ -1122,6 +1147,7 @@ class CacheDataset(Dataset):
             raise RuntimeError(f"Incomplete task cache manifest: {self.manifest_file}")
         self.name = self.manifest["dataset"]["name"]
         self.dataset_id = self.name
+        self.cache_level = self.manifest.get("cache_level", DEFAULT_CACHE_LEVEL)
         self.episode_runs = self.manifest.get("episode_runs", [])
         self.collation_spec = self.manifest.get("collation_spec", {})
         self.image_storage = self.manifest.get("image_storage")
@@ -1236,6 +1262,22 @@ class CacheDataset(Dataset):
     def __del__(self):
         with contextlib.suppress(Exception):
             self.close()
+
+
+class CacheBeforeCollatorDataset(CacheDataset):
+    """Load processor-level records for the original policy collator."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.cache_level != "processor":
+            raise ValueError(
+                "CacheBeforeCollatorDataset requires a processor-level cache, "
+                f"got {self.cache_level!r}"
+            )
+
+    def __getitem__(self, index: int) -> Any:
+        payload = super().__getitem__(index)
+        return _decode_image_storage(payload, self.image_storage)
 
 
 def _padding_value(path: Sequence[str], dtype: Any, spec: Mapping[str, Any]) -> Any:
@@ -1360,6 +1402,13 @@ class CacheCollator:
 
     @classmethod
     def from_datasets(cls, datasets: Sequence[CacheDataset]) -> "CacheCollator":
+        invalid_levels = sorted(
+            {dataset.cache_level for dataset in datasets if dataset.cache_level != "collator"}
+        )
+        if invalid_levels:
+            raise ValueError(
+                f"CacheCollator requires collator-level caches, got {invalid_levels}"
+            )
         specs = [dataset.collation_spec for dataset in datasets if dataset.collation_spec]
         if specs and any(spec != specs[0] for spec in specs[1:]):
             raise ValueError("Task cache datasets were built with incompatible collation specs")
@@ -1396,6 +1445,14 @@ class TaskCacheManager:
         self.cache_config = get_task_cache_config(task_config, required=True)
         assert self.cache_config is not None
         self.cache_root = resolve_cache_root(task_config)
+        self.cache_level = str(
+            self.cache_config.get("level", DEFAULT_CACHE_LEVEL)
+        ).lower()
+        if self.cache_level not in SUPPORTED_CACHE_LEVELS:
+            raise ValueError(
+                f"cache.level must be one of {sorted(SUPPORTED_CACHE_LEVELS)}, "
+                f"got {self.cache_level!r}"
+            )
         self.cache_format = str(
             self.cache_config.get("format", DEFAULT_CACHE_FORMAT)
         ).lower()
@@ -1447,10 +1504,13 @@ class TaskCacheManager:
             )
         self.policy_dir = self.cache_root / self.policy_key
         self.pipeline_signature = {
-            "processor": _object_signature(processor),
-            "collator": _object_signature(collator),
+            "processor": _object_signature(processor)
         }
-        self.collation_spec = infer_collation_spec(collator)
+        if self.cache_level == "collator":
+            self.pipeline_signature["collator"] = _object_signature(collator)
+            self.collation_spec = infer_collation_spec(collator)
+        else:
+            self.collation_spec = {}
         self.task_pipeline = {
             key: copy.deepcopy(task_config[key])
             for key in _TASK_PIPELINE_KEYS
@@ -1481,17 +1541,20 @@ class TaskCacheManager:
         for index, (kind, config) in enumerate(configs):
             name = _dataset_name(config, index, kind)
             config_hash = _stable_hash(config)
-            dataset_hash = _stable_hash(
-                {
-                    "config": config,
-                    "task_pipeline": self.task_pipeline,
-                    "effective_pipeline_args": self.effective_pipeline_args,
-                    "pipeline_signature": self.pipeline_signature,
-                    "cache_format": self.cache_format,
-                    "cache_shard_size_mb": self.shard_size_bytes // (1024 * 1024),
-                    "image_storage": self.image_storage,
-                }
-            )
+            cache_identity = {
+                "config": config,
+                "task_pipeline": self.task_pipeline,
+                "effective_pipeline_args": self.effective_pipeline_args,
+                "pipeline_signature": self.pipeline_signature,
+                "cache_format": self.cache_format,
+                "cache_shard_size_mb": self.shard_size_bytes // (1024 * 1024),
+                "image_storage": self.image_storage,
+            }
+            # Preserve existing collator-level cache hashes. Processor-level
+            # records have different semantics and must use a distinct identity.
+            if self.cache_level != DEFAULT_CACHE_LEVEL:
+                cache_identity["cache_level"] = self.cache_level
+            dataset_hash = _stable_hash(cache_identity)
             directory = (
                 self.policy_dir
                 / "datasets"
@@ -1522,6 +1585,7 @@ class TaskCacheManager:
                 "configured_name": self.configured_policy_name,
                 "cache_key": self.policy_key,
             },
+            "cache_level": self.cache_level,
             "pipeline_signature": self.pipeline_signature,
             "collation_spec": self.collation_spec,
             "task_pipeline": self.task_pipeline,
@@ -1547,6 +1611,7 @@ class TaskCacheManager:
                 or not manifest.get("complete")
                 or manifest.get("policy_key") != self.policy_key
                 or manifest.get("task_hash") != self.task_hash
+                or manifest.get("cache_level", DEFAULT_CACHE_LEVEL) != self.cache_level
                 or [item.get("dataset_hash") for item in manifest.get("datasets", [])]
                 != [descriptor.dataset_hash for descriptor in self.descriptors]
             ):
@@ -1568,6 +1633,7 @@ class TaskCacheManager:
                 or manifest.get("dataset", {}).get("dataset_hash") != descriptor.dataset_hash
                 or manifest.get("policy", {}).get("cache_key") != self.policy_key
                 or manifest.get("cache_format", "hdf5") != self.cache_format
+                or manifest.get("cache_level", DEFAULT_CACHE_LEVEL) != self.cache_level
             ):
                 return False
             if self.cache_format == "npy":
@@ -1594,6 +1660,11 @@ class TaskCacheManager:
         return [descriptor for descriptor in self.descriptors if not self._is_valid(descriptor)]
 
     def ensure(self) -> List[CacheDataset]:
+        dataset_class = (
+            CacheBeforeCollatorDataset
+            if self.cache_level == "processor"
+            else CacheDataset
+        )
         self.task_dir.mkdir(parents=True, exist_ok=True)
         with _FileLock(self.lock_file):
             missing = self.missing()
@@ -1609,7 +1680,7 @@ class TaskCacheManager:
             else:
                 logger.info(f"Task cache hit: {self.task_dir}")
         return [
-            CacheDataset(
+            dataset_class(
                 descriptor.cache_file,
                 descriptor.manifest_file,
                 local_cache_dir=self.local_cache_dir,
@@ -1660,6 +1731,7 @@ class TaskCacheManager:
                     image_storage=self.image_storage,
                     num_workers=self.num_workers,
                     prefetch_factor=self.prefetch_factor,
+                    cache_level=self.cache_level,
                 )
 
         task_manifest = {
@@ -1668,6 +1740,7 @@ class TaskCacheManager:
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "policy_key": self.policy_key,
             "task_hash": self.task_hash,
+            "cache_level": self.cache_level,
             "datasets": [
                 {
                     "name": descriptor.name,
@@ -1714,10 +1787,12 @@ def load_task_cache(
     processor: Any,
     collator: Any,
     output_dir: Optional[os.PathLike[str] | str] = None,
-) -> tuple[Dict[str, Any], CacheCollator, TaskCacheManager]:
-    """Build missing caches, then return cached train/eval splits and collator."""
+) -> tuple[Dict[str, Any], Any, TaskCacheManager]:
+    """Build missing caches, then return cached splits and the correct collator."""
     manager = TaskCacheManager(args, task_config, policy_config, processor, collator)
     data = manager.load_data(output_dir=output_dir)
+    if manager.cache_level == "processor":
+        return data, collator, manager
     cache_datasets: List[CacheDataset] = []
     for split in (data.get("train"), data.get("eval")):
         if isinstance(split, CacheDataset):
@@ -1734,7 +1809,9 @@ def load_task_cache(
 
 __all__ = [
     "CACHE_FORMAT_VERSION",
+    "DEFAULT_CACHE_LEVEL",
     "DEFAULT_MAX_OPEN_SHARDS",
+    "CacheBeforeCollatorDataset",
     "CacheCollator",
     "CacheDataset",
     "TaskCacheManager",

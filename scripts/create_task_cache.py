@@ -42,7 +42,8 @@ def main(args):
     )
     datasets = manager.ensure()
     logger.info(
-        f"Task cache ready: {len(datasets)} datasets, format={manager.cache_format}, "
+        f"Task cache ready: {len(datasets)} datasets, level={manager.cache_level}, "
+        f"format={manager.cache_format}, "
         f"path={manager.task_dir}"
     )
 

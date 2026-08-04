@@ -118,8 +118,9 @@ def main(args):
         logger.info(f"Loaded config from YAML: {type(config).__name__}") 
     ml_utils.print_model_trainable_information(model)
     
-    # Resolve the policy pipeline before loading data. Task-cache construction
-    # runs this pipeline once; cache hits bypass it entirely in DataLoader workers.
+    # Resolve the policy pipeline before loading data. Cache construction runs
+    # through the configured boundary; cache hits always bypass the processor,
+    # while processor-level caches retain the original policy collator.
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
     if cache_enabled:
@@ -135,7 +136,8 @@ def main(args):
         )
         data_processor = None
         logger.info(
-            f"Using task cache ({cache_manager.cache_format}) from {cache_manager.task_dir}"
+            f"Using {cache_manager.cache_level}-level task cache "
+            f"({cache_manager.cache_format}) from {cache_manager.task_dir}"
         )
     else:
         data_dict = load_data(args, task_config)
