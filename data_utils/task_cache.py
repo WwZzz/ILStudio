@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import bisect
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -20,7 +21,9 @@ import pickle
 import re
 import shutil
 import socket
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence
@@ -36,6 +39,24 @@ from torch.utils.data._utils.collate import default_collate
 CACHE_FORMAT_VERSION = 1
 DEFAULT_CACHE_FORMAT = "npy"
 SUPPORTED_CACHE_FORMATS = {"npy", "hdf5"}
+DEFAULT_MAX_OPEN_SHARDS = 16
+_CACHE_CONFIG_KEYS = {
+    "root",
+    "policy_name",
+    "format",
+    "shard_size_mb",
+    "max_open_shards",
+    "local_dir",
+    "image_storage",
+}
+_LEGACY_CACHE_KEYS = {
+    "enable_cache",
+    "cache_root",
+    "cache_policy_name",
+    "cache_format",
+    "cache_shard_size_mb",
+    "cache_local_dir",
+}
 _HASHED_SOURCE_SUFFIXES = {".py", ".json", ".yaml", ".yml", ".toml"}
 _IGNORED_SOURCE_PARTS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache"}
 _TASK_PIPELINE_KEYS = (
@@ -113,9 +134,41 @@ def _slug(value: str, fallback: str = "cache") -> str:
     return (value or fallback)[:96]
 
 
+def get_task_cache_config(
+    task_config: Mapping[str, Any], *, required: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Return the nested task-cache config; its presence enables caching."""
+    legacy = sorted(key for key in _LEGACY_CACHE_KEYS if key in task_config)
+    if legacy:
+        raise ValueError(
+            "Top-level task-cache keys are no longer supported: "
+            f"{', '.join(legacy)}. Put these settings under task_config.cache."
+        )
+    if "cache" not in task_config or task_config.get("cache") is False:
+        if required:
+            raise ValueError(
+                "Task cache is not enabled. Add a 'cache:' mapping to the task config."
+            )
+        return None
+    configured = task_config.get("cache")
+    if configured is None or configured is True:
+        return {}
+    if not isinstance(configured, Mapping):
+        raise TypeError("task_config.cache must be a mapping, true, false, or null")
+    unknown = sorted(set(configured) - _CACHE_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown task_config.cache settings: {', '.join(unknown)}")
+    return copy.deepcopy(dict(configured))
+
+
+def is_task_cache_enabled(task_config: Mapping[str, Any]) -> bool:
+    return get_task_cache_config(task_config) is not None
+
+
 def resolve_cache_root(task_config: Mapping[str, Any]) -> Path:
-    """Resolve ``cache_root`` or the default ``$HF_HOME/ilstd_cache``."""
-    configured = task_config.get("cache_root")
+    """Resolve ``cache.root`` or the default ``$HF_HOME/ilstd_cache``."""
+    cache_config = get_task_cache_config(task_config) or {}
+    configured = cache_config.get("root")
     if configured:
         root = Path(os.path.expandvars(os.path.expanduser(str(configured))))
     else:
@@ -371,6 +424,212 @@ def _write_uint8_npy_from_raw_atomic(path: Path, raw_path: Path, size: int) -> N
     os.replace(temporary, path)
 
 
+def _normalize_image_storage_config(
+    cache_config: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    configured = cache_config.get("image_storage")
+    if configured in (None, False):
+        return None
+    if not isinstance(configured, Mapping):
+        raise TypeError("task_config.cache.image_storage must be a mapping or false")
+    unknown = sorted(
+        set(configured)
+        - {"dtype", "fields", "value_range", "restore_dtype", "strict_range"}
+    )
+    if unknown:
+        raise ValueError(
+            "Unknown cache.image_storage settings: " + ", ".join(unknown)
+        )
+
+    storage_dtype = str(configured.get("dtype", "uint8")).lower()
+    if storage_dtype != "uint8":
+        raise ValueError("cache.image_storage.dtype currently supports only 'uint8'")
+    fields = configured.get("fields")
+    if isinstance(fields, str):
+        fields = [fields]
+    if not isinstance(fields, Sequence) or not fields or not all(
+        isinstance(field, str) and field for field in fields
+    ):
+        raise ValueError("cache.image_storage.fields must be a non-empty list of paths")
+    value_range = configured.get("value_range")
+    if (
+        not isinstance(value_range, Sequence)
+        or isinstance(value_range, (str, bytes))
+        or len(value_range) != 2
+    ):
+        raise ValueError("cache.image_storage.value_range must contain [minimum, maximum]")
+    minimum, maximum = (float(value_range[0]), float(value_range[1]))
+    if not np.isfinite(minimum) or not np.isfinite(maximum) or minimum >= maximum:
+        raise ValueError("cache.image_storage.value_range must be finite and increasing")
+    restore_dtype = str(configured.get("restore_dtype", "float32")).lower()
+    if restore_dtype not in {"float16", "float32", "float64", "bfloat16"}:
+        raise ValueError(
+            "cache.image_storage.restore_dtype must be float16, float32, float64, or bfloat16"
+        )
+    return {
+        "dtype": storage_dtype,
+        "fields": list(fields),
+        "value_range": [minimum, maximum],
+        "restore_dtype": restore_dtype,
+        "strict_range": bool(configured.get("strict_range", True)),
+    }
+
+
+def _matches_image_storage_field(path: Sequence[str], config: Mapping[str, Any]) -> bool:
+    dotted_path = ".".join(path)
+    return any(fnmatch.fnmatchcase(dotted_path, pattern) for pattern in config["fields"])
+
+
+def _map_image_storage_fields(
+    value: Any,
+    config: Optional[Mapping[str, Any]],
+    transform: Any,
+    path: Sequence[str] = (),
+) -> Any:
+    if not config:
+        return value
+    if isinstance(value, Mapping):
+        return value.__class__(
+            (key, _map_image_storage_fields(item, config, transform, (*path, str(key))))
+            for key, item in value.items()
+        )
+    if isinstance(value, tuple):
+        return tuple(
+            _map_image_storage_fields(item, config, transform, (*path, str(index)))
+            for index, item in enumerate(value)
+        )
+    if isinstance(value, list):
+        return [
+            _map_image_storage_fields(item, config, transform, (*path, str(index)))
+            for index, item in enumerate(value)
+        ]
+    if _matches_image_storage_field(path, config):
+        return transform(value, config, ".".join(path))
+    return value
+
+
+def _validate_image_range(
+    minimum_value: float,
+    maximum_value: float,
+    config: Mapping[str, Any],
+    field_path: str,
+) -> None:
+    if not np.isfinite(minimum_value) or not np.isfinite(maximum_value):
+        raise ValueError(f"Image field {field_path!r} contains non-finite values")
+    if not config.get("strict_range", True):
+        return
+    expected_minimum, expected_maximum = config["value_range"]
+    tolerance = max(1e-5, (expected_maximum - expected_minimum) * 1e-5)
+    if (
+        minimum_value < expected_minimum - tolerance
+        or maximum_value > expected_maximum + tolerance
+    ):
+        raise ValueError(
+            f"Image field {field_path!r} has range [{minimum_value}, {maximum_value}], "
+            f"outside configured cache range [{expected_minimum}, {expected_maximum}]"
+        )
+
+
+def _encode_image_value(value: Any, config: Mapping[str, Any], field_path: str) -> Any:
+    minimum, maximum = config["value_range"]
+    if isinstance(value, torch.Tensor):
+        if not value.is_floating_point():
+            raise TypeError(
+                f"Image field {field_path!r} must be floating point "
+                "before uint8 encoding"
+            )
+        if value.numel():
+            _validate_image_range(
+                float(value.min().item()), float(value.max().item()), config, field_path
+            )
+        normalized = (value - minimum) / (maximum - minimum)
+        return (normalized * 255.0).round().clamp(0, 255).to(torch.uint8)
+    if isinstance(value, np.ndarray):
+        if not np.issubdtype(value.dtype, np.floating):
+            raise TypeError(
+                f"Image field {field_path!r} must be floating point "
+                "before uint8 encoding"
+            )
+        if value.size:
+            _validate_image_range(
+                float(value.min()), float(value.max()), config, field_path
+            )
+        normalized = (value - minimum) / (maximum - minimum)
+        return np.rint(normalized * 255.0).clip(0, 255).astype(np.uint8)
+    raise TypeError(
+        f"Image field {field_path!r} must be a torch.Tensor or numpy.ndarray, got {type(value)}"
+    )
+
+
+def _decode_image_value(value: Any, config: Mapping[str, Any], field_path: str) -> Any:
+    minimum, maximum = config["value_range"]
+    dtype_name = config["restore_dtype"]
+    torch_dtypes = {
+        "float16": torch.float16,
+        "float32": torch.float32,
+        "float64": torch.float64,
+        "bfloat16": torch.bfloat16,
+    }
+    numpy_dtypes = {
+        "float16": np.float16,
+        "float32": np.float32,
+        "float64": np.float64,
+    }
+    if isinstance(value, torch.Tensor):
+        if value.dtype != torch.uint8:
+            raise TypeError(f"Encoded image field {field_path!r} is not uint8")
+        restored = value.to(torch_dtypes[dtype_name]) / 255.0
+        return restored * (maximum - minimum) + minimum
+    if isinstance(value, np.ndarray):
+        if value.dtype != np.uint8:
+            raise TypeError(f"Encoded image field {field_path!r} is not uint8")
+        if dtype_name == "bfloat16":
+            raise ValueError("bfloat16 restoration requires torch.Tensor image fields")
+        restored = value.astype(numpy_dtypes[dtype_name]) / 255.0
+        return restored * (maximum - minimum) + minimum
+    raise TypeError(
+        f"Encoded image field {field_path!r} must be a tensor or array, got {type(value)}"
+    )
+
+
+def _encode_image_storage(value: Any, config: Optional[Mapping[str, Any]]) -> Any:
+    if not config:
+        return value
+    matches = 0
+
+    def encode(item: Any, item_config: Mapping[str, Any], field_path: str) -> Any:
+        nonlocal matches
+        matches += 1
+        return _encode_image_value(item, item_config, field_path)
+
+    encoded = _map_image_storage_fields(value, config, encode)
+    if matches == 0:
+        raise ValueError(
+            "cache.image_storage.fields did not match any collated batch field: "
+            + ", ".join(config["fields"])
+        )
+    return encoded
+
+
+def _decode_image_storage(value: Any, config: Optional[Mapping[str, Any]]) -> Any:
+    if not config:
+        return value
+    matches = 0
+
+    def decode(item: Any, item_config: Mapping[str, Any], field_path: str) -> Any:
+        nonlocal matches
+        matches += 1
+        return _decode_image_value(item, item_config, field_path)
+
+    decoded = _map_image_storage_fields(value, config, decode)
+    if matches == 0:
+        raise ValueError(
+            "Cached image fields are missing from a record: "
+            + ", ".join(config["fields"])
+        )
+    return decoded
+
+
 def _to_cpu(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().contiguous()
@@ -486,6 +745,7 @@ def _build_hdf5_cache(
     collator: Any,
     descriptor: CacheDescriptor,
     common_manifest: Mapping[str, Any],
+    image_storage: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     descriptor.cache_dir.mkdir(parents=True, exist_ok=True)
     temporary = descriptor.cache_file.with_name(
@@ -506,6 +766,7 @@ def _build_hdf5_cache(
                 episode_ids.append(episode_id)
                 processed = processor(sample) if processor is not None else sample
                 batch = collator([processed]) if collator is not None else default_collate([processed])
+                batch = _encode_image_storage(batch, image_storage)
                 writer.append(batch, episode_id)
                 if (index + 1) % 1000 == 0:
                     logger.info(
@@ -559,6 +820,7 @@ def _build_npy_cache(
     descriptor: CacheDescriptor,
     common_manifest: Mapping[str, Any],
     shard_size_bytes: int,
+    image_storage: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build mmap-friendly payload and offset ``.npy`` shard pairs.
 
@@ -628,6 +890,7 @@ def _build_npy_cache(
                 flush_shard()
             processed = processor(sample) if processor is not None else sample
             batch = collator([processed]) if collator is not None else default_collate([processed])
+            batch = _encode_image_storage(batch, image_storage)
             record = pickle.dumps(_to_cpu(batch), protocol=pickle.HIGHEST_PROTOCOL)
             raw_stream.write(record)
             record_bytes += len(record)
@@ -683,6 +946,7 @@ def _build_cache(
     common_manifest: Mapping[str, Any],
     cache_format: str,
     shard_size_bytes: int,
+    image_storage: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     if cache_format == "npy":
         return _build_npy_cache(
@@ -692,12 +956,38 @@ def _build_cache(
             descriptor,
             common_manifest,
             shard_size_bytes,
+            image_storage,
         )
     if cache_format == "hdf5":
         return _build_hdf5_cache(
-            dataset, processor, collator, descriptor, common_manifest
+            dataset, processor, collator, descriptor, common_manifest, image_storage
         )
     raise ValueError(f"Unsupported task cache format: {cache_format}")
+
+
+_NPY_SHARD_POOL_LOCK = threading.RLock()
+_NPY_SHARD_POOL: "OrderedDict[tuple[str, int], tuple[np.ndarray, np.ndarray]]" = OrderedDict()
+
+
+def _close_memmap(array: np.ndarray) -> None:
+    memory_map = getattr(array, "_mmap", None)
+    if memory_map is not None:
+        with contextlib.suppress(Exception):
+            memory_map.close()
+
+
+def _evict_npy_shards(max_open_shards: int) -> None:
+    while len(_NPY_SHARD_POOL) > max_open_shards:
+        _, (payload, _) = _NPY_SHARD_POOL.popitem(last=False)
+        _close_memmap(payload)
+
+
+def _close_dataset_npy_shards(manifest_file: str) -> None:
+    with _NPY_SHARD_POOL_LOCK:
+        keys = [key for key in _NPY_SHARD_POOL if key[0] == manifest_file]
+        for key in keys:
+            payload, _ = _NPY_SHARD_POOL.pop(key)
+            _close_memmap(payload)
 
 
 class CacheDataset(Dataset):
@@ -708,6 +998,7 @@ class CacheDataset(Dataset):
         cache_file: os.PathLike[str] | str,
         manifest_file: os.PathLike[str] | str,
         local_cache_dir: Optional[os.PathLike[str] | str] = None,
+        max_open_shards: int = DEFAULT_MAX_OPEN_SHARDS,
     ):
         self.cache_file = str(cache_file)
         self.manifest_file = str(manifest_file)
@@ -719,6 +1010,7 @@ class CacheDataset(Dataset):
         self.dataset_id = self.name
         self.episode_runs = self.manifest.get("episode_runs", [])
         self.collation_spec = self.manifest.get("collation_spec", {})
+        self.image_storage = self.manifest.get("image_storage")
         self.cache_format = self.manifest.get("cache_format", "hdf5")
         self._length = int(self.manifest["sample_count"])
         self.shards = self.manifest.get("shards", [])
@@ -727,10 +1019,11 @@ class CacheDataset(Dataset):
         ]
         self._shard_stops = [stop for _, stop in self.shard_ranges]
         self.local_cache_dir = str(local_cache_dir) if local_cache_dir else None
+        self.max_open_shards = int(max_open_shards)
+        if self.max_open_shards <= 0:
+            raise ValueError("max_open_shards must be positive")
         self._h5: Optional[h5py.File] = None
         self._offsets: Optional[np.ndarray] = None
-        self._npy_payloads: Dict[int, np.ndarray] = {}
-        self._npy_offsets: Dict[int, np.ndarray] = {}
 
     def __len__(self) -> int:
         return self._length
@@ -762,18 +1055,39 @@ class CacheDataset(Dataset):
         )
         return destination
 
-    def _ensure_npy_shard(self, shard_index: int) -> tuple[np.ndarray, np.ndarray]:
-        if shard_index in self._npy_payloads:
-            return self._npy_payloads[shard_index], self._npy_offsets[shard_index]
+    def _npy_pool_key(self, shard_index: int) -> tuple[str, int]:
+        return (self.manifest_file, shard_index)
+
+    def _npy_record(self, shard_index: int, local_index: int) -> Any:
+        pool_key = self._npy_pool_key(shard_index)
+        with _NPY_SHARD_POOL_LOCK:
+            cached = _NPY_SHARD_POOL.get(pool_key)
+            if cached is not None:
+                _NPY_SHARD_POOL.move_to_end(pool_key)
+                payload, offsets = cached
+                start = int(offsets[local_index])
+                stop = int(offsets[local_index + 1])
+                return pickle.loads(memoryview(payload[start:stop]))
+
         shard = self.shards[shard_index]
         cache_dir = Path(self.manifest_file).parent
         payload_path = self._stage_file(cache_dir / shard["payload"], shard_index)
         offsets_path = self._stage_file(cache_dir / shard["offsets"], shard_index)
-        payload = np.load(payload_path, mmap_mode="r", allow_pickle=False)
-        offsets = np.load(offsets_path, mmap_mode="r", allow_pickle=False)
-        self._npy_payloads[shard_index] = payload
-        self._npy_offsets[shard_index] = offsets
-        return payload, offsets
+        with _NPY_SHARD_POOL_LOCK:
+            cached = _NPY_SHARD_POOL.get(pool_key)
+            if cached is None:
+                payload = np.load(payload_path, mmap_mode="r", allow_pickle=False)
+                # Offsets are small and frequently accessed. Keeping them in RAM
+                # avoids a second mmap/file descriptor per shard.
+                offsets = np.load(offsets_path, allow_pickle=False)
+                _NPY_SHARD_POOL[pool_key] = (payload, offsets)
+                _evict_npy_shards(self.max_open_shards)
+            else:
+                payload, offsets = cached
+                _NPY_SHARD_POOL.move_to_end(pool_key)
+            start = int(offsets[local_index])
+            stop = int(offsets[local_index + 1])
+            return pickle.loads(memoryview(payload[start:stop]))
 
     def __getitem__(self, index: int) -> Any:
         if index < 0:
@@ -783,11 +1097,8 @@ class CacheDataset(Dataset):
         if self.cache_format == "npy":
             shard_index = bisect.bisect_right(self._shard_stops, index)
             shard = self.shards[shard_index]
-            payload_array, offsets = self._ensure_npy_shard(shard_index)
             local_index = index - int(shard["start"])
-            start = int(offsets[local_index])
-            stop = int(offsets[local_index + 1])
-            return pickle.loads(memoryview(payload_array[start:stop]))
+            return self._npy_record(shard_index, local_index)
         self._ensure_hdf5_open()
         assert self._h5 is not None and self._offsets is not None
         start = int(self._offsets[index])
@@ -800,15 +1111,12 @@ class CacheDataset(Dataset):
             self._h5.close()
         self._h5 = None
         self._offsets = None
-        self._npy_payloads = {}
-        self._npy_offsets = {}
+        _close_dataset_npy_shards(self.manifest_file)
 
     def __getstate__(self):
         state = self.__dict__.copy()
         state["_h5"] = None
         state["_offsets"] = None
-        state["_npy_payloads"] = {}
-        state["_npy_offsets"] = {}
         return state
 
     def __del__(self):
@@ -925,23 +1233,34 @@ def _merge_cached(values: Sequence[Any], path: Sequence[str], spec: Mapping[str,
 class CacheCollator:
     """Merge cached, already-collated single samples into a training batch."""
 
-    def __init__(self, spec: Optional[Mapping[str, Any]] = None):
+    def __init__(
+        self,
+        spec: Optional[Mapping[str, Any]] = None,
+        image_storage: Optional[Mapping[str, Any]] = None,
+    ):
         self.spec = dict(spec or {})
         self.spec.setdefault("padding_side", "right")
         self.spec.setdefault("pad_token_id", 0)
         self.spec.setdefault("label_pad_token_id", -100)
+        self.image_storage = copy.deepcopy(image_storage) if image_storage else None
 
     @classmethod
     def from_datasets(cls, datasets: Sequence[CacheDataset]) -> "CacheCollator":
         specs = [dataset.collation_spec for dataset in datasets if dataset.collation_spec]
         if specs and any(spec != specs[0] for spec in specs[1:]):
             raise ValueError("Task cache datasets were built with incompatible collation specs")
-        return cls(specs[0] if specs else None)
+        image_specs = [dataset.image_storage for dataset in datasets]
+        if image_specs and any(spec != image_specs[0] for spec in image_specs[1:]):
+            raise ValueError("Task cache datasets were built with incompatible image storage specs")
+        return cls(specs[0] if specs else None, image_specs[0] if image_specs else None)
 
     def __call__(self, instances: Sequence[Any]) -> Any:
         if not instances:
             raise ValueError("CacheCollator received an empty batch")
-        return _merge_cached(instances, [], self.spec)
+        decoded = [
+            _decode_image_storage(instance, self.image_storage) for instance in instances
+        ]
+        return _merge_cached(decoded, [], self.spec)
 
 
 class TaskCacheManager:
@@ -960,20 +1279,28 @@ class TaskCacheManager:
         self.policy_config = copy.deepcopy(dict(policy_config))
         self.processor = processor
         self.collator = collator
+        self.cache_config = get_task_cache_config(task_config, required=True)
+        assert self.cache_config is not None
         self.cache_root = resolve_cache_root(task_config)
         self.cache_format = str(
-            task_config.get("cache_format", DEFAULT_CACHE_FORMAT)
+            self.cache_config.get("format", DEFAULT_CACHE_FORMAT)
         ).lower()
         if self.cache_format not in SUPPORTED_CACHE_FORMATS:
             raise ValueError(
-                f"cache_format must be one of {sorted(SUPPORTED_CACHE_FORMATS)}, "
+                f"cache.format must be one of {sorted(SUPPORTED_CACHE_FORMATS)}, "
                 f"got {self.cache_format!r}"
             )
-        shard_size_mb = int(task_config.get("cache_shard_size_mb", 512))
+        shard_size_mb = int(self.cache_config.get("shard_size_mb", 512))
         if shard_size_mb <= 0:
-            raise ValueError("cache_shard_size_mb must be positive")
+            raise ValueError("cache.shard_size_mb must be positive")
         self.shard_size_bytes = shard_size_mb * 1024 * 1024
-        configured_local_dir = task_config.get("cache_local_dir") or os.environ.get(
+        self.max_open_shards = int(
+            self.cache_config.get("max_open_shards", DEFAULT_MAX_OPEN_SHARDS)
+        )
+        if self.max_open_shards <= 0:
+            raise ValueError("cache.max_open_shards must be positive")
+        self.image_storage = _normalize_image_storage_config(self.cache_config)
+        configured_local_dir = self.cache_config.get("local_dir") or os.environ.get(
             "ILSTD_CACHE_LOCAL"
         )
         self.local_cache_dir = (
@@ -985,9 +1312,9 @@ class TaskCacheManager:
             policy_config.get("module_path") or policy_config.get("type") or "unknown_policy"
         )
         self.policy_source_hash = hash_policy_module(self.module_path)
-        self.cache_policy_name = task_config.get("cache_policy_name")
-        if self.cache_policy_name:
-            self.policy_key = _slug(str(self.cache_policy_name), "shared-policy")
+        self.configured_policy_name = self.cache_config.get("policy_name")
+        if self.configured_policy_name:
+            self.policy_key = _slug(str(self.configured_policy_name), "shared-policy")
         else:
             self.policy_key = (
                 f"{_slug(self.module_path, 'policy')}--{self.policy_source_hash[:16]}"
@@ -1036,6 +1363,7 @@ class TaskCacheManager:
                     "pipeline_signature": self.pipeline_signature,
                     "cache_format": self.cache_format,
                     "cache_shard_size_mb": self.shard_size_bytes // (1024 * 1024),
+                    "image_storage": self.image_storage,
                 }
             )
             directory = (
@@ -1065,7 +1393,7 @@ class TaskCacheManager:
             "policy": {
                 "module_path": self.module_path,
                 "source_hash": self.policy_source_hash,
-                "cache_policy_name": self.cache_policy_name,
+                "configured_name": self.configured_policy_name,
                 "cache_key": self.policy_key,
             },
             "pipeline_signature": self.pipeline_signature,
@@ -1073,6 +1401,7 @@ class TaskCacheManager:
             "task_pipeline": self.task_pipeline,
             "effective_pipeline_args": self.effective_pipeline_args,
             "cache_format": self.cache_format,
+            "image_storage": self.image_storage,
         }
 
     def _task_manifest_valid(self) -> bool:
@@ -1152,6 +1481,7 @@ class TaskCacheManager:
                 descriptor.cache_file,
                 descriptor.manifest_file,
                 local_cache_dir=self.local_cache_dir,
+                max_open_shards=self.max_open_shards,
             )
             for descriptor in self.descriptors
         ]
@@ -1195,6 +1525,7 @@ class TaskCacheManager:
                     common_manifest=common_manifest,
                     cache_format=self.cache_format,
                     shard_size_bytes=self.shard_size_bytes,
+                    image_storage=self.image_storage,
                 )
 
         task_manifest = {
@@ -1269,10 +1600,13 @@ def load_task_cache(
 
 __all__ = [
     "CACHE_FORMAT_VERSION",
+    "DEFAULT_MAX_OPEN_SHARDS",
     "CacheCollator",
     "CacheDataset",
     "TaskCacheManager",
+    "get_task_cache_config",
     "hash_policy_module",
+    "is_task_cache_enabled",
     "load_task_cache",
     "resolve_cache_root",
 ]

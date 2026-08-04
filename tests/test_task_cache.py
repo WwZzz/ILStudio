@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+import pytest
 import torch
 from torch.utils.data import DataLoader
 
@@ -9,8 +11,10 @@ from data_utils.task_cache import (
     CacheDataset,
     CacheDescriptor,
     TaskCacheManager,
+    _NPY_SHARD_POOL,
     _build_cache,
     hash_policy_module,
+    is_task_cache_enabled,
 )
 from configs.loader import ConfigLoader
 from data_utils import data_loader
@@ -38,6 +42,13 @@ class ToyProcessor:
             "input_ids": ids,
             "labels": ids.clone(),
             "state": torch.tensor(sample["state"], dtype=torch.float32),
+            "image": (
+                torch.tensor([0, 64, 128, 255], dtype=torch.float32)
+                .reshape(1, 2, 2)
+                .div(255.0)
+                .mul(2.0)
+                .sub(1.0)
+            ),
         }
 
 
@@ -66,6 +77,7 @@ class ToyCollator:
             "labels": torch.stack(labels),
             "attention_mask": torch.stack(attention_mask),
             "state": torch.stack([instance["state"] for instance in instances]),
+            "image": torch.stack([instance["image"] for instance in instances]),
         }
 
 
@@ -84,7 +96,12 @@ def make_descriptor(root: Path, cache_format: str) -> CacheDescriptor:
     )
 
 
-def build_toy_cache(tmp_path: Path, cache_format: str) -> tuple[CacheDataset, ToyProcessor, ToyCollator]:
+def build_toy_cache(
+    tmp_path: Path,
+    cache_format: str,
+    image_storage=None,
+    max_open_shards: int = 16,
+) -> tuple[CacheDataset, ToyProcessor, ToyCollator]:
     descriptor = make_descriptor(tmp_path, cache_format)
     processor = ToyProcessor()
     collator = ToyCollator()
@@ -95,6 +112,7 @@ def build_toy_cache(tmp_path: Path, cache_format: str) -> tuple[CacheDataset, To
             "pad_token_id": 9,
             "label_pad_token_id": -100,
         },
+        "image_storage": image_storage,
     }
     _build_cache(
         dataset=ToyDataset(),
@@ -104,8 +122,13 @@ def build_toy_cache(tmp_path: Path, cache_format: str) -> tuple[CacheDataset, To
         common_manifest=common_manifest,
         cache_format=cache_format,
         shard_size_bytes=1,
+        image_storage=image_storage,
     )
-    return CacheDataset(descriptor.cache_file, descriptor.manifest_file), processor, collator
+    return CacheDataset(
+        descriptor.cache_file,
+        descriptor.manifest_file,
+        max_open_shards=max_open_shards,
+    ), processor, collator
 
 
 def assert_batch_equal(actual, expected):
@@ -145,6 +168,48 @@ def test_npy_cache_can_stage_shards_locally(tmp_path):
     assert len(staged_files) == 2
 
 
+def test_uint8_image_storage_round_trip(tmp_path):
+    image_storage = {
+        "dtype": "uint8",
+        "fields": ["image"],
+        "value_range": [-1.0, 1.0],
+        "restore_dtype": "float32",
+        "strict_range": True,
+    }
+    dataset, processor, original_collator = build_toy_cache(
+        tmp_path, "npy", image_storage=image_storage
+    )
+    cached_samples = [dataset[0], dataset[2]]
+    assert all(sample["image"].dtype == torch.uint8 for sample in cached_samples)
+
+    actual = CacheCollator(dataset.collation_spec, dataset.image_storage)(cached_samples)
+    source = ToyDataset()
+    expected = original_collator([processor(source[0]), processor(source[2])])
+    assert_batch_equal(actual, expected)
+
+
+def test_image_storage_rejects_unmatched_field_paths(tmp_path):
+    image_storage = {
+        "dtype": "uint8",
+        "fields": ["observation.missing.*"],
+        "value_range": [-1.0, 1.0],
+        "restore_dtype": "float32",
+        "strict_range": True,
+    }
+    with pytest.raises(ValueError, match="did not match"):
+        build_toy_cache(tmp_path, "npy", image_storage=image_storage)
+
+
+def test_npy_cache_bounds_open_shards_and_keeps_offsets_in_ram(tmp_path):
+    dataset, _, _ = build_toy_cache(tmp_path, "npy", max_open_shards=1)
+    dataset[0]
+    dataset[2]
+
+    assert len(_NPY_SHARD_POOL) <= 1
+    _, offsets = next(iter(_NPY_SHARD_POOL.values()))
+    assert not isinstance(offsets, np.memmap)
+
+
 def test_npy_cache_works_with_dataloader_workers(tmp_path):
     dataset, _, _ = build_toy_cache(tmp_path, "npy")
     loader = DataLoader(
@@ -160,9 +225,7 @@ def test_npy_cache_works_with_dataloader_workers(tmp_path):
 def test_real_pi0_task_config_resolves_cache_overrides():
     loader = ConfigLoader(
         unknown_args=[
-            "--task.enable_cache",
-            "true",
-            "--task.cache_format",
+            "--task.cache.format",
             "npy",
         ]
     )
@@ -170,8 +233,8 @@ def test_real_pi0_task_config_resolves_cache_overrides():
     policy_config, _ = loader.load_policy("pi0_lora")
     module_hash = hash_policy_module(policy_config["module_path"])
 
-    assert task_config["enable_cache"] is True
-    assert task_config["cache_format"] == "npy"
+    assert is_task_cache_enabled(task_config)
+    assert task_config["cache"]["format"] == "npy"
     assert policy_config["module_path"] == "policy.openpi"
     assert len(module_hash) == 64
 
@@ -206,10 +269,11 @@ def test_manager_builds_on_miss_and_reuses_on_hit(tmp_path, monkeypatch):
     monkeypatch.setattr("data_utils.utils.load_datasets", load_datasets_stub)
     args = SimpleNamespace(task="toy", output_dir=str(tmp_path / "output"), eval_ratio=0.0)
     task_config = {
-        "enable_cache": True,
-        "cache_root": str(tmp_path / "cache"),
-        "cache_format": "npy",
-        "cache_shard_size_mb": 1,
+        "cache": {
+            "root": str(tmp_path / "cache"),
+            "format": "npy",
+            "shard_size_mb": 1,
+        },
         "datasets": [
             {"type": "tests.ToyDataset", "name": "toy", "args": {}}
         ],
@@ -229,9 +293,10 @@ def test_manager_builds_on_miss_and_reuses_on_hit(tmp_path, monkeypatch):
 
 def test_cache_alias_still_hashes_effective_normalization(tmp_path):
     task_config = {
-        "enable_cache": True,
-        "cache_root": str(tmp_path / "cache"),
-        "cache_policy_name": "shared-pipeline",
+        "cache": {
+            "root": str(tmp_path / "cache"),
+            "policy_name": "shared-pipeline",
+        },
         "datasets": [
             {"type": "tests.ToyDataset", "name": "toy", "args": {}}
         ],
@@ -249,6 +314,17 @@ def test_cache_alias_still_hashes_effective_normalization(tmp_path):
 
     assert first.policy_key == second.policy_key == "shared-pipeline"
     assert first.descriptors[0].dataset_hash != second.descriptors[0].dataset_hash
+
+
+def test_cache_section_presence_enables_cache_and_legacy_keys_are_rejected():
+    assert not is_task_cache_enabled({})
+    assert not is_task_cache_enabled({"cache": False})
+    assert is_task_cache_enabled({"cache": {}})
+    assert is_task_cache_enabled({"cache": None})
+    with pytest.raises(ValueError, match="Top-level task-cache keys"):
+        is_task_cache_enabled({"enable_cache": True})
+    with pytest.raises(ValueError, match="Unknown task_config.cache settings"):
+        is_task_cache_enabled({"cache": {"typo": True}})
 
 
 def test_cached_dataset_get_dataloader_returns_loader_not_nested_tuple(tmp_path):

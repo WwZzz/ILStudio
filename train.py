@@ -88,6 +88,9 @@ def main(args):
     
     # Load all configurations in one place
     task_config, policy_config, training_args, config_paths = load_all_configs(args)
+    from data_utils.task_cache import is_task_cache_enabled
+
+    cache_enabled = is_task_cache_enabled(task_config)
     
     # Set random seed
     seed = getattr(training_args, 'seed', 0)
@@ -119,7 +122,6 @@ def main(args):
     # runs this pipeline once; cache hits bypass it entirely in DataLoader workers.
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
-    cache_enabled = bool(task_config.get('enable_cache', False))
     if cache_enabled:
         from data_utils.task_cache import load_task_cache
 
