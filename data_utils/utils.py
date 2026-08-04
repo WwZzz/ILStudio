@@ -988,7 +988,7 @@ def _apply_transforms_to_datasets(datasets, args, task_config):
 def _maybe_assign_weights_to_datasets(datasets, task_config):
     sample_weights = task_config.get('sample_weights', None)
     if sample_weights is None or not isinstance(datasets, list): return datasets
-    datasets_config = task_config.get('datasets', [])
+    datasets_config = list(task_config.get('datasets', []))
     vqa_configs = task_config.get('vqa', [])
     datasets_config.extend(vqa_configs)
     if isinstance(sample_weights, dict):
@@ -997,8 +997,44 @@ def _maybe_assign_weights_to_datasets(datasets, task_config):
         dataset_i.__weight__ = wi
     return datasets
 
+def load_datasets(args, task_config, save_norm=True):
+    """Create, normalize, and transform source datasets without splitting.
+
+    Keeping this boundary separate lets the task-cache builder traverse each
+    configured dataset exactly once in deterministic source order.
+    """
+    if 'datasets' not in task_config and 'vqa' not in task_config:
+        raise ValueError("There is not dataset in task config")
+
+    merge_info = {}
+    if 'datasets' in task_config:
+        datasets_config = task_config['datasets']
+        datasets, _, merge_info = _parse_datasets_config(datasets_config, args)
+        datasets = _normalize_datasets(datasets, args, task_config, save_norm, merge_info)
+        datasets = _apply_transforms_to_datasets(datasets, args, task_config)
+    else:
+        datasets = []
+
+    if 'vqa' in task_config:
+        vqa_datasets = [
+            _create_vqa_dataset_from_config(dataset_config, args)
+            for dataset_config in task_config['vqa']
+        ]
+        vqa_datasets = _apply_transforms_to_datasets(vqa_datasets, args, task_config)
+        vqa_datasets = _wrap_vqa_datasets(vqa_datasets, args, task_config)
+        datasets.extend(vqa_datasets)
+    return datasets
+
+
+def prepare_data_splits(datasets, args, task_config):
+    """Apply the existing train/eval split and dataset-weight semantics."""
+    train_data, eval_data = _train_val_split_datasets(datasets, args)
+    train_data = _maybe_assign_weights_to_datasets(train_data, task_config)
+    return {'train': train_data, 'eval': eval_data}
+
+
 def load_data(args, task_config, save_norm=True):
-    """Load datasets with flexible configuration support
+    """Load datasets with flexible configuration support.
     
     Supports both regular datasets and merged datasets.
     
@@ -1030,48 +1066,8 @@ def load_data(args, task_config, save_norm=True):
     ```
     """
     
-    # Ensure new flexible format is used
-    if 'datasets' not in task_config and 'vqa' not in task_config:
-        raise ValueError("There is not dataset in task config")
-    
-    merge_info = {}
-    
-    if 'datasets' in task_config:
-        datasets_config = task_config['datasets']
-        # Create datasets on every rank. Dataset construction may perform slow local
-        # metadata/index preparation, so serializing it behind a global barrier can
-        # cause other ranks to hit the process-group timeout before rank 0 finishes.
-        datasets = []
-        datasets, flattened_configs, merge_info = _parse_datasets_config(datasets_config, args)
-        
-        # Normalize datasets (with merged stats support)
-        datasets = _normalize_datasets(datasets, args, task_config, save_norm, merge_info)
-
-        # Apply transforms to datasets
-        datasets = _apply_transforms_to_datasets(datasets, args, task_config)
-    else:
-        datasets = []
-    if 'vqa' in task_config:
-        vqa_configs = task_config['vqa']
-        vqa_datasets = []
-        for dataset_config in vqa_configs:
-            dataset = _create_vqa_dataset_from_config(dataset_config, args)
-            vqa_datasets.append(dataset)
-        # Apply transforms to vqa datasets
-        vqa_datasets = _apply_transforms_to_datasets(vqa_datasets, args, task_config)
-        # Wrap vqa datasets
-        vqa_datasets = _wrap_vqa_datasets(vqa_datasets, args, task_config)
-        datasets.extend(vqa_datasets)
-        
-        
-
-    # Split datasets into train and eval sets
-    train_data, eval_data = _train_val_split_datasets(datasets, args)
-
-    # Assigning weights to each dataset
-    train_data = _maybe_assign_weights_to_datasets(train_data, task_config)
-    
-    return {'train': train_data, 'eval': eval_data}
+    datasets = load_datasets(args, task_config, save_norm=save_norm)
+    return prepare_data_splits(datasets, args, task_config)
 
 def is_rlds_data(ds):
     import dlimp as dl # Ensure dlimp is imported here as well if needed

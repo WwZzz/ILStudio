@@ -115,20 +115,41 @@ def main(args):
         logger.info(f"Loaded config from YAML: {type(config).__name__}") 
     ml_utils.print_model_trainable_information(model)
     
-    # Load dataset
-    data_dict = load_data(args, task_config)
-    train_data, val_data = data_dict['train'], data_dict['eval']
-    
-    # Save example data from the first training dataset for debugging
-    logger.info("="*80)
-    logger.info(f"Saving example data to {training_args.output_dir}...")
-    logger.info("="*80)
-    save_example_data(train_data, training_args.output_dir)
-    logger.info("="*80)
-    
-    # Create data loader with policy-spefific data processor and collator
+    # Resolve the policy pipeline before loading data. Task-cache construction
+    # runs this pipeline once; cache hits bypass it entirely in DataLoader workers.
     data_processor = get_policy_data_processor(config_paths['policy'], args, model_components)
     data_collator = get_policy_data_collator(config_paths['policy'], args, model_components)
+    cache_enabled = bool(task_config.get('enable_cache', False))
+    if cache_enabled:
+        from data_utils.task_cache import load_task_cache
+
+        data_dict, data_collator, cache_manager = load_task_cache(
+            args=args,
+            task_config=task_config,
+            policy_config=policy_config,
+            processor=data_processor,
+            collator=data_collator,
+            output_dir=training_args.output_dir,
+        )
+        data_processor = None
+        logger.info(
+            f"Using task cache ({cache_manager.cache_format}) from {cache_manager.task_dir}"
+        )
+    else:
+        data_dict = load_data(args, task_config)
+
+    train_data, val_data = data_dict['train'], data_dict['eval']
+
+    if not cache_enabled:
+        # Cached samples are already policy batches, so the raw-data visualizer is
+        # intentionally only used on the uncached path.
+        logger.info("="*80)
+        logger.info(f"Saving example data to {training_args.output_dir}...")
+        logger.info("="*80)
+        save_example_data(train_data, training_args.output_dir)
+        logger.info("="*80)
+
+    # Create data loader with either the policy pipeline or generic cache pipeline.
     train_loader, eval_loader = get_dataloader(train_data, val_data, data_processor, data_collator, args) 
     # assert val_data is not None, "Validation data is required for training"
     # Get Trainer

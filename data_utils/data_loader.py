@@ -19,6 +19,109 @@ from .dataset_wrappers import WrappedDataset, WrappedIterableDataset, MapToItera
 def is_distributed():
     return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
 
+
+def _collect_cache_shard_ranges(dataset, offset=0):
+    """Collect global index ranges without importing the cache module."""
+    ranges = getattr(dataset, 'shard_ranges', None)
+    if ranges:
+        return [(offset + int(start), offset + int(stop)) for start, stop in ranges]
+    if isinstance(dataset, ConcatDataset):
+        collected = []
+        child_offset = offset
+        for child in dataset.datasets:
+            child_ranges = _collect_cache_shard_ranges(child, child_offset)
+            if not child_ranges:
+                return []
+            collected.extend(child_ranges)
+            child_offset += len(child)
+        return collected
+    return []
+
+
+class CacheShardDistributedSampler(Sampler):
+    """Assign cache shard ranges to ranks while keeping every rank balanced.
+
+    Unlike a strided DistributedSampler, this sampler keeps rank reads local to
+    a small set of mmap shards.  Shards are shuffled and samples are shuffled
+    within each shard on every epoch.
+    """
+
+    def __init__(self, dataset, shuffle=True, seed=0):
+        self.dataset = dataset
+        self.shuffle = shuffle
+        self.seed = seed
+        self.epoch = 0
+        self.num_replicas = dist.get_world_size()
+        self.rank = dist.get_rank()
+        ranges = _collect_cache_shard_ranges(dataset)
+        if not ranges:
+            raise ValueError("CacheShardDistributedSampler requires cache shard ranges")
+
+        # If there are fewer files than ranks, split the largest ranges into
+        # contiguous units.  This still limits each rank to a small file set.
+        units = list(ranges)
+        while len(units) < self.num_replicas:
+            largest_index = max(range(len(units)), key=lambda i: units[i][1] - units[i][0])
+            start, stop = units.pop(largest_index)
+            if stop - start <= 1:
+                units.insert(largest_index, (start, stop))
+                break
+            middle = start + (stop - start) // 2
+            units.extend([(start, middle), (middle, stop)])
+        self.units = units
+
+        # Deterministic greedy bin packing gives all ranks the same assignment.
+        assignments = [[] for _ in range(self.num_replicas)]
+        loads = [0] * self.num_replicas
+        for unit in sorted(units, key=lambda item: item[1] - item[0], reverse=True):
+            target_rank = min(range(self.num_replicas), key=lambda rank: loads[rank])
+            assignments[target_rank].append(unit)
+            loads[target_rank] += unit[1] - unit[0]
+        # A dataset can be smaller than the world size during smoke tests. In
+        # that unavoidable case, duplicate one contiguous unit for empty ranks
+        # instead of failing before the first step.
+        non_empty_ranks = [rank for rank, assignment in enumerate(assignments) if assignment]
+        for rank, assignment in enumerate(assignments):
+            if assignment:
+                continue
+            source_rank = non_empty_ranks[rank % len(non_empty_ranks)]
+            unit = assignments[source_rank][0]
+            assignments[rank] = [unit]
+            loads[rank] = unit[1] - unit[0]
+        self.assignments = assignments
+        self.num_samples = max(loads)
+
+    def __len__(self):
+        return self.num_samples
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def __iter__(self):
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        units = list(self.assignments[self.rank])
+        if self.shuffle and len(units) > 1:
+            order = torch.randperm(len(units), generator=generator).tolist()
+            units = [units[index] for index in order]
+
+        indices = []
+        for start, stop in units:
+            if self.shuffle:
+                local = torch.randperm(stop - start, generator=generator).tolist()
+                indices.extend(start + index for index in local)
+            else:
+                indices.extend(range(start, stop))
+
+        if not indices:
+            raise RuntimeError(f"Cache shard sampler assigned no samples to rank {self.rank}")
+        if len(indices) < self.num_samples:
+            repeats = (self.num_samples + len(indices) - 1) // len(indices)
+            indices = (indices * repeats)[:self.num_samples]
+        else:
+            indices = indices[:self.num_samples]
+        return iter(indices)
+
 PrefetchResult = Union[
     Tuple[Any, List[Any], int], # (iterator, prefetched_batches_list, epoch_fetched)
     Exception,
@@ -398,7 +501,18 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         # 1. Sampler Logic
         sampler = None
         if sample_weights is None:
-            sampler = DistributedSampler(wrapped_data, shuffle=is_training) if is_distributed() else None
+            if is_distributed():
+                cache_ranges = _collect_cache_shard_ranges(wrapped_data.dataset)
+                if cache_ranges:
+                    sampler = CacheShardDistributedSampler(
+                        wrapped_data.dataset,
+                        shuffle=is_training,
+                        seed=getattr(args, 'seed', 0),
+                    )
+                else:
+                    sampler = DistributedSampler(wrapped_data, shuffle=is_training)
+            else:
+                sampler = None
         else:
             if is_training:
                 # Case A: Training with Weights
@@ -455,8 +569,8 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
         # Build DataLoader kwargs
         dataloader_kwargs = {
             'dataset': wrapped_data,
-            'batch_size': args.per_device_train_batch_size,
-            'shuffle': (sampler is None),
+            'batch_size': args.per_device_train_batch_size if is_training else args.per_device_eval_batch_size,
+            'shuffle': (is_training and sampler is None),
             'sampler': sampler,
             'num_workers': args.dataloader_num_workers,
             'collate_fn': collator,
@@ -522,7 +636,7 @@ def _create_single_dataloader(dataset, processor, collator, args, is_training=Tr
             )
     else:
         raise ValueError("Dataset must be either map-style or iterable.")
-    return loader, None if is_training else loader
+    return loader
 
 def _create_mixed_dataloader(datasets, processor, collator, args, is_training=True):
     """
