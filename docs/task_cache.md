@@ -64,11 +64,11 @@ completed cache.
 
 ## Build explicitly
 
-`create_task_cache.py` accepts the same policy, task, training config, output,
+`scripts/create_task_cache.py` accepts the same policy, task, training config, output,
 evaluation ratio, and dotted override arguments as `train.py`:
 
 ```bash
-python create_task_cache.py \
+python scripts/create_task_cache.py \
   --policy pi0_lora \
   --task /path/to/task.yaml \
   --training_config default
