@@ -32,7 +32,7 @@ import h5py
 import numpy as np
 import torch
 from loguru import logger
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 
 
@@ -48,6 +48,8 @@ _CACHE_CONFIG_KEYS = {
     "max_open_shards",
     "local_dir",
     "image_storage",
+    "num_workers",
+    "prefetch_factor",
 }
 _LEGACY_CACHE_KEYS = {
     "enable_cache",
@@ -665,6 +667,99 @@ def _episode_id(sample: Any, fallback: int) -> str:
     return str(value)
 
 
+class _IndexedCacheDataset(Dataset):
+    """Attach the source index without changing the source dataset contract."""
+
+    def __init__(self, dataset: Any):
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> tuple[int, Any]:
+        return index, self.dataset[index]
+
+
+class _CacheBuildCollator:
+    """Run the expensive policy pipeline inside DataLoader workers."""
+
+    def __init__(
+        self,
+        processor: Any,
+        collator: Any,
+        image_storage: Optional[Mapping[str, Any]],
+    ):
+        self.processor = processor
+        self.collator = collator
+        self.image_storage = image_storage
+
+    def __call__(self, indexed_samples: Sequence[tuple[int, Any]]) -> tuple[int, str, Any]:
+        if len(indexed_samples) != 1:
+            raise ValueError(
+                "Task-cache build DataLoader must use batch_size=1 to preserve "
+                "the one-source-sample-per-record cache contract"
+            )
+        index, sample = indexed_samples[0]
+        processed = self.processor(sample) if self.processor is not None else sample
+        batch = (
+            self.collator([processed])
+            if self.collator is not None
+            else default_collate([processed])
+        )
+        batch = _to_cpu(_encode_image_storage(batch, self.image_storage))
+        return int(index), _episode_id(sample, fallback=index), batch
+
+
+def _iter_cache_records(
+    dataset: Any,
+    processor: Any,
+    collator: Any,
+    image_storage: Optional[Mapping[str, Any]],
+    num_workers: int,
+    prefetch_factor: int,
+) -> Iterator[tuple[int, str, Any]]:
+    """Yield processed records in source order using a non-shuffling DataLoader."""
+    if not hasattr(dataset, "__len__") or not hasattr(dataset, "__getitem__"):
+        if num_workers:
+            logger.warning(
+                "Task-cache source is not map-style; falling back to a sequential "
+                "iterator because parallel workers cannot partition it safely"
+            )
+        build_collator = _CacheBuildCollator(processor, collator, image_storage)
+        for index, sample in enumerate(iter(dataset)):
+            yield build_collator([(index, sample)])
+        return
+
+    loader_kwargs: Dict[str, Any] = {
+        "dataset": _IndexedCacheDataset(dataset),
+        "batch_size": 1,
+        "shuffle": False,
+        "num_workers": num_workers,
+        "collate_fn": _CacheBuildCollator(processor, collator, image_storage),
+        "drop_last": False,
+        "pin_memory": False,
+    }
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+        # Cache construction makes one pass, so persistent workers only delay
+        # process cleanup and provide no next-epoch benefit.
+        loader_kwargs["persistent_workers"] = False
+    logger.info(
+        "Building task cache with DataLoader(shuffle=False, batch_size=1, "
+        f"num_workers={num_workers}, prefetch_factor="
+        f"{prefetch_factor if num_workers else None})"
+    )
+    expected_index = 0
+    for index, episode_id, batch in DataLoader(**loader_kwargs):
+        if index != expected_index:
+            raise RuntimeError(
+                "Task-cache DataLoader returned samples out of order: "
+                f"expected {expected_index}, got {index}"
+            )
+        yield index, episode_id, batch
+        expected_index += 1
+
+
 class _PayloadWriter:
     """Append pickled records to one contiguous HDF5 byte stream."""
 
@@ -721,14 +816,6 @@ class _PayloadWriter:
         self._episodes.clear()
 
 
-def _iter_dataset(dataset: Any) -> Iterator[tuple[int, Any]]:
-    if hasattr(dataset, "__len__") and hasattr(dataset, "__getitem__"):
-        for index in range(len(dataset)):
-            yield index, dataset[index]
-    else:
-        yield from enumerate(iter(dataset))
-
-
 def _episode_runs(episode_ids: Sequence[str]) -> List[Dict[str, Any]]:
     runs: List[Dict[str, Any]] = []
     for index, episode_id in enumerate(episode_ids):
@@ -746,6 +833,8 @@ def _build_hdf5_cache(
     descriptor: CacheDescriptor,
     common_manifest: Mapping[str, Any],
     image_storage: Optional[Mapping[str, Any]] = None,
+    num_workers: int = 0,
+    prefetch_factor: int = 2,
 ) -> Dict[str, Any]:
     descriptor.cache_dir.mkdir(parents=True, exist_ok=True)
     temporary = descriptor.cache_file.with_name(
@@ -761,12 +850,15 @@ def _build_hdf5_cache(
             h5_file.attrs["format_version"] = CACHE_FORMAT_VERSION
             h5_file.attrs["complete"] = False
             writer = _PayloadWriter(h5_file)
-            for index, sample in _iter_dataset(dataset):
-                episode_id = _episode_id(sample, fallback=index)
+            for index, episode_id, batch in _iter_cache_records(
+                dataset,
+                processor,
+                collator,
+                image_storage,
+                num_workers,
+                prefetch_factor,
+            ):
                 episode_ids.append(episode_id)
-                processed = processor(sample) if processor is not None else sample
-                batch = collator([processed]) if collator is not None else default_collate([processed])
-                batch = _encode_image_storage(batch, image_storage)
                 writer.append(batch, episode_id)
                 if (index + 1) % 1000 == 0:
                     logger.info(
@@ -804,6 +896,12 @@ def _build_hdf5_cache(
         "episode_count": len({episode_id for episode_id in episode_ids}),
         "episode_runs": _episode_runs(episode_ids),
         "build_seconds": time.time() - started,
+        "build_dataloader": {
+            "shuffle": False,
+            "batch_size": 1,
+            "num_workers": num_workers,
+            "prefetch_factor": prefetch_factor if num_workers else None,
+        },
     }
     _write_json_atomic(descriptor.manifest_file, manifest)
     logger.info(
@@ -821,6 +919,8 @@ def _build_npy_cache(
     common_manifest: Mapping[str, Any],
     shard_size_bytes: int,
     image_storage: Optional[Mapping[str, Any]] = None,
+    num_workers: int = 0,
+    prefetch_factor: int = 2,
 ) -> Dict[str, Any]:
     """Build mmap-friendly payload and offset ``.npy`` shard pairs.
 
@@ -879,8 +979,14 @@ def _build_npy_cache(
         raw_stream = raw_path.open("wb")
 
     try:
-        for index, sample in _iter_dataset(dataset):
-            episode_id = _episode_id(sample, fallback=index)
+        for index, episode_id, batch in _iter_cache_records(
+            dataset,
+            processor,
+            collator,
+            image_storage,
+            num_workers,
+            prefetch_factor,
+        ):
             if (
                 record_count
                 and record_bytes >= shard_size_bytes
@@ -888,10 +994,7 @@ def _build_npy_cache(
                 and episode_id != previous_episode
             ):
                 flush_shard()
-            processed = processor(sample) if processor is not None else sample
-            batch = collator([processed]) if collator is not None else default_collate([processed])
-            batch = _encode_image_storage(batch, image_storage)
-            record = pickle.dumps(_to_cpu(batch), protocol=pickle.HIGHEST_PROTOCOL)
+            record = pickle.dumps(batch, protocol=pickle.HIGHEST_PROTOCOL)
             raw_stream.write(record)
             record_bytes += len(record)
             record_count += 1
@@ -929,6 +1032,12 @@ def _build_npy_cache(
         "shard_size_bytes": shard_size_bytes,
         "shards": shards,
         "build_seconds": time.time() - started,
+        "build_dataloader": {
+            "shuffle": False,
+            "batch_size": 1,
+            "num_workers": num_workers,
+            "prefetch_factor": prefetch_factor if num_workers else None,
+        },
     }
     _write_json_atomic(descriptor.manifest_file, manifest)
     logger.info(
@@ -947,6 +1056,8 @@ def _build_cache(
     cache_format: str,
     shard_size_bytes: int,
     image_storage: Optional[Mapping[str, Any]] = None,
+    num_workers: int = 0,
+    prefetch_factor: int = 2,
 ) -> Dict[str, Any]:
     if cache_format == "npy":
         return _build_npy_cache(
@@ -957,10 +1068,13 @@ def _build_cache(
             common_manifest,
             shard_size_bytes,
             image_storage,
+            num_workers,
+            prefetch_factor,
         )
     if cache_format == "hdf5":
         return _build_hdf5_cache(
-            dataset, processor, collator, descriptor, common_manifest, image_storage
+            dataset, processor, collator, descriptor, common_manifest, image_storage,
+            num_workers, prefetch_factor
         )
     raise ValueError(f"Unsupported task cache format: {cache_format}")
 
@@ -1299,6 +1413,18 @@ class TaskCacheManager:
         )
         if self.max_open_shards <= 0:
             raise ValueError("cache.max_open_shards must be positive")
+        default_num_workers = getattr(args, "dataloader_num_workers", 0) or 0
+        self.num_workers = int(
+            self.cache_config.get("num_workers", default_num_workers)
+        )
+        if self.num_workers < 0:
+            raise ValueError("cache.num_workers must be non-negative")
+        default_prefetch_factor = getattr(args, "dataloader_prefetch_factor", 2) or 2
+        self.prefetch_factor = int(
+            self.cache_config.get("prefetch_factor", default_prefetch_factor)
+        )
+        if self.prefetch_factor <= 0:
+            raise ValueError("cache.prefetch_factor must be positive")
         self.image_storage = _normalize_image_storage_config(self.cache_config)
         configured_local_dir = self.cache_config.get("local_dir") or os.environ.get(
             "ILSTD_CACHE_LOCAL"
@@ -1402,6 +1528,12 @@ class TaskCacheManager:
             "effective_pipeline_args": self.effective_pipeline_args,
             "cache_format": self.cache_format,
             "image_storage": self.image_storage,
+            "build_dataloader": {
+                "shuffle": False,
+                "batch_size": 1,
+                "num_workers": self.num_workers,
+                "prefetch_factor": self.prefetch_factor if self.num_workers else None,
+            },
         }
 
     def _task_manifest_valid(self) -> bool:
@@ -1526,6 +1658,8 @@ class TaskCacheManager:
                     cache_format=self.cache_format,
                     shard_size_bytes=self.shard_size_bytes,
                     image_storage=self.image_storage,
+                    num_workers=self.num_workers,
+                    prefetch_factor=self.prefetch_factor,
                 )
 
         task_manifest = {

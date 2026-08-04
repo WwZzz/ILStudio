@@ -34,6 +34,15 @@ cache:
   # Optional node-local staging. It can also be supplied by ILSTD_CACHE_LOCAL.
   local_dir: /tmp/ilstd_cache
 
+  # Cache construction always uses DataLoader(shuffle=False, batch_size=1).
+  # num_workers defaults to the training config's dataloader_num_workers;
+  # set it explicitly here to tune cache-build parallelism independently.
+  num_workers: 8
+
+  # Number of ready records queued by each build worker. Ignored when
+  # num_workers is zero. Defaults to dataloader_prefetch_factor, then 2.
+  prefetch_factor: 2
+
   # Optional field-aware image storage. This PI0 example converts the collator's
   # float32 BCHW images in [-1, 1] to uint8 on disk and restores float32 values
   # before returning the training batch.
@@ -61,6 +70,14 @@ The persistent path has two identity components:
 Changing any of those inputs creates a new cache. Writes are locked and atomic,
 so concurrent distributed ranks wait for the first builder and then reuse the
 completed cache.
+
+Cache construction parallelizes source I/O, the policy processor, image storage
+conversion, and the original policy collator in DataLoader workers. Completed
+records are returned in source-index order to a single writer, so HDF5 remains
+single-writer safe and NPY shards still close only at episode boundaries. The
+worker count and prefetch depth are build-performance settings and do not change
+cache identity. Set `cache.num_workers: 0` only for debugging or for source
+datasets that already own an incompatible multiprocessing pipeline.
 
 ## Build explicitly
 
