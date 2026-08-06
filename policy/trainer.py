@@ -1,5 +1,10 @@
 # import transformers
+import re
+import shutil
+from pathlib import Path
+
 from transformers.trainer import Trainer
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import torch
 import numpy as np
 from loguru import logger
@@ -9,6 +14,16 @@ class BaseTrainer(Trainer):
     def __init__(self, *, train_loader=None, eval_loader=None, **kwargs):
         # If no eval dataset/loader is provided, force evaluation off to avoid HF Trainer errors
         training_args = kwargs.get('args', None)
+        if (
+            training_args is not None
+            and getattr(training_args, 'save_latest_checkpoint_only', False)
+            and getattr(training_args, 'load_best_model_at_end', False)
+        ):
+            raise ValueError(
+                "save_latest_checkpoint_only cannot be combined with "
+                "load_best_model_at_end because older best checkpoints are "
+                "intentionally removed"
+            )
         no_eval_inputs = eval_loader is None and (kwargs.get('eval_dataset', None) is None)
         if no_eval_inputs and training_args is not None:
             if hasattr(training_args, 'eval_strategy'):
@@ -38,11 +53,64 @@ class BaseTrainer(Trainer):
         super().__init__(**kwargs)
         self._train_loader = train_loader
         self._eval_loader  = eval_loader
-        
+
         # Log eval configuration after initialization
         if hasattr(self.args, 'do_eval') and self.args.do_eval:
             eval_strategy = getattr(self.args, 'eval_strategy', None)
             logger.info(f"🔍 Evaluation configured: do_eval={self.args.do_eval}, eval_steps={getattr(self.args, 'eval_steps', None)}, eval_strategy={eval_strategy}, eval_loader={'provided' if eval_loader is not None else 'None'}")
+
+    def _rotate_checkpoints(self, use_mtime=False, output_dir=None):
+        """Keep exactly the newest checkpoint when explicitly requested.
+
+        Transformers calls this method after the new checkpoint's model,
+        optimizer, scheduler, RNG state, and trainer state have been saved.
+        The default path is left untouched unless the project-level switch is
+        enabled.
+        """
+        if not getattr(self.args, 'save_latest_checkpoint_only', False):
+            return super()._rotate_checkpoints(
+                use_mtime=use_mtime,
+                output_dir=output_dir,
+            )
+
+        checkpoint_root = Path(output_dir or self.args.output_dir).resolve()
+        checkpoints = self._sorted_checkpoints(
+            use_mtime=use_mtime,
+            output_dir=str(checkpoint_root),
+        )
+        if len(checkpoints) <= 1:
+            return
+
+        checkpoint_pattern = re.compile(
+            rf"{re.escape(PREFIX_CHECKPOINT_DIR)}-[0-9]+"
+        )
+        for checkpoint in checkpoints[:-1]:
+            checkpoint_path = Path(checkpoint)
+            if checkpoint_path.is_symlink():
+                raise RuntimeError(
+                    f"Refusing to delete symlinked checkpoint: {checkpoint_path}"
+                )
+            resolved_checkpoint = checkpoint_path.resolve()
+            if (
+                resolved_checkpoint.parent != checkpoint_root
+                or checkpoint_pattern.fullmatch(resolved_checkpoint.name) is None
+                or not resolved_checkpoint.is_dir()
+            ):
+                raise RuntimeError(
+                    "Refusing to delete unexpected checkpoint path: "
+                    f"{resolved_checkpoint}"
+                )
+            logger.info(
+                f"Deleting older checkpoint [{resolved_checkpoint}] because "
+                "save_latest_checkpoint_only=True"
+            )
+            try:
+                shutil.rmtree(resolved_checkpoint)
+            except OSError as exc:
+                raise RuntimeError(
+                    "Failed to delete older checkpoint after the newest "
+                    f"checkpoint was saved: {resolved_checkpoint}"
+                ) from exc
 
     def get_train_dataloader(self):
         if self._train_loader is None:
@@ -326,4 +394,3 @@ class BaseTrainer(Trainer):
         self.log(metrics)
         
         return metrics
-    

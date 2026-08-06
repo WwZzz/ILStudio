@@ -60,6 +60,27 @@ class TrainingConfig:
         
         # Apply overrides
         config_dict.update(overrides)
+
+        # This project-level switch is intentionally not passed to
+        # transformers.TrainingArguments. When enabled, the trainer removes
+        # older checkpoints only after the newest checkpoint has been fully
+        # written. save_total_limit=1 also gives trainers that do not inherit
+        # from BaseTrainer the closest equivalent built-in behavior.
+        save_latest_checkpoint_only = bool(
+            config_dict.pop('save_latest_checkpoint_only', False)
+        )
+        if save_latest_checkpoint_only:
+            if config_dict.get('load_best_model_at_end', False):
+                raise ValueError(
+                    "save_latest_checkpoint_only cannot be combined with "
+                    "load_best_model_at_end because older best checkpoints "
+                    "are intentionally removed"
+                )
+            if config_dict.get('save_total_limit') != 1:
+                logger.info(
+                    "save_latest_checkpoint_only=True: forcing save_total_limit=1"
+                )
+            config_dict['save_total_limit'] = 1
         
         # Auto-set eval_strategy if do_eval is True but eval_strategy is not set
         # This ensures evaluation actually runs when do_eval=True
@@ -76,7 +97,7 @@ class TrainingConfig:
         
         # Create TrainingArguments - it will use default values for any missing parameters
         try:
-            return transformers.TrainingArguments(**config_dict)
+            training_args = transformers.TrainingArguments(**config_dict)
         except TypeError as e:
             # If there are invalid parameters, filter them out and try again
             import inspect
@@ -91,7 +112,13 @@ class TrainingConfig:
             if invalid_params:
                 for k in invalid_params:
                     setattr(training_args, k, config_dict[k])
-            return training_args
+
+        setattr(
+            training_args,
+            'save_latest_checkpoint_only',
+            save_latest_checkpoint_only,
+        )
+        return training_args
 
 
 def load_training_config(config_path: str = "configs/training/default.yaml") -> TrainingConfig:

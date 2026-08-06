@@ -51,6 +51,9 @@ report_to: "tensorboard"
 save_strategy: "steps"
 save_steps: 1000
 save_total_limit: 50
+# Manual opt-in. When true, the newest checkpoint is saved first and all older
+# checkpoint-* directories in this output_dir are then removed.
+save_latest_checkpoint_only: false
 
 # =============================================================================
 # DATA PROCESSING CONFIGURATION (TrainingArguments)

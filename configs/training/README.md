@@ -81,6 +81,7 @@ These parameters change frequently between runs and are kept in `HyperArguments`
 - `save_strategy`: Saving strategy
 - `save_steps`: Saving frequency
 - `save_total_limit`: Maximum number of checkpoints to keep
+- `save_latest_checkpoint_only`: Manual opt-in that saves the newest checkpoint before deleting every older `checkpoint-*` directory. Defaults to `false`, forces `save_total_limit=1`, and cannot be combined with `load_best_model_at_end`.
 - `resume_from_checkpoint`: Whether to resume from checkpoint
 - `dataloader_num_workers`: Number of data loader workers
 - `dataloader_pin_memory`: Whether to pin memory
