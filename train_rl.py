@@ -16,6 +16,8 @@ from utils.torch_backend import configure_torch_backends_from_env
 
 def summarize_rl_iteration(result, runner):
     episodes = result.collection.episodes
+    collection_seconds = float(getattr(result, "collection_seconds", 0.0))
+    update_seconds = float(getattr(result, "update_seconds", 0.0))
     metrics = {
         "iteration": result.iteration,
         "global_env_steps": runner.global_env_steps,
@@ -25,19 +27,17 @@ def summarize_rl_iteration(result, runner):
         "collected_steps": result.collection.num_steps,
         "collected_episodes": result.collection.num_episodes,
         "updates": len(result.updates),
-        "runtime/collection_seconds": result.collection_seconds,
-        "runtime/update_seconds": result.update_seconds,
-        "runtime/iteration_seconds": (
-            result.collection_seconds + result.update_seconds
-        ),
+        "runtime/collection_seconds": collection_seconds,
+        "runtime/update_seconds": update_seconds,
+        "runtime/iteration_seconds": collection_seconds + update_seconds,
     }
-    if result.collection_seconds > 0:
+    if collection_seconds > 0:
         metrics["throughput/env_steps_per_second"] = (
-            result.collection.num_steps / result.collection_seconds
+            result.collection.num_steps / collection_seconds
         )
-    if result.update_seconds > 0 and result.updates:
+    if update_seconds > 0 and result.updates:
         metrics["throughput/updates_per_second"] = (
-            len(result.updates) / result.update_seconds
+            len(result.updates) / update_seconds
         )
         objective_count = sum(
             float(value)
@@ -47,7 +47,7 @@ def summarize_rl_iteration(result, runner):
         )
         if objective_count:
             metrics["throughput/objectives_per_second"] = (
-                objective_count / result.update_seconds
+                objective_count / update_seconds
             )
     if episodes:
         metrics["episode/success_rate"] = fmean(
@@ -315,7 +315,8 @@ def main(argv=None):
         except (ImportError, RuntimeError):
             pass
         pipeline.entry.callbacks = (
-            *pipeline.entry.callbacks, build_metrics_callback(args.output_dir)
+            *tuple(getattr(pipeline.entry, "callbacks", ())),
+            build_metrics_callback(args.output_dir),
         )
         result = pipeline.run()
         save_policy = getattr(pipeline.entry, "save_policy", None)
