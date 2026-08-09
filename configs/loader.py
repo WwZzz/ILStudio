@@ -318,7 +318,13 @@ class ConfigLoader:
         """Load env config and return a namespace for attribute-style access.
         Supports both single environment and multiple environments (envs list).
         """
-        cfg, path = self.load_yaml_config('env', name_or_path)
+        # Environment configs may be top-level lists.  Defer overrides until
+        # after that shape is known; the generic mapping override helper cannot
+        # traverse a list root.
+        cfg, path = self.load_yaml_config(
+            'env', name_or_path, override_category='__env_deferred__'
+        )
+        env_overrides = self.get_overrides('env')
         
         # Check if it's a multi-env config
         if isinstance(cfg, list):
@@ -331,6 +337,30 @@ class ConfigLoader:
             # Single env - normalize and wrap in list for consistency
             normalized_cfg = self.normalize_config(cfg)
             normalized_envs = [normalized_cfg]
+
+        # Apply overrides after normalization so top-level convenience fields
+        # are not discarded when a config already has an ``args`` mapping.
+        for dotted, raw in env_overrides.items():
+            parts = dotted.split('.')
+            if parts[0].isdigit():
+                index = int(parts.pop(0))
+                if not 0 <= index < len(normalized_envs):
+                    raise IndexError(
+                        f"environment override index {index} is out of range"
+                    )
+                if not parts:
+                    raise ValueError(
+                        "indexed environment overrides require a field path"
+                    )
+                targets = (normalized_envs[index],)
+            else:
+                # An unindexed override applies to every entry, which is useful
+                # for shared runner concerns such as seeds or action conventions.
+                targets = tuple(normalized_envs)
+            for target in targets:
+                apply_overrides_to_mapping(
+                    target, {'.'.join(parts): raw}, _convert_to_type
+                )
         
         # Flatten args for each env to make them accessible at top level
         flattened_envs = []
