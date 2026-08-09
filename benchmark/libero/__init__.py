@@ -99,10 +99,15 @@ class LiberoEnv(MetaEnv):
     def meta2act(self, maction: MetaAction):
         assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
         assert maction['ctrl_type']==self.ctrl_type, "Action must be delta action for LIBERO"
-        actions = maction['action'] # (action_dim, )
+        actions = np.asarray(maction['action']).copy() # (action_dim, )
         # actions[:6] = actions[:6]*np.array([0.5, 0.5, 0.5, 0.05, 0.05, 0.05, ])
         if self.use_openvla_gripper:
-            actions[6] = 1.-2.*actions[6]
+            # OpenVLA represents the absolute gripper as 0=closed, 1=open,
+            # while LIBERO expects +1=closed, -1=open.  Match the official
+            # OpenVLA/SimpleVLA-RL evaluation path by binarizing after the
+            # range conversion; stochastic token sampling can otherwise send
+            # invalid intermediate gripper commands to the simulator.
+            actions[6] = np.sign(1.-2.*actions[6])
         return actions
     
     def get_libero_dummy_action(self):
