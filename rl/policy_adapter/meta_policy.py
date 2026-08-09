@@ -236,13 +236,6 @@ class MetaPolicyAdapter(BasePolicyAdapter):
             return
         source_root = self._checkpoint_root(self.checkpoint_path)
         output_root = Path(output_dir)
-        metadata_path = source_root / "policy_metadata.json"
-        if not metadata_path.is_file():
-            raise FileNotFoundError(
-                f"checkpoint metadata was not found: {metadata_path}"
-            )
-        self._copy_file(metadata_path, output_root / metadata_path.name)
-
         normalize_path = source_root / "normalize.json"
         if not normalize_path.is_file():
             return

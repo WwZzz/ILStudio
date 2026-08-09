@@ -1,7 +1,9 @@
 """Thin policy-facing contracts for reinforcement learning."""
 
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from benchmark.base import MetaAction, MetaObs
@@ -27,6 +29,7 @@ class BasePolicyAdapter(ABC):
         self.policy = policy
         self._capabilities = capabilities
         self._policy_version = 0
+        self.checkpoint_path = None
 
     @property
     def capabilities(self):
@@ -161,15 +164,48 @@ class BasePolicyAdapter(ABC):
             "this policy adapter does not expose critic features"
         )
 
+    def set_checkpoint_source(self, checkpoint_path):
+        """Attach the ILStudio checkpoint whose loader assets must survive save."""
+
+        if checkpoint_path is None:
+            return self
+        checkpoint_path = Path(checkpoint_path)
+        current = getattr(self, "checkpoint_path", None)
+        if current is not None and Path(current).resolve() != checkpoint_path.resolve():
+            raise ValueError(
+                "policy adapter checkpoint source does not match model components"
+            )
+        self.checkpoint_path = checkpoint_path
+        return self
+
+    @staticmethod
+    def _checkpoint_root(checkpoint_path):
+        root = Path(checkpoint_path)
+        if root.name.startswith("checkpoint-"):
+            root = root.parent
+        return root
+
+    def _copy_policy_metadata(self, output_dir):
+        if self.checkpoint_path is None:
+            return
+        source = self._checkpoint_root(self.checkpoint_path) / "policy_metadata.json"
+        if not source.is_file():
+            raise FileNotFoundError(f"checkpoint metadata was not found: {source}")
+        destination = Path(output_dir) / source.name
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
+
     def save_pretrained(self, output_dir):
-        """Delegate policy persistence without owning checkpoint scheduling."""
+        """Save policy weights plus ILStudio's policy-loader metadata."""
 
         save = getattr(self.policy, "save_pretrained", None)
         if not callable(save):
             raise TypeError(
                 "policy must provide save_pretrained() or override the adapter hook"
             )
-        return save(output_dir)
+        result = save(output_dir)
+        self._copy_policy_metadata(output_dir)
+        return result
 
     def _validate_obs(self, obs: MetaObs) -> None:
         if not isinstance(obs, MetaObs):

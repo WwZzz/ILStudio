@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import inspect
 import math
-import shutil
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
@@ -641,20 +640,8 @@ class MLPRLPolicyAdapter(BasePolicyAdapter):
     def save_pretrained(self, output_dir):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.policy.save_pretrained(output_dir)
+        result = super().save_pretrained(output_dir)
         torch.save(self.state_dict(), output_dir / _STATE_FILENAME)
-        if self.checkpoint_path is not None:
-            source_root = Path(self.checkpoint_path)
-            if source_root.name.startswith("checkpoint-"):
-                source_root = source_root.parent
-            source_metadata = source_root / "policy_metadata.json"
-            if not source_metadata.is_file():
-                raise FileNotFoundError(
-                    f"checkpoint metadata was not found: {source_metadata}"
-                )
-            target_metadata = output_dir / source_metadata.name
-            if source_metadata.resolve() != target_metadata.resolve():
-                shutil.copy2(source_metadata, target_metadata)
         return result
 
 

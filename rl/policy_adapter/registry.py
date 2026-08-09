@@ -175,5 +175,6 @@ def build_policy_adapter(
 
     if not isinstance(result, BasePolicyAdapter):
         raise TypeError("policy adapter factory must return BasePolicyAdapter")
+    result.set_checkpoint_source(model_components.get("checkpoint_path"))
     result.require_capabilities(required_capabilities)
     return result
