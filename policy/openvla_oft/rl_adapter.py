@@ -139,53 +139,12 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
 
     def _parallel_action_logits(self, input_ids, pixel_values, proprio=None):
         """Return ``[B, chunk*dim, 256]`` logits matching SimpleVLA-RL."""
-
-        batch_size, prompt_length = input_ids.shape
-        embeddings = self.vla.get_input_embeddings()
-        prompt_embeddings = embeddings(input_ids)
-        action_embeddings = prompt_embeddings.new_zeros(
-            batch_size, self.num_action_tokens, prompt_embeddings.shape[-1]
+        logits = self.policy.parallel_action_token_logits(
+            input_ids,
+            pixel_values,
+            proprio,
+            action_vocab_size=self.action_vocab_size,
         )
-        stop_token_id = int(
-            getattr(self.tokenizer, "eos_token_id", None)
-            if getattr(self.tokenizer, "eos_token_id", None) is not None
-            else 2
-        )
-        stop_ids = input_ids.new_full((batch_size, 1), stop_token_id)
-        text_embeddings = torch.cat(
-            [prompt_embeddings, action_embeddings, embeddings(stop_ids)], dim=1
-        )
-
-        patch_features = self.vla.vision_backbone(pixel_values)
-        projected = self.vla.projector(patch_features)
-        if self.policy.config.use_proprio and proprio is not None:
-            proprio = proprio.to(projected.device, dtype=projected.dtype)
-            proprio_features = self.policy.proprio_projector(
-                proprio.reshape(batch_size, -1)
-            ).unsqueeze(1)
-            projected = torch.cat([projected, proprio_features], dim=1)
-
-        multimodal_embeddings = torch.cat(
-            [text_embeddings[:, :1], projected, text_embeddings[:, 1:]], dim=1
-        )
-        attention_mask = torch.ones(
-            multimodal_embeddings.shape[:2],
-            dtype=torch.long,
-            device=multimodal_embeddings.device,
-        )
-        output = self.vla.language_model(
-            inputs_embeds=multimodal_embeddings,
-            attention_mask=attention_mask,
-            use_cache=False,
-            output_attentions=False,
-            output_hidden_states=False,
-            return_dict=True,
-        )
-        start = projected.shape[1] + prompt_length - 1
-        logits = output.logits[:, start : start + self.num_action_tokens]
-        logits = logits[:, :, self.first_action_token_id : self.vocab_size]
-        if logits.shape[1:] != (self.num_action_tokens, self.action_vocab_size):
-            raise RuntimeError("OpenVLA-OFT action-token logits have an unexpected shape")
         return logits.float() / self.temperature
 
     def _logits_for_observations(self, observations):
