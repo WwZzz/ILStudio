@@ -1,0 +1,15 @@
+# SO101 Plus Leader — drives so101_plus follower via qpos teleop
+#
+# Uses the calibration JSON you already created under robots/so101_plus/
+# (python -m deploy.robot.so101_plus --calibrate --id so101_plus_leader)
+
+type: deploy.teleoperator.so101_plus_leader.So101PlusLeader
+name: so101_plus_leader
+args:
+  name: so101_plus_leader
+  max_size_mb: 1
+  fps: 100.0
+  com: /dev/ttyACM0
+  robot_id: so101_plus_leader
+  # Reuse follower-style calibration files written by deploy.robot.so101_plus CLI
+  calibration_dir: ~/.cache/huggingface/lerobot/calibration/robots/so101_plus
