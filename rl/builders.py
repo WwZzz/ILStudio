@@ -182,6 +182,11 @@ def build_policy_components_from_checkpoint(
         {
             "model_name_or_path": checkpoint,
             "is_training": False,
+            # Evaluation construction is intentionally reused so checkpoint
+            # metadata and normalizers stay identical.  Policy-local loaders
+            # may use this explicit flag to keep parameter-efficient adapters
+            # trainable without changing eval_sim/eval_real behavior.
+            "rl_training": True,
         }
     )
     args = SimpleNamespace(**runtime)
