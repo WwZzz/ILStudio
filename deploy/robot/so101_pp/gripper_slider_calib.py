@@ -89,8 +89,8 @@ def calibrate_gripper_with_slider(
 
     info = tk.StringVar(
         value=(
-            "步骤 2a：用滑条把平行抓夹完全闭合，然后点「确认最小值（闭合）」\n"
-            "或在此窗口按 Enter。"
+            "Step 2a: Use the slider to fully CLOSE the parallel gripper, then click "
+            "'Set min (closed)'\nor press Enter in this window."
         )
     )
     stats = tk.StringVar(value="")
@@ -129,7 +129,7 @@ def calibrate_gripper_with_slider(
             f"goal={goal:4d}   present={present:4d}   closed={closed_s}   open={open_s}   step={phase}"
         )
         if err:
-            status.set(f"错误: {err}")
+            status.set(f"Error: {err}")
         if not finished:
             root.after(50, refresh_labels)
 
@@ -141,23 +141,23 @@ def calibrate_gripper_with_slider(
             state["closed_v"] = present
             state["phase"] = "open"
         info.set(
-            "步骤 2b：用滑条把平行抓夹完全打开，然后点「确认最大值（打开）」\n"
-            "或在此窗口按 Enter。"
+            "Step 2b: Use the slider to fully OPEN the parallel gripper, then click "
+            "'Set max (open)'\nor press Enter in this window."
         )
-        status.set(f"已记录闭合位置 = {present}")
+        status.set(f"Recorded closed position = {present}")
 
     def confirm_open_and_finish():
         with lock:
             if state["phase"] != "open":
-                status.set("请先确认最小值（闭合）")
+                status.set("Set min (closed) first")
                 return
             present = int(state["present"])
             closed_v = state["closed_v"]
             if closed_v is None:
-                status.set("闭合位置未设置")
+                status.set("Closed position is not set")
                 return
             if present == closed_v:
-                status.set("打开位置与闭合位置相同，请把抓夹打开到另一端再确认")
+                status.set("Open equals closed; move the gripper to the other end and confirm again")
                 return
             state["open_v"] = present
             state["finished"] = True
@@ -179,17 +179,17 @@ def calibrate_gripper_with_slider(
         stop_event.set()
         root.destroy()
 
-    ttk.Button(btn_frame, text="确认最小值（闭合）", command=confirm_closed).pack(side=tk.LEFT, padx=6)
-    ttk.Button(btn_frame, text="确认最大值（打开）", command=confirm_open_and_finish).pack(side=tk.LEFT, padx=6)
+    ttk.Button(btn_frame, text="Set min (closed)", command=confirm_closed).pack(side=tk.LEFT, padx=6)
+    ttk.Button(btn_frame, text="Set max (open)", command=confirm_open_and_finish).pack(side=tk.LEFT, padx=6)
 
     root.bind("<Return>", on_enter)
     root.protocol("WM_DELETE_WINDOW", on_close)
     refresh_labels()
 
     print(
-        "\n[Gripper GUI] 窗口已打开。\n"
-        "  1) 滑到完全闭合 → 「确认最小值（闭合）」或 Enter\n"
-        "  2) 滑到完全打开 → 「确认最大值（打开）」或 Enter\n"
+        "\n[Gripper GUI] Window opened.\n"
+        "  1) Fully close → 'Set min (closed)' or Enter\n"
+        "  2) Fully open  → 'Set max (open)' or Enter\n"
     )
     root.mainloop()
     stop_event.set()

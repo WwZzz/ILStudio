@@ -14,8 +14,8 @@ python -m deploy.robot.so101_pp --port /dev/ttyACM1 --id so101_pp_follower --cal
 
 1. **Arm joints** (no gripper): move by hand through ROM, Enter to finish (same as so101_plus).
 2. **Gripper**: a Tkinter slider window opens  
-   - close fully → **确认最小值（闭合）** (or Enter)  
-   - open fully → **确认最大值（打开）** (or Enter)  
+   - close fully → **Set min (closed)** (or Enter)  
+   - open fully → **Set max (open)** (or Enter)  
    - Home is set to **closed** (normalized 0), not mid.
 
 Calibration files:
