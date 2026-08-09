@@ -1,0 +1,8 @@
+version: 1
+type: rl.critic.PolicyFeatureCritic
+args:
+  feature_provider:
+    $ref: policy_adapter
+  hidden_dim: 256
+  detach_features: true
+  use_language: false

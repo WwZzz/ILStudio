@@ -436,7 +436,7 @@ class Behavior1kEnv(MetaEnv):
         """Execute one environment step.
         
         Returns:
-            tuple: (obs, reward, done, info) - 4 values to match ILStudio convention
+            tuple: (obs, reward, terminated, truncated, info)
         """
         action = self.meta2act(maction)
         
@@ -446,18 +446,14 @@ class Behavior1kEnv(MetaEnv):
         meta_obs = self.obs2meta(obs)
         self.prev_obs = meta_obs
         
-        # Combine terminated and truncated into done
-        done = terminated or truncated
-        
         # Extract success from nested info
         if 'done' in info and 'success' in info['done']:
-            info['success'] = info['done']['success']
-        
-        # Store truncated in info for reference
-        info['truncated'] = truncated
-        
-        # Return 4 values to match ILStudio's SequentialVectorEnv expectation
-        return asdict(meta_obs), reward, done, info
+            info['success'] = bool(info['done']['success'])
+        info.setdefault('success', False)
+        info['terminated'] = bool(terminated)
+        info['truncated'] = bool(truncated)
+
+        return asdict(meta_obs), reward, bool(terminated), bool(truncated), info
     
     def reset(self):
         """Reset the environment."""
@@ -497,9 +493,23 @@ class Behavior1kEnv(MetaEnv):
         return self.env.observation_space
 
 
-def evaluate(args, policy, env, video_writer=None, save_example_dir=None):
+def evaluate(
+    args,
+    env,
+    action_manager,
+    inference_ctx=None,
+    video_writer=None,
+    save_example_dir=None,
+):
     """
     Custom evaluation function for BEHAVIOR-1K environment.
     """
     from benchmark.utils import evaluate as default_evaluate
-    return default_evaluate(args, policy, env, video_writer=video_writer, save_example_dir=save_example_dir)
+    return default_evaluate(
+        args,
+        env,
+        action_manager,
+        inference_ctx=inference_ctx,
+        video_writer=video_writer,
+        save_example_dir=save_example_dir,
+    )

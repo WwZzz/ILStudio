@@ -1,0 +1,10 @@
+name: gym_cartpole
+datasets: []
+meta:
+  state_only: true
+  state_dim: 4
+  action_dim: 1
+  action_space: discrete
+  num_actions: 2
+  action_normalize: none
+  state_normalize: none

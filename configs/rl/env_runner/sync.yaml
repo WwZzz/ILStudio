@@ -1,0 +1,7 @@
+version: 1
+runner:
+  type: benchmark.env_runner.SyncEnvRunner
+  args: {}
+collector:
+  type: rl.collector.SyncCollector
+  args: {}

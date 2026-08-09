@@ -49,6 +49,7 @@ import torch
 from loguru import logger
 
 from deploy.shm_utils import SharedMemoryChannel, cleanup_all_shm
+from utils.torch_backend import configure_torch_backends_from_env
 
 
 def _extract_step_action(step):
@@ -106,6 +107,9 @@ def inference_worker(
     from data_utils.utils import set_seed
     set_seed(0)
     
+    if configure_torch_backends_from_env():
+        logger.info("[InferenceWorker] cuDNN disabled by ILSTUDIO_DISABLE_CUDNN")
+
     is_real_mode = device_shm_names is not None and len(device_shm_names) > 0
     mode_str = "REAL" if is_real_mode else "SIM"
     
@@ -426,12 +430,14 @@ class InferenceContext:
         action_reader: SharedMemoryChannel,
         ctrl_writer: SharedMemoryChannel,
         shm_names: tuple,
+        chunk_size: int = -1,
     ):
         self.process = process
         self.obs_writer = obs_writer
         self.action_reader = action_reader
         self.ctrl_writer = ctrl_writer
         self.shm_names = shm_names
+        self.chunk_size = chunk_size
         self._epoch = 0  # Incremented on reset; used to discard stale chunks
     
     def update_obs(self, mobs, t: int) -> None:
@@ -645,6 +651,7 @@ def start_inference_process(
         action_reader=action_reader,
         ctrl_writer=ctrl_writer,
         shm_names=tuple(all_shm_names),
+        chunk_size=chunk_size,
     )
 
 

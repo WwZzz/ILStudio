@@ -126,6 +126,14 @@ class LiberoEnv(MetaEnv):
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
+
+    def step(self, *args, **kwargs):
+        obs, reward, terminated, truncated, info = super().step(*args, **kwargs)
+        # LIBERO's legacy ``done`` happens to mean task success, but keeping an
+        # explicit metric prevents that benchmark-specific fact leaking into
+        # the common episode-end contract.
+        info['success'] = bool(self.env.check_success())
+        return obs, reward, terminated, truncated, info
     
     def reset(self):
         self.env.reset()

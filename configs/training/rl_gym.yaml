@@ -1,0 +1,10 @@
+# Small state-policy optimizer settings loaded by the same ConfigLoader as train.py.
+learning_rate: 0.0005
+weight_decay: 0.0
+optim: adamw_torch
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+seed: 0
+report_to: none
+disable_tqdm: true

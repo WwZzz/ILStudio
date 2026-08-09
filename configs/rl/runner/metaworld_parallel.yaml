@@ -1,0 +1,21 @@
+version: 1
+name: metaworld_parallel
+metadata:
+  description: Safe visual off-policy preset for two MetaWorld workers
+type: rl.runner.RLRunner
+config_type: rl.runner.RLRunnerConfig
+collector:
+  args:
+    terminate_on_success: true
+    bootstrap_on_truncation: false
+args:
+  iterations: 250
+  collect_episodes: 2
+  batch_size: 64
+  updates_per_iteration: 16
+  warmup_steps: 8192
+  deterministic_collection: false
+  clear_rollout_after_update: true
+  seed: 0
+run:
+  retain_results: false

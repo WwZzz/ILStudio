@@ -1,0 +1,23 @@
+version: 1
+metadata:
+  recommended_reward: raw_0_01
+  recommended_training_overrides:
+    learning_rate: 0.0002
+type: rl.algorithm.ActorCriticAlgorithm
+args:
+  gamma: 0.98
+  reward_key: train/total
+  value_coef: 1.0
+  entropy_coef: 0.0
+policy_adapter:
+  required_capabilities: [action, actor_critic]
+  args:
+    policy_std: 0.2
+    seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_steps: 10
+  updates_per_iteration: 1
+  warmup_steps: 0

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, fields, asdict
 from typing import Optional
 import torch
 from loguru import logger
-from .utils import resize_with_pad
+from .utils import normalize_step_result, resize_with_pad
 
 @dataclass
 class MetaAction:
@@ -65,10 +65,13 @@ class MetaEnv:
         
     def step(self, *args, **kwargs):
         act = self.meta2act(*args, **kwargs)
-        results = list(self.env.step(act))
-        self.prev_obs = results[0] = self.obs2meta(results[0])
-        if isinstance(results[0], MetaObs): results[0] = asdict(results[0])
-        return tuple(results)
+        obs, reward, terminated, truncated, info = normalize_step_result(
+            self.env.step(act)
+        )
+        self.prev_obs = obs = self.obs2meta(obs)
+        if isinstance(obs, MetaObs):
+            obs = asdict(obs)
+        return obs, reward, terminated, truncated, info
     
     def obs2meta(self, raw_obs):
         # convert raw_obs into MetaObs WITHOUT normalizing data
@@ -209,7 +212,7 @@ class MetaPolicy:
         
         samples = []
         for i in range(batch_size):
-            sample = {}
+            sample = {'image': None}
             
             # Image: keep original format, let policy's data_processor handle resize
             if normed_mobs.image is not None:
@@ -235,13 +238,22 @@ class MetaPolicy:
             
             # Timestamp (optional)
             if hasattr(normed_mobs, 'timestep') and normed_mobs.timestep is not None:
-                sample['timestamp'] = normed_mobs.timestep[i] if len(normed_mobs.timestep.shape) > 1 else normed_mobs.timestep
+                timestep = normed_mobs.timestep
+                if (
+                    isinstance(timestep, (np.ndarray, torch.Tensor))
+                    and timestep.ndim > 0
+                    and timestep.shape[0] == batch_size
+                ):
+                    timestep = timestep[i]
+                sample['timestamp'] = timestep
             # Construct observations, convert arrays to tensors
             if sample['image'] is not None:
                 # Safety check: ensure images are uint8 with values in [0, 255]
                 from data_utils.utils import ensure_uint8_image
                 sample['image'] = ensure_uint8_image(sample['image'])   # (cameras, C, H, W)
-                sample['image'] = torch.from_numpy(sample['image'])  # (cameras, C, H, W)
+                sample['image'] = torch.from_numpy(
+                    np.ascontiguousarray(sample['image'])
+                )  # (cameras, C, H, W)
             else:
                 sample['image'] = None
             sample['state'] = torch.from_numpy(sample['state']).float() if 'state' in sample else None  # (state_dim,)

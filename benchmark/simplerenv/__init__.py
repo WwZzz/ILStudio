@@ -86,10 +86,10 @@ class SimplerEnv(MetaEnv):
         action = args[0]['action']
         observation, reward, terminated, truncated, info = self.env.step(action)
         obs = self.obs2meta(observation)
-        done = info['success']
-        info['terminated'] = terminated
-        info['truncated'] = truncated
-        return obs, reward, done, info
+        info['success'] = bool(info.get('success', False))
+        info['terminated'] = bool(terminated)
+        info['truncated'] = bool(truncated)
+        return obs, reward, bool(terminated), bool(truncated), info
     
     def reset(self):
         obs, reset_info = self.env.reset()

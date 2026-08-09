@@ -12,12 +12,12 @@ type: benchmark.rlbench.RLBenchEnv
 name: rlbench_close_box
 args:
   task: CloseBox
-  max_timesteps: 200  # Maximum steps per episode
+  max_timesteps: 450  # ~1.3x the longest training demonstration (343 frames)
   ctrl_space: ee  # 'joint' or 'ee'
   ctrl_type: abs     # 'abs' or 'delta'
-
+  ee_exec: ik  # Match the controller used to validate this checkpoint/task.
   camera_names:
-    - front
+    - overhead
     - wrist
   image_size: [256, 256]
   headless: true

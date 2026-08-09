@@ -1,0 +1,22 @@
+version: 1
+type: rl.algorithm.PPOAlgorithm
+args:
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  reward_key: train/total
+  value_coef: 0.5
+  entropy_coef: 0.01
+  normalize_advantage: true
+policy_adapter:
+  required_capabilities: [action, ppo]
+  args:
+    policy_std: 0.2
+    seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 4
+  warmup_steps: 0

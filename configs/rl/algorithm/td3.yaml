@@ -1,0 +1,32 @@
+version: 1
+type: rl.algorithm.TD3Algorithm
+args:
+  gamma: 0.99
+  reward_key: train/total
+  target_tau: 0.005
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  policy_delay: 64
+  actor_bc_coef: 1.0
+policy_adapter:
+  required_capabilities: [action, td3, target_update]
+  args:
+    target_action_clip: [-1.0, 1.0]
+    target_policy_noise_std: 0.02
+    target_policy_noise_rho: 0.9
+    target_policy_noise_clip: 0.05
+    critic_spatial_grid: [4, 4]
+    critic_timestep_scale: 128.0
+    critic_activation: relu
+    actor_learning_rate: 0.000001
+    critic_learning_rate: 0.001
+    seed: 0
+buffer:
+  type: rl.buffer.DecisionReplayBuffer
+  args:
+    capacity: 100000
+    seed: 0
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 10
+  warmup_steps: 8192

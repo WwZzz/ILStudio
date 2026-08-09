@@ -235,16 +235,22 @@ class TabletopSimEnv(MetaEnv):
         ts = self.env.step(act)
         reward = float(ts.reward) if ts.reward is not None else 0.0
         max_reward = getattr(self.env.task, "max_reward", 1) or 1
-        done = bool(reward >= max_reward)
+        success = bool(reward >= max_reward)
+        is_last = bool(ts.last())
+        terminated = is_last and (ts.discount is None or float(ts.discount) == 0.0)
+        truncated = is_last and not terminated
         info = {
-            "success": done,
+            "success": success,
+            "terminated": terminated,
+            "truncated": truncated,
             "reward": reward,
             "max_reward": max_reward,
+            "discount": ts.discount,
+            "step_type": ts.step_type,
         }
         self.raw_lang = str(ts.observation.get("language_instruction", self.raw_lang) or self.raw_lang)
         self.prev_obs = self.obs2meta(ts.observation)
-        results = [asdict(self.prev_obs), reward, done, info]
-        return tuple(results)
+        return asdict(self.prev_obs), reward, terminated, truncated, info
 
     def close(self):
         try:

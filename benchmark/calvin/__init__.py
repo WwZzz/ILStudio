@@ -290,17 +290,17 @@ class CalvinEnv(MetaEnv):
         2. Steps the environment
         3. Checks if current subtask is completed
         4. If completed, advances to next subtask or marks sequence as done
-        5. Returns (obs, reward, done, info)
+        5. Returns (obs, reward, terminated, truncated, info)
         
         For eval_sim.py compatibility:
-        - done=True when sequence ends (all subtasks done OR failed)
         - info['success'] = True if at least 1 subtask completed (for standard eval)
         - info['subtasks_completed'] = actual number (for CALVIN metrics)
         
         Returns:
             obs: MetaObs dict
             reward: Always 0 (CALVIN doesn't use rewards)
-            done: True if sequence is complete
+            terminated: True if all five subtasks are complete
+            truncated: True if the current subtask reaches its step limit
             info: Dict with 'success', 'subtasks_completed', 'sequence_done', etc.
         """
         # Convert action
@@ -324,6 +324,8 @@ class CalvinEnv(MetaEnv):
         
         subtask_success = len(current_task_info) > 0
         sequence_done = False
+        terminated = False
+        truncated = False
         
         if subtask_success:
             # Subtask completed successfully
@@ -337,9 +339,11 @@ class CalvinEnv(MetaEnv):
             # Check if sequence is complete
             if self.current_subtask_idx >= self.max_subtasks:
                 sequence_done = True
+                terminated = True
         elif self.current_step >= self.ep_len:
             # Subtask failed (timeout)
             sequence_done = True
+            truncated = True
         
         # Prepare info dict
         # For eval_sim.py: 'success' means at least 1 subtask completed
@@ -348,6 +352,8 @@ class CalvinEnv(MetaEnv):
             'subtasks_completed': self.subtasks_completed,  # CALVIN metric: 0-5
             'current_subtask_idx': self.current_subtask_idx,
             'sequence_done': sequence_done,
+            'terminated': terminated,
+            'truncated': truncated,
             'current_step': self.current_step,
             'current_subtask': subtask if self.current_subtask_idx < len(self.eval_sequence) else None,
             'calvin_success_rate_1': 1.0 if self.subtasks_completed >= 1 else 0.0,
@@ -363,10 +369,7 @@ class CalvinEnv(MetaEnv):
             from dataclasses import asdict
             obs = asdict(obs)
         
-        # done = True means the sequence evaluation is complete
-        done = sequence_done
-        
-        return obs, 0, done, info
+        return obs, 0, terminated, truncated, info
     
     def get_sequence_info(self):
         """Get information about the current sequence."""

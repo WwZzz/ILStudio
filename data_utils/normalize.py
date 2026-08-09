@@ -1013,7 +1013,7 @@ class ZScoreNormalizer(BaseNormalizer):
         dataset_name=None,
         ctrl_type='delta',
         ctrl_space='ee',
-        min_std=1e-2,
+        min_std=1e-6,
         mask=None,
         *args,
         **kwargs,
@@ -1033,7 +1033,10 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        std = self._safe_scale(stats['std'], self.min_std)
+        std = stats['std']
+        std = (torch.clamp(std, min=self.min_std)
+               if isinstance(std, torch.Tensor)
+               else np.clip(std, self.min_std, np.inf))
         normalized = (data - stats['mean']) / std
         
         # Apply mask to selectively normalize
@@ -1050,7 +1053,10 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        std = self._safe_scale(stats['std'], self.min_std)
+        std = stats['std']
+        std = (torch.clamp(std, min=self.min_std)
+               if isinstance(std, torch.Tensor)
+               else np.clip(std, self.min_std, np.inf))
         denormalized = data * std + stats['mean']
         
         # Apply mask to selectively denormalize

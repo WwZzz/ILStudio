@@ -19,6 +19,9 @@ class MLPPolicyConfig(PretrainedConfig):
         dropout=0.0,
         use_camera=False,
         image_dim=None,  # Flattened image dimension (H*W*C)
+        rl_action_space=None,
+        action_low=None,
+        action_high=None,
         
         # Training parameters
         chunk_size=1,  # For consistency with other policies
@@ -36,6 +39,17 @@ class MLPPolicyConfig(PretrainedConfig):
         self.dropout = dropout
         self.use_camera = use_camera
         self.image_dim = image_dim
+        if rl_action_space not in {None, "discrete", "continuous"}:
+            raise ValueError(
+                "rl_action_space must be discrete, continuous, or None"
+            )
+        if (action_low is None) != (action_high is None):
+            raise ValueError(
+                "action_low and action_high must be configured together"
+            )
+        self.rl_action_space = rl_action_space
+        self.action_low = action_low
+        self.action_high = action_high
         self.chunk_size = chunk_size
         
         # Calculate input dimension

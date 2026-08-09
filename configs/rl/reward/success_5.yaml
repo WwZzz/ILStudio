@@ -1,0 +1,10 @@
+version: 1
+name: success_5
+components:
+  success_reward:
+    type: rl.reward.SuccessReward
+    args:
+      namespace: task
+      first_only: true
+weights:
+  task/success: 5.0

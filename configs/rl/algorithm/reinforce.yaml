@@ -1,0 +1,22 @@
+version: 1
+type: rl.algorithm.ReinforceAlgorithm
+args:
+  gamma: 0.99
+  reward_key: train/total
+  normalize_returns: true
+  entropy_coef: 0.0
+policy_adapter:
+  fallback_adapter: gaussian_chunk
+  required_capabilities: [action, reinforce]
+  args:
+    # Standard deviation in normalized action space. Tune this per
+    # checkpoint and control space; absolute EE control may need much less.
+    policy_std: 0.02
+    inference_seed: 0
+    seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 1

@@ -1,0 +1,21 @@
+version: 1
+type: rl.algorithm.SARSAAlgorithm
+args:
+  gamma: 0.98
+  reward_key: train/total
+  huber_loss: true
+policy_adapter:
+  required_capabilities: [action, sarsa]
+  args:
+    epsilon_start: 0.10
+    epsilon_end: 0.01
+    epsilon_decay_steps: 10000
+    seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  # FullRolloutUpdates interprets this as epochs over each sealed rollout.
+  updates_per_iteration: 10
+  warmup_steps: 0

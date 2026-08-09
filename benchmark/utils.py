@@ -5,11 +5,141 @@ from tianshou.env import SubprocVectorEnv
 import time
 import os
 from PIL import Image, ImageDraw, ImageFont
-from typing import List, Optional
+from typing import Any, List, Optional
 from pathlib import Path
 from collections import deque
 import cv2
 from loguru import logger
+
+
+def normalize_step_result(step_result):
+    """Convert one environment step result to the Gymnasium five-value API.
+
+    New benchmark adapters must already return ``(obs, reward, terminated,
+    truncated, info)``. The four-value branch is deliberately retained for
+    third-party environments that still implement the pre-v0.26 Gym API.
+    """
+    if not isinstance(step_result, (tuple, list)) or len(step_result) not in (4, 5):
+        raise ValueError("env.step() must return 4 or 5 values")
+
+    if len(step_result) == 5:
+        obs, reward, terminated, truncated, info = step_result
+    else:
+        obs, reward, done, info = step_result
+        info = {} if info is None else dict(info)
+        truncated = bool(
+            info.get("TimeLimit.truncated", info.get("truncated", False))
+        )
+        terminated = bool(done) and not truncated
+
+    if info is None:
+        info = {}
+    if not isinstance(info, dict):
+        raise TypeError("the fifth env.step() value must be an info dict")
+
+    terminated = bool(terminated)
+    truncated = bool(truncated)
+    info = dict(info)
+    # These copies are useful to legacy consumers and make recorded rollouts
+    # self-describing without changing the standard return contract.
+    info["terminated"] = terminated
+    info["truncated"] = truncated
+    return obs, reward, terminated, truncated, info
+
+
+def _split_vector_info(info: Any, batch_size: int) -> List[dict]:
+    """Normalize vector-env info containers to one dictionary per env."""
+    if isinstance(info, dict):
+        items = []
+        for index in range(batch_size):
+            item = {}
+            for key, value in info.items():
+                try:
+                    is_batched = not np.isscalar(value) and len(value) == batch_size
+                except TypeError:
+                    is_batched = False
+                item[key] = value[index] if is_batched else value
+            items.append(item)
+        return items
+
+    if isinstance(info, np.ndarray):
+        info = info.tolist()
+    if isinstance(info, (tuple, list)):
+        if len(info) != batch_size:
+            raise ValueError(
+                f"vector info has {len(info)} entries for batch size {batch_size}"
+            )
+        return [dict(item or {}) for item in info]
+
+    raise TypeError("vector env info must be a dict or a sequence of dicts")
+
+
+def normalize_vector_step_result(step_result):
+    """Convert vector environment results to the Gymnasium five-value API."""
+    if not isinstance(step_result, (tuple, list)) or len(step_result) not in (4, 5):
+        raise ValueError("vector env.step() must return 4 or 5 values")
+
+    if len(step_result) == 5:
+        obs, reward, terminated, truncated, info = step_result
+        terminated = np.asarray(terminated, dtype=bool)
+        truncated = np.asarray(truncated, dtype=bool)
+    else:
+        obs, reward, done, info = step_result
+        done = np.asarray(done, dtype=bool)
+        batch_size = int(done.size) if done.ndim else 1
+        infos = _split_vector_info(info, batch_size)
+        truncated = np.asarray(
+            [
+                bool(item.get("truncated", item.get("TimeLimit.truncated", False)))
+                for item in infos
+            ],
+            dtype=bool,
+        ).reshape(done.shape)
+        terminated = np.logical_and(done, np.logical_not(truncated))
+        info = infos
+
+    batch_size = int(terminated.size) if terminated.ndim else 1
+    infos = _split_vector_info(info, batch_size)
+    flat_terminated = terminated.reshape(-1)
+    flat_truncated = truncated.reshape(-1)
+    for index, item in enumerate(infos):
+        item["terminated"] = bool(flat_terminated[index])
+        item["truncated"] = bool(flat_truncated[index])
+
+    return obs, reward, terminated, truncated, infos
+
+
+def extract_success(info: Any, batch_size: int) -> np.ndarray:
+    """Read task success independently from termination or truncation."""
+    infos = _split_vector_info(info, batch_size)
+    return np.asarray([bool(item.get("success", False)) for item in infos], dtype=bool)
+
+
+class LegacyStepAPIWrapper:
+    """Expose a four-value API only to consumers that cannot read Gym v0.26.
+
+    ILStudio currently pins Tianshou 0.2.0, whose vector workers expect the
+    legacy ``done`` value. Keeping this adapter at that process boundary lets
+    benchmark environments and RL code use the correct five-value contract.
+    """
+
+    def __init__(self, env):
+        self.env = env
+
+    def reset(self, *args, **kwargs):
+        return self.env.reset(*args, **kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = normalize_step_result(
+            self.env.step(action)
+        )
+        return obs, reward, terminated or truncated, info
+
+    def close(self):
+        return self.env.close()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
 
 class SequentialVectorEnv:
@@ -50,22 +180,30 @@ class SequentialVectorEnv:
     
     def step(self, action, id=None):
         if id is None:
-            results = [env.step(act) for env, act in zip(self.envs, action)]
+            results = [
+                normalize_step_result(env.step(act))
+                for env, act in zip(self.envs, action)
+            ]
             obs = self._stack_obs([r[0] for r in results])
             rew = np.array([r[1] for r in results])
-            done = np.array([r[2] for r in results])
-            info = [r[3] for r in results]
-            return obs, rew, done, info
+            terminated = np.array([r[2] for r in results], dtype=bool)
+            truncated = np.array([r[3] for r in results], dtype=bool)
+            info = [r[4] for r in results]
+            return obs, rew, terminated, truncated, info
         else:
             if np.isscalar(id):
-                return self.envs[id].step(action)
+                return normalize_step_result(self.envs[id].step(action))
             else:
-                results = [self.envs[i].step(act) for i, act in zip(id, action)]
+                results = [
+                    normalize_step_result(self.envs[i].step(act))
+                    for i, act in zip(id, action)
+                ]
                 obs = self._stack_obs([r[0] for r in results])
                 rew = np.array([r[1] for r in results])
-                done = np.array([r[2] for r in results])
-                info = [r[3] for r in results]
-                return obs, rew, done, info
+                terminated = np.array([r[2] for r in results], dtype=bool)
+                truncated = np.array([r[3] for r in results], dtype=bool)
+                info = [r[4] for r in results]
+                return obs, rew, terminated, truncated, info
     
     def __len__(self):
         return self.env_num
@@ -415,7 +553,8 @@ def evaluate(
     # Start evaluation
     with torch.inference_mode():
         time_start_eval = time.time()
-        success = np.zeros(len(env)).astype(np.bool8)
+        success = np.zeros(len(env), dtype=bool)
+        episode_done = np.zeros(len(env), dtype=bool)
         obs = env.reset()
         obs = organize_obs(obs)
         
@@ -439,20 +578,24 @@ def evaluate(
                 _save_example_batch(obs, act, save_example_dir)
                 first_obs_saved = True
             
-            obs, reward, done, info = env.step(act)
+            obs, reward, terminated, truncated, info = normalize_vector_step_result(
+                env.step(act)
+            )
             obs = organize_obs(obs)
-            # Decide if success
-            success = success | done
-            if success.all(): 
-                for sidx in range(success.shape[0]):
-                    if horizons[sidx] > t:
-                        horizons[sidx] = t
+
+            step_success = extract_success(info, batch_size=len(env))
+            first_success = np.logical_and(step_success, np.logical_not(success))
+            for sidx in np.flatnonzero(first_success):
+                horizons[sidx] = t
+            success = np.logical_or(success, step_success)
+            episode_done = np.logical_or(
+                episode_done, np.logical_or(terminated, truncated)
+            )
+
+            # A successful task need not terminate, and a failed episode may
+            # terminate or truncate. Stop once every rollout has an outcome.
+            if success.all() or episode_done.all():
                 break
-            elif success.any():
-                success_idx = np.where(success == True)[0]
-                for sidx in success_idx: 
-                    if horizons[sidx] > t:
-                        horizons[sidx] = t
 
     # Cleanup
     env.close()

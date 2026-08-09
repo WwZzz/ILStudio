@@ -39,3 +39,4 @@ policy/*pose*
 policy/*nostate*
 *bilora*
 configs/task/local/
+/tests/

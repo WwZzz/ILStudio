@@ -1,0 +1,27 @@
+version: 1
+type: rl.algorithm.PPOAlgorithm
+objective: chunk
+critic: dino_state
+args:
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  reward_key: train/total
+  value_coef: 0.5
+  entropy_coef: 0.0
+  normalize_advantage: true
+policy_adapter:
+  fallback_adapter: gaussian_chunk
+  required_capabilities: [action, ppo]
+  args:
+    # Standard deviation in normalized action space. Tune this per
+    # checkpoint and control space; absolute EE control may need much less.
+    policy_std: 0.02
+    inference_seed: 0
+    seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 4

@@ -1,5 +1,6 @@
 import configs  # Must be first to suppress TensorFlow logs
 import os
+import copy
 import json
 import importlib
 import imageio
@@ -9,13 +10,30 @@ from loguru import logger
 from data_utils.utils import set_seed
 from tqdm import tqdm
 from tianshou.env import SubprocVectorEnv
-from benchmark.utils import evaluate as default_evaluate, SequentialVectorEnv
+from benchmark.utils import (
+    LegacyStepAPIWrapper,
+    SequentialVectorEnv,
+    evaluate as default_evaluate,
+)
 from deploy.action_manager import load_action_manager
 from deploy.inference import start_inference_process, stop_inference_process
 
-def env_fn(env_config, env_handler):
+def rollout_env_seed(base_seed, rollout_index):
+    """Return a stable, prefix-preserving seed for one evaluation rollout."""
+    return int(base_seed) + int(rollout_index)
+
+
+def env_fn(env_config, env_handler, legacy_step_api=False, seed=None):
     def create_env():
-        return env_handler(env_config)
+        # ConfigLoader returns SimpleNamespace objects.  Clone per worker so
+        # parallel factories never mutate or share the caller's config.
+        worker_config = copy.deepcopy(env_config)
+        if seed is not None:
+            worker_config.seed = int(seed)
+        env = env_handler(worker_config)
+        if legacy_step_api:
+            env = LegacyStepAPIWrapper(env)
+        return env
     return create_env
 
 def load_env_module(env_cfg):
@@ -173,7 +191,17 @@ if __name__=='__main__':
                     video_writer = None
                 
                 # Create environment(s)
-                env_fns = [env_fn(env_cfg, env_module.create_env) for _ in range(num_envs)]
+                # Tianshou 0.2.0 only accepts the old four-value step API. Keep
+                # that compatibility local to its subprocess worker boundary.
+                env_fns = [
+                    env_fn(
+                        env_cfg,
+                        env_module.create_env,
+                        legacy_step_api=not use_sequential,
+                        seed=rollout_env_seed(args.seed, rollout_start + env_offset),
+                    )
+                    for env_offset in range(num_envs)
+                ]
                 env = SequentialVectorEnv(env_fns) if use_sequential else SubprocVectorEnv(env_fns)
                 
                 # Save example batch only for the first rollout

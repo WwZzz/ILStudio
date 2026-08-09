@@ -1,0 +1,26 @@
+version: 1
+type: rl.algorithm.DDPGAlgorithm
+args:
+  gamma: 0.99
+  reward_key: train/total
+  target_tau: 0.005
+  actor_bc_coef: 1.0
+policy_adapter:
+  required_capabilities: [action, ddpg, target_update]
+  args:
+    policy_std: 0.2
+    critic_spatial_grid: [4, 4]
+    critic_timestep_scale: 128.0
+    critic_activation: relu
+    actor_learning_rate: 0.0000001
+    critic_learning_rate: 0.001
+    seed: 0
+buffer:
+  type: rl.buffer.DecisionReplayBuffer
+  args:
+    capacity: 100000
+    seed: 0
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 10
+  warmup_steps: 8192

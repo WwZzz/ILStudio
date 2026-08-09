@@ -1,0 +1,17 @@
+version: 1
+name: process
+metadata:
+  description: Two spawned MetaEnv workers with batched in-process policy inference
+runner:
+  type: benchmark.env_runner.ProcessEnvRunner
+  args:
+    num_envs: 2
+    start_method: spawn
+    seed_stride: 1000000
+executor:
+  type: rl.executor.BatchedRLPolicyExecutor
+  args:
+    num_envs: 2
+collector:
+  type: rl.collector.ParallelCollector
+  args: {}

@@ -459,7 +459,8 @@ class BiGymEnv(MetaEnv):
         Returns:
             meta_obs: MetaObs with 15-dim (or 12-dim) state
             reward: float
-            success: bool
+            terminated: bool
+            truncated: bool
             info: dict
         """
         maction = args[0]
@@ -477,7 +478,7 @@ class BiGymEnv(MetaEnv):
         info['truncated'] = truncated
         info['success'] = success
         
-        return meta_obs, reward, success, info
+        return meta_obs, reward, bool(terminated), bool(truncated), info
     
     def reset(self, seed=None):
         """Reset the environment.

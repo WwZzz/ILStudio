@@ -76,10 +76,8 @@ class PandaGymEnv(MetaEnv):
 
     def step(self, *args, **kwargs):
         observation, reward, terminated, truncated, info = super().step(*args, **kwargs)
-        done = info['is_success']
-        info['terminated'] = terminated
-        info['truncated'] = truncated
-        return observation, reward, done, info
+        info['success'] = bool(info.get('is_success', False))
+        return observation, reward, terminated, truncated, info
     
     def reset(self):
         pid = current_process().pid  # 获取当前进程 ID
