@@ -1,10 +1,7 @@
 """Adapter for existing ``MetaPolicy`` checkpoints."""
 
 import copy
-import json
-import shutil
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, Optional
 
@@ -218,47 +215,6 @@ class MetaPolicyAdapter(BasePolicyAdapter):
 
     def reset(self):
         self.meta_policy.reset()
-
-    @staticmethod
-    def _checkpoint_root(checkpoint_path):
-        root = Path(checkpoint_path)
-        if root.name.startswith("checkpoint-"):
-            root = root.parent
-        return root
-
-    @staticmethod
-    def _copy_file(source, destination):
-        if source.resolve() != destination.resolve():
-            shutil.copy2(source, destination)
-
-    def _copy_checkpoint_assets(self, output_dir):
-        if self.checkpoint_path is None:
-            return
-        source_root = self._checkpoint_root(self.checkpoint_path)
-        output_root = Path(output_dir)
-        normalize_path = source_root / "normalize.json"
-        if not normalize_path.is_file():
-            return
-        self._copy_file(normalize_path, output_root / normalize_path.name)
-        with normalize_path.open("r", encoding="utf-8") as stream:
-            normalize_config = json.load(stream)
-        for dataset in normalize_config.get("datasets", ()):
-            dataset_id = dataset.get("dataset_id")
-            if not dataset_id:
-                continue
-            ctrl_space = dataset.get("ctrl_space", "ee")
-            ctrl_type = dataset.get("ctrl_type", "delta")
-            filename = f"{dataset_id}_stats_{ctrl_space}_{ctrl_type}.pkl"
-            stats_path = source_root / filename
-            if stats_path.is_file():
-                self._copy_file(stats_path, output_root / filename)
-
-    def save_pretrained(self, output_dir):
-        """Save native model files plus loader metadata and normalizers."""
-
-        result = super().save_pretrained(output_dir)
-        self._copy_checkpoint_assets(output_dir)
-        return result
 
     def state_dict(self):
         state = super().state_dict()

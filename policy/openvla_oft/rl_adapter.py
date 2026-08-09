@@ -321,7 +321,7 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
                 extra_state_dict[name] = module.state_dict()
         if extra_state_dict:
             torch.save(extra_state_dict, os.path.join(output_dir, "extra_weights.bin"))
-        self._copy_policy_metadata(output_dir)
+        self._copy_checkpoint_assets(output_dir)
         return result
 
 

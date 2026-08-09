@@ -1,5 +1,6 @@
 """Thin policy-facing contracts for reinforcement learning."""
 
+import json
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
@@ -195,6 +196,34 @@ class BasePolicyAdapter(ABC):
         if source.resolve() != destination.resolve():
             shutil.copy2(source, destination)
 
+    def _copy_checkpoint_assets(self, output_dir):
+        """Preserve the native ILStudio loader contract in every RL save."""
+
+        self._copy_policy_metadata(output_dir)
+        if self.checkpoint_path is None:
+            return
+        source_root = self._checkpoint_root(self.checkpoint_path)
+        output_root = Path(output_dir)
+        normalize_path = source_root / "normalize.json"
+        if not normalize_path.is_file():
+            return
+        destination = output_root / normalize_path.name
+        if normalize_path.resolve() != destination.resolve():
+            shutil.copy2(normalize_path, destination)
+        with normalize_path.open("r", encoding="utf-8") as stream:
+            normalize_config = json.load(stream)
+        for dataset in normalize_config.get("datasets", ()):
+            dataset_id = dataset.get("dataset_id")
+            if not dataset_id:
+                continue
+            ctrl_space = dataset.get("ctrl_space", "ee")
+            ctrl_type = dataset.get("ctrl_type", "delta")
+            filename = f"{dataset_id}_stats_{ctrl_space}_{ctrl_type}.pkl"
+            source = source_root / filename
+            destination = output_root / filename
+            if source.is_file() and source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+
     def save_pretrained(self, output_dir):
         """Save policy weights plus ILStudio's policy-loader metadata."""
 
@@ -204,7 +233,7 @@ class BasePolicyAdapter(ABC):
                 "policy must provide save_pretrained() or override the adapter hook"
             )
         result = save(output_dir)
-        self._copy_policy_metadata(output_dir)
+        self._copy_checkpoint_assets(output_dir)
         return result
 
     def _validate_obs(self, obs: MetaObs) -> None:
