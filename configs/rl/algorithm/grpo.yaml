@@ -15,8 +15,6 @@ policy_adapter:
   required_capabilities: [action, grpo]
   args:
     temperature: 1.6
-    action_dim: 7
-    restrict_action_tokens: true
 buffer:
   type: rl.buffer.RolloutBuffer
   args: {}
