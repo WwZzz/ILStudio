@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from benchmark.base import MetaObs
 from deploy.action_manager.chunk import BasicActionChunkManager
+from rl.base import RL_LIKELIHOOD_GROUP_KEY, RL_LIKELIHOOD_GROUP_SIZE_KEY
 from rl.policy_adapter import BasePolicyAdapter
 
 from .base import BasePolicyExecutor
@@ -37,6 +38,7 @@ class BatchedRLPolicyExecutor(BasePolicyExecutor):
             for _ in range(num_envs)
         )
         self._next_decision_id = 0
+        self._next_likelihood_group_id = 0
         self._closed = False
 
     @property
@@ -94,6 +96,8 @@ class BatchedRLPolicyExecutor(BasePolicyExecutor):
             )
             if len(outputs) != len(inference_positions):
                 raise ValueError("batched policy output size does not match inputs")
+            likelihood_group_id = self._next_likelihood_group_id
+            likelihood_group_size = len(outputs)
             for position, output in zip(inference_positions, outputs):
                 env_index = env_indices[position]
                 self._lanes[env_index].enqueue_policy_output(
@@ -102,9 +106,12 @@ class BatchedRLPolicyExecutor(BasePolicyExecutor):
                     policy_info={
                         "decision_id": self._next_decision_id,
                         "env_index": env_index,
+                        RL_LIKELIHOOD_GROUP_KEY: likelihood_group_id,
+                        RL_LIKELIHOOD_GROUP_SIZE_KEY: likelihood_group_size,
                     },
                 )
                 self._next_decision_id += 1
+            self._next_likelihood_group_id += 1
 
         return tuple(self._lanes[index].take_action() for index in env_indices)
 

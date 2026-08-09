@@ -17,6 +17,8 @@ from benchmark.base import MetaAction, MetaObs
 ACTION_POLICY_INFO_KEY = "action_policy_info"
 RL_BOOTSTRAP_MASK_KEY = "rl.bootstrap_mask"
 RL_TERMINATED_ON_SUCCESS_KEY = "rl.terminated_on_success"
+RL_LIKELIHOOD_GROUP_KEY = "rl.likelihood_group"
+RL_LIKELIHOOD_GROUP_SIZE_KEY = "rl.likelihood_group_size"
 
 
 @dataclass

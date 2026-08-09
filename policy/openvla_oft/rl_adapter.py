@@ -15,7 +15,12 @@ import numpy as np
 import torch
 
 from benchmark.base import MetaAction, MetaObs
-from rl.base import PolicyOutput, PolicyTrace
+from rl.base import (
+    PolicyOutput,
+    PolicyTrace,
+    RL_LIKELIHOOD_GROUP_KEY,
+    RL_LIKELIHOOD_GROUP_SIZE_KEY,
+)
 from rl.policy_adapter import BasePolicyAdapter
 from rl.policy_adapter.trainer import BaseTrainerAdapter, TrainerStepResult
 
@@ -263,12 +268,46 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
 
     def _recompute_traces(self, rollout):
         decisions = tuple(rollout.decisions)
-        logits_rows = self._logits_for_observations(
-            tuple(decision.obs for decision in decisions)
-        )
+        likelihood_groups = {}
+        expected_sizes = {}
+        for decision in decisions:
+            group_id = decision.extras.get(RL_LIKELIHOOD_GROUP_KEY)
+            if group_id is None:
+                key = ("decision", decision.decision_id)
+                expected_size = 1
+            else:
+                key = ("likelihood", group_id)
+                expected_size = decision.extras.get(RL_LIKELIHOOD_GROUP_SIZE_KEY)
+                if (
+                    isinstance(expected_size, bool)
+                    or not isinstance(expected_size, int)
+                    or expected_size <= 0
+                ):
+                    raise ValueError(
+                        "OpenVLA-OFT likelihood group size must be positive"
+                    )
+            previous_size = expected_sizes.setdefault(key, expected_size)
+            if previous_size != expected_size:
+                raise ValueError(
+                    "OpenVLA-OFT likelihood group members disagree on size"
+                )
+            likelihood_groups.setdefault(key, []).append(decision)
+
+        logits_by_decision = {}
+        for key, grouped_decisions in likelihood_groups.items():
+            if len(grouped_decisions) != expected_sizes[key]:
+                raise ValueError("OpenVLA-OFT likelihood recompute group is incomplete")
+            logits_rows = self._logits_for_observations(
+                tuple(decision.obs for decision in grouped_decisions)
+            )
+            logits_by_decision.update(
+                (decision.decision_id, logits)
+                for decision, logits in zip(grouped_decisions, logits_rows)
+            )
         traces = {}
         entropies = []
-        for decision, logits in zip(decisions, logits_rows):
+        for decision in decisions:
+            logits = logits_by_decision[decision.decision_id]
             if decision.trace is None:
                 raise ValueError("OpenVLA-OFT update requires stored token traces")
             token_ids = decision.trace.extras.get("token_ids")

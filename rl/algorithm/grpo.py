@@ -10,7 +10,7 @@ from rl.policy_adapter import BasePolicyAdapter
 
 from .base import AlgorithmOutput, BaseRLAlgorithm
 from .objective import BasePolicyObjectiveBuilder
-from .on_policy import FullRolloutUpdates
+from .on_policy import FullRolloutUpdates, iter_likelihood_micro_batches
 from .utils import detached_metric, forward_result
 
 
@@ -247,8 +247,9 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             raise ValueError("GRPO requires a rollout-aware RolloutBuffer batch")
         decisions = tuple(rollout.decisions)
         total_objectives = self._num_trace_objectives(rollout)
-        for start in range(0, len(decisions), self.update_micro_batch_size):
-            selected = decisions[start : start + self.update_micro_batch_size]
+        for selected in iter_likelihood_micro_batches(
+            decisions, self.update_micro_batch_size
+        ):
             micro_batch = batch.select_decisions(
                 decision.decision_id for decision in selected
             )
