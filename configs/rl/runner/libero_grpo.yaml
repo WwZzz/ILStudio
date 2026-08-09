@@ -14,3 +14,4 @@ collector:
   args:
     terminate_on_success: true
     bootstrap_on_truncation: true
+    max_episode_steps: 512

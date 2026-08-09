@@ -42,6 +42,47 @@ def validate_episode_semantics(
     return terminate_on_success, bootstrap_on_truncation
 
 
+def validate_max_episode_steps(max_episode_steps):
+    if max_episode_steps is None:
+        return None
+    if (
+        isinstance(max_episode_steps, bool)
+        or not isinstance(max_episode_steps, int)
+        or max_episode_steps <= 0
+    ):
+        raise ValueError("max_episode_steps must be a positive integer or None")
+    return max_episode_steps
+
+
+def apply_episode_time_limit(
+    transition: MetaTransition,
+    *,
+    episode_step: int,
+    max_episode_steps,
+) -> MetaTransition:
+    """Truncate an active episode at an RL-local step limit."""
+
+    if not isinstance(transition, MetaTransition):
+        raise TypeError("episode time limits require MetaTransition")
+    if (
+        isinstance(episode_step, bool)
+        or not isinstance(episode_step, int)
+        or episode_step <= 0
+    ):
+        raise ValueError("episode_step must be a positive integer")
+    max_episode_steps = validate_max_episode_steps(max_episode_steps)
+    if (
+        max_episode_steps is None
+        or episode_step < max_episode_steps
+        or transition.episode_done
+    ):
+        return transition
+    info = dict(transition.info)
+    info["rl.time_limit_reached"] = True
+    info["rl.time_limit_steps"] = max_episode_steps
+    return replace(transition, truncated=True, info=info)
+
+
 def apply_episode_semantics(
     transition: MetaTransition,
     *,

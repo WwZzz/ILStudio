@@ -15,8 +15,10 @@ from .base import (
     CollectResult,
     EpisodeSummary,
     annotate_episode_timestep,
+    apply_episode_time_limit,
     apply_episode_semantics,
     validate_episode_semantics,
+    validate_max_episode_steps,
 )
 from .sync import _validate_target
 
@@ -33,6 +35,7 @@ class ParallelCollector(BaseCollector):
         reward_composer: Optional[RewardComposer] = None,
         terminate_on_success: bool = False,
         bootstrap_on_truncation: bool = True,
+        max_episode_steps: Optional[int] = None,
     ) -> None:
         if not isinstance(runner, BaseEnvRunner):
             raise TypeError("runner must inherit BaseEnvRunner")
@@ -61,6 +64,7 @@ class ParallelCollector(BaseCollector):
             terminate_on_success=terminate_on_success,
             bootstrap_on_truncation=bootstrap_on_truncation,
         )
+        self.max_episode_steps = validate_max_episode_steps(max_episode_steps)
         self._observations = [None] * runner.num_envs
         self._episode_lengths = [0] * runner.num_envs
         self._episode_rewards = [{} for _ in range(runner.num_envs)]
@@ -187,18 +191,23 @@ class ParallelCollector(BaseCollector):
                 if existing_index != env_index:
                     raise ValueError("environment returned a conflicting env_index")
                 info["env_index"] = env_index
+                transition = apply_episode_time_limit(
+                    MetaTransition(
+                        obs=obs,
+                        action=output.action,
+                        next_obs=next_obs,
+                        reward=wrap_env_reward(env_reward),
+                        terminated=terminated,
+                        truncated=truncated,
+                        info=info,
+                        policy_info=output.policy_info,
+                    ),
+                    episode_step=self._episode_lengths[env_index] + 1,
+                    max_episode_steps=self.max_episode_steps,
+                )
                 raw_transitions.append(
                     apply_episode_semantics(
-                        MetaTransition(
-                            obs=obs,
-                            action=output.action,
-                            next_obs=next_obs,
-                            reward=wrap_env_reward(env_reward),
-                            terminated=terminated,
-                            truncated=truncated,
-                            info=info,
-                            policy_info=output.policy_info,
-                        ),
+                        transition,
                         terminate_on_success=self.terminate_on_success,
                         bootstrap_on_truncation=self.bootstrap_on_truncation,
                     )

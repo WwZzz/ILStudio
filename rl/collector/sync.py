@@ -20,8 +20,10 @@ from .base import (
     CollectResult,
     EpisodeSummary,
     annotate_episode_timestep,
+    apply_episode_time_limit,
     apply_episode_semantics,
     validate_episode_semantics,
+    validate_max_episode_steps,
 )
 
 
@@ -42,6 +44,7 @@ class SyncCollector(BaseCollector):
         reward_composer: Optional[RewardComposer] = None,
         terminate_on_success: bool = False,
         bootstrap_on_truncation: bool = True,
+        max_episode_steps: Optional[int] = None,
     ) -> None:
         if not isinstance(runner, BaseEnvRunner):
             raise TypeError("runner must inherit BaseEnvRunner")
@@ -66,6 +69,7 @@ class SyncCollector(BaseCollector):
             terminate_on_success=terminate_on_success,
             bootstrap_on_truncation=bootstrap_on_truncation,
         )
+        self.max_episode_steps = validate_max_episode_steps(max_episode_steps)
         self._obs = None
         self._episode_length = 0
         self._episode_reward = {}
@@ -167,6 +171,11 @@ class SyncCollector(BaseCollector):
                 truncated=truncated,
                 info=info,
                 policy_info=output.policy_info,
+            )
+            transition = apply_episode_time_limit(
+                transition,
+                episode_step=self._episode_length + 1,
+                max_episode_steps=self.max_episode_steps,
             )
             transition = apply_episode_semantics(
                 transition,
