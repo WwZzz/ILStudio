@@ -25,7 +25,30 @@ def summarize_rl_iteration(result, runner):
         "collected_steps": result.collection.num_steps,
         "collected_episodes": result.collection.num_episodes,
         "updates": len(result.updates),
+        "runtime/collection_seconds": result.collection_seconds,
+        "runtime/update_seconds": result.update_seconds,
+        "runtime/iteration_seconds": (
+            result.collection_seconds + result.update_seconds
+        ),
     }
+    if result.collection_seconds > 0:
+        metrics["throughput/env_steps_per_second"] = (
+            result.collection.num_steps / result.collection_seconds
+        )
+    if result.update_seconds > 0 and result.updates:
+        metrics["throughput/updates_per_second"] = (
+            len(result.updates) / result.update_seconds
+        )
+        objective_count = sum(
+            float(value)
+            for update in result.updates
+            for key, value in update.metrics.items()
+            if key.endswith("/num_objectives")
+        )
+        if objective_count:
+            metrics["throughput/objectives_per_second"] = (
+                objective_count / result.update_seconds
+            )
     if episodes:
         metrics["episode/success_rate"] = fmean(
             float(episode.success) for episode in episodes
@@ -54,6 +77,19 @@ def build_metrics_callback(output_dir):
 
     def callback(result, runner):
         metrics = summarize_rl_iteration(result, runner)
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                metrics["gpu/peak_allocated_gib"] = (
+                    torch.cuda.max_memory_allocated() / 1024**3
+                )
+                metrics["gpu/peak_reserved_gib"] = (
+                    torch.cuda.max_memory_reserved() / 1024**3
+                )
+                torch.cuda.reset_peak_memory_stats()
+        except (ImportError, RuntimeError):
+            pass
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(metrics, sort_keys=True) + "\n")
         logger.info(
@@ -270,6 +306,14 @@ def main(argv=None):
     )
     pipeline = build_rl_pipeline(config)
     try:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                # Exclude checkpoint loading from per-iteration training peaks.
+                torch.cuda.reset_peak_memory_stats()
+        except (ImportError, RuntimeError):
+            pass
         pipeline.entry.callbacks = (
             *pipeline.entry.callbacks, build_metrics_callback(args.output_dir)
         )

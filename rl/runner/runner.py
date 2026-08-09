@@ -1,6 +1,7 @@
 """Outer RL loop composing collection, algorithms and policy updates."""
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
@@ -20,6 +21,8 @@ class RLIterationResult:
     iteration: int
     collection: CollectResult
     updates: Tuple[AlgorithmUpdateResult, ...]
+    collection_seconds: float = 0.0
+    update_seconds: float = 0.0
 
     def __post_init__(self):
         object.__setattr__(self, "updates", tuple(self.updates))
@@ -123,7 +126,9 @@ class RLRunner:
 
             iteration_context = self._context(context)
             self.policy_adapter.set_training(False)
+            collection_started = perf_counter()
             collection = self._collect(iteration_context)
+            collection_seconds = perf_counter() - collection_started
             self.global_env_steps += collection.num_steps
 
             if isinstance(self.buffer, RolloutBuffer):
@@ -131,6 +136,7 @@ class RLRunner:
 
             updates = []
             policy_was_updated = False
+            update_started = perf_counter()
             if self._can_update():
                 self.policy_adapter.set_training(True)
                 for batch in self.algorithm.iter_update_batches(
@@ -152,6 +158,7 @@ class RLRunner:
                         self.global_update_steps += 1
                         self.policy_adapter.bump_policy_version()
                 self.policy_adapter.set_training(False)
+            update_seconds = perf_counter() - update_started
             if policy_was_updated:
                 self.collector.policy_updated()
 
@@ -165,6 +172,8 @@ class RLRunner:
                 iteration=self.iteration,
                 collection=collection,
                 updates=tuple(updates),
+                collection_seconds=collection_seconds,
+                update_seconds=update_seconds,
             )
             self.iteration += 1
             for callback in self.callbacks:
