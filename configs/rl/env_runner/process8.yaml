@@ -7,7 +7,10 @@ runner:
   args:
     num_envs: 8
     start_method: spawn
-    seed_stride: 1
+    seed: 0
+    # GRPO replicas deliberately share a seed so each group starts from the
+    # same LIBERO trial, matching SimpleVLA-RL's repeat_interleave(n_samples).
+    seed_stride: 0
 executor:
   type: rl.executor.BatchedRLPolicyExecutor
   args:

@@ -11,13 +11,19 @@ from .base import BaseEnvRunner
 from .sync import SyncEnvRunner
 
 
-def _worker_main(connection, env_class, config, env_index, seed_stride):
+def _worker_main(
+    connection, env_class, config, env_index, seed_stride, base_seed
+):
     runner = None
     try:
         config = copy.deepcopy(config)
-        seed = (
-            config.get("seed") if isinstance(config, Mapping) else getattr(config, "seed", None)
-        )
+        seed = base_seed
+        if seed is None:
+            seed = (
+                config.get("seed")
+                if isinstance(config, Mapping)
+                else getattr(config, "seed", None)
+            )
         if seed is not None:
             worker_seed = int(seed) + env_index * seed_stride
             if isinstance(config, Mapping):
@@ -72,6 +78,7 @@ class _ProcessWorker:
         env_index,
         *,
         seed_stride,
+        seed,
         timeout,
     ):
         parent, child = context.Pipe()
@@ -80,7 +87,7 @@ class _ProcessWorker:
         self.timeout = timeout
         self.process = context.Process(
             target=_worker_main,
-            args=(child, env_class, config, env_index, seed_stride),
+            args=(child, env_class, config, env_index, seed_stride, seed),
             daemon=True,
             name=f"ilstudio-env-{env_index}",
         )
@@ -132,6 +139,7 @@ class ProcessEnvRunner(BaseEnvRunner):
         num_envs: int = 2,
         start_method: str = "spawn",
         seed_stride: int = 1000000,
+        seed=None,
         timeout: float = 120.0,
     ) -> None:
         if not isinstance(env, MetaEnv):
@@ -140,8 +148,12 @@ class ProcessEnvRunner(BaseEnvRunner):
             raise ValueError("ProcessEnvRunner requires num_envs greater than one")
         if start_method not in mp.get_all_start_methods():
             raise ValueError(f"unsupported multiprocessing start method {start_method!r}")
-        if isinstance(seed_stride, bool) or not isinstance(seed_stride, int) or seed_stride <= 0:
-            raise ValueError("seed_stride must be a positive integer")
+        if isinstance(seed_stride, bool) or not isinstance(seed_stride, int) or seed_stride < 0:
+            raise ValueError("seed_stride must be a non-negative integer")
+        if seed is not None and (
+            isinstance(seed, bool) or not isinstance(seed, int)
+        ):
+            raise TypeError("seed must be an integer or None")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise ValueError("timeout must be positive")
         config = getattr(env, "config", None)
@@ -164,6 +176,7 @@ class ProcessEnvRunner(BaseEnvRunner):
                     config,
                     index,
                     seed_stride=seed_stride,
+                    seed=seed,
                     timeout=float(timeout),
                 )
                 for index in range(num_envs)
