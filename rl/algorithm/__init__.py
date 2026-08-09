@@ -5,6 +5,7 @@ from .actor_critic import ActorCriticAlgorithm
 from .basic import BasicRLAlgorithm
 from .ddpg import DDPGAlgorithm
 from .dqn import DQNAlgorithm
+from .grpo import GRPOAlgorithm
 from .objective import (
     ActionChunkPolicyObjectiveBuilder,
     BasePolicyObjectiveBuilder,
@@ -31,6 +32,7 @@ __all__ = [
     "ChunkTrainingBatch",
     "DDPGAlgorithm",
     "DQNAlgorithm",
+    "GRPOAlgorithm",
     "DenoisingPolicyObjectiveBuilder",
     "PPOAlgorithm",
     "ReinforceAlgorithm",
