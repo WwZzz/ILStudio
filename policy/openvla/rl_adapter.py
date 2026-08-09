@@ -18,6 +18,8 @@ from rl.base import PolicyOutput, PolicyTrace
 from rl.policy_adapter import BasePolicyAdapter
 from rl.policy_adapter.trainer import BaseTrainerAdapter, TrainerStepResult
 
+from .modeling import OpenPolicy
+
 
 _SUPPORTED_ALGORITHMS = frozenset({"ppo", "grpo"})
 
@@ -43,19 +45,28 @@ class _ActionTokenLogitsProcessor(LogitsProcessor):
 def _unwrap_open_policy(policy):
     candidate = policy
     seen = set()
-    for _ in range(6):
+    for _ in range(8):
         if id(candidate) in seen:
             break
         seen.add(id(candidate))
-        if hasattr(candidate, "action_tokenizer") and hasattr(candidate, "processor"):
+        # PEFT wrappers proxy unknown attributes to the wrapped model, so an
+        # attribute-only check mistakes PeftModel for OpenPolicy and makes
+        # generation target the wrapper one level too high.
+        if isinstance(candidate, OpenPolicy):
             return candidate
         get_base_model = getattr(candidate, "get_base_model", None)
         if callable(get_base_model):
-            candidate = get_base_model()
-            continue
+            base = get_base_model()
+            if base is not candidate:
+                candidate = base
+                continue
         base_model = getattr(candidate, "base_model", None)
-        if base_model is not None:
+        if base_model is not None and base_model is not candidate:
             candidate = base_model
+            continue
+        model = getattr(candidate, "model", None)
+        if model is not None and model is not candidate:
+            candidate = model
             continue
         break
     raise TypeError("OpenVLA RL adapter could not locate the OpenPolicy base model")
