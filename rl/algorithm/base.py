@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 import numpy as np
@@ -85,25 +86,78 @@ class BaseRLAlgorithm(ABC):
         trainer_adapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> AlgorithmUpdateResult:
-        output = self.compute_update(
-            batch,
+        metric_totals = {}
+        metric_weights = {}
+        post_steps = []
+
+        def scalar_metric(value):
+            if isinstance(value, Real) and not isinstance(value, bool):
+                return float(value)
+            if hasattr(value, "detach"):
+                value = value.detach()
+            if hasattr(value, "cpu"):
+                value = value.cpu()
+            try:
+                array = np.asarray(value)
+            except (TypeError, ValueError):
+                return None
+            if array.size != 1 or not np.issubdtype(array.dtype, np.number):
+                return None
+            return float(array.reshape(-1)[0])
+
+        def observed_outputs():
+            for output in self.iter_compute_updates(
+                batch,
+                policy_adapter=policy_adapter,
+                context=context,
+            ):
+                if not isinstance(output, AlgorithmOutput):
+                    raise TypeError("compute updates must yield AlgorithmOutput")
+                weight = output.payload.get("metric_weight", 1.0)
+                if not isinstance(weight, Real) or float(weight) <= 0:
+                    raise ValueError("metric_weight must be positive")
+                weight = float(weight)
+                for key, value in output.metrics.items():
+                    scalar = scalar_metric(value)
+                    if scalar is not None:
+                        metric_totals[key] = (
+                            metric_totals.get(key, 0.0) + scalar * weight
+                        )
+                        metric_weights[key] = metric_weights.get(key, 0.0) + weight
+                    elif key in metric_totals and metric_totals[key] != value:
+                        raise ValueError(
+                            f"non-numeric metric {key!r} changed across micro-batches"
+                        )
+                    else:
+                        metric_totals[key] = value
+                post_step = output.payload.get("post_step")
+                if post_step is not None:
+                    post_steps.append(
+                        (post_step, dict(output.payload.get("post_step_context", {})))
+                    )
+                yield output
+
+        trainer_result = trainer_adapter.step_many(
+            observed_outputs(),
             policy_adapter=policy_adapter,
             context=context,
         )
-        if not isinstance(output, AlgorithmOutput):
-            raise TypeError("compute_update must return AlgorithmOutput")
-        trainer_result = trainer_adapter.step(
-            output,
-            policy_adapter=policy_adapter,
-            context=context,
-        )
-        metrics = dict(output.metrics)
-        post_step = output.payload.get("post_step")
-        if trainer_result.updated and post_step is not None:
+        metrics = {
+            key: (
+                value / metric_weights[key]
+                if key in metric_weights
+                else value
+            )
+            for key, value in metric_totals.items()
+        }
+        if trainer_result.updated and post_steps:
+            if any(item != post_steps[0] for item in post_steps[1:]):
+                raise ValueError("micro-batches must request the same post_step")
+            post_step, post_step_context = post_steps[0]
             if not isinstance(post_step, str) or not post_step:
                 raise TypeError("algorithm post_step payload must be a non-empty string")
             post_context = dict(context or {})
-            post_context.update(dict(output.payload.get("post_step_context", {})))
+            post_context.update(post_step_context)
             policy_adapter.algorithm_post_step(
                 post_step,
                 context=post_context,
@@ -118,6 +172,21 @@ class BaseRLAlgorithm(ABC):
         return AlgorithmUpdateResult(
             metrics=metrics,
             updated=trainer_result.updated,
+        )
+
+    def iter_compute_updates(
+        self,
+        batch,
+        *,
+        policy_adapter: BasePolicyAdapter,
+        context: Optional[Mapping[str, Any]] = None,
+    ):
+        """Yield loss graphs consumed and released by the TrainerAdapter."""
+
+        yield self.compute_update(
+            batch,
+            policy_adapter=policy_adapter,
+            context=context,
         )
 
     def iter_update_batches(

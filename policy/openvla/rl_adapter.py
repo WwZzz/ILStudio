@@ -473,13 +473,31 @@ class OpenVLATrainerAdapter(BaseTrainerAdapter):
         self.step_count = 0
 
     def step(self, output, *, policy_adapter, context=None):
-        del context
-        if output.loss is None:
-            return TrainerStepResult(updated=False)
-        if isinstance(output.loss, Mapping):
-            raise TypeError("OpenVLA trainer adapter expects one combined loss")
+        return self.step_many(
+            (output,), policy_adapter=policy_adapter, context=context
+        )
+
+    def step_many(self, outputs, *, policy_adapter, context=None):
+        del policy_adapter, context
         self.optimizer.zero_grad(set_to_none=True)
-        output.loss.backward()
+        updated = False
+        total_weight = 0.0
+        for output in outputs:
+            if output.loss is None:
+                continue
+            if isinstance(output.loss, Mapping):
+                raise TypeError("OpenVLA trainer adapter expects one combined loss")
+            weight = output.payload.get("loss_weight", 1.0)
+            if not isinstance(weight, (int, float)) or float(weight) <= 0:
+                raise ValueError("OpenVLA loss_weight must be positive")
+            weight = float(weight)
+            (output.loss * weight).backward()
+            total_weight += weight
+            updated = True
+        if not updated:
+            return TrainerStepResult(updated=False)
+        if abs(total_weight - 1.0) > 1e-5:
+            raise ValueError("OpenVLA accumulated loss weights must sum to one")
         parameters = [
             parameter
             for group in self.optimizer.param_groups

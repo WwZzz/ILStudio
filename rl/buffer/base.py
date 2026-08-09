@@ -16,6 +16,7 @@ class BufferBatch:
     transitions: Tuple[MetaTransition, ...]
     indices: np.ndarray
     rollout: Optional[Rollout] = None
+    source_rollout: Optional[Rollout] = None
 
     def __post_init__(self) -> None:
         transitions = tuple(self.transitions)
@@ -29,6 +30,27 @@ class BufferBatch:
                 raise TypeError("batch rollout must be Rollout or None")
             if self.rollout.transitions != transitions:
                 raise ValueError("batch rollout must contain batch transitions")
+        if self.source_rollout is not None:
+            if not isinstance(self.source_rollout, Rollout):
+                raise TypeError("batch source_rollout must be Rollout or None")
+            if self.rollout is None:
+                raise ValueError("source_rollout requires a selected batch rollout")
+            source_transition_ids = {
+                id(transition) for transition in self.source_rollout.transitions
+            }
+            if any(
+                id(transition) not in source_transition_ids
+                for transition in transitions
+            ):
+                raise ValueError("batch transitions must come from source_rollout")
+            source_decision_ids = {
+                decision.decision_id for decision in self.source_rollout.decisions
+            }
+            if any(
+                decision.decision_id not in source_decision_ids
+                for decision in self.rollout.decisions
+            ):
+                raise ValueError("batch decisions must come from source_rollout")
         object.__setattr__(self, "transitions", transitions)
         object.__setattr__(self, "indices", indices.copy())
 
@@ -37,6 +59,45 @@ class BufferBatch:
 
     def __iter__(self):
         return iter(self.transitions)
+
+    def select_decisions(self, decision_ids) -> "BufferBatch":
+        """Select complete policy decisions while retaining rollout context."""
+
+        if self.rollout is None:
+            raise ValueError("decision selection requires a rollout-aware batch")
+        decision_ids = tuple(decision_ids)
+        if not decision_ids:
+            raise ValueError("decision selection cannot be empty")
+        if len(decision_ids) != len(set(decision_ids)):
+            raise ValueError("decision selection cannot contain duplicates")
+        requested = set(decision_ids)
+        known = {decision.decision_id for decision in self.rollout.decisions}
+        missing = requested - known
+        if missing:
+            raise KeyError(f"unknown rollout decision ids: {sorted(missing)!r}")
+        selected_steps = tuple(
+            step for step in self.rollout.steps if step.decision_id in requested
+        )
+        selected_decisions = tuple(
+            decision
+            for decision in self.rollout.decisions
+            if decision.decision_id in requested
+        )
+        selected_rollout = Rollout(selected_steps, selected_decisions)
+        transition_indices = {
+            id(transition): int(index)
+            for transition, index in zip(self.transitions, self.indices)
+        }
+        selected_indices = np.asarray(
+            [transition_indices[id(step.transition)] for step in selected_steps],
+            dtype=np.int64,
+        )
+        return type(self)(
+            transitions=selected_rollout.transitions,
+            indices=selected_indices,
+            rollout=selected_rollout,
+            source_rollout=self.source_rollout or self.rollout,
+        )
 
 
 class TransitionStorage:

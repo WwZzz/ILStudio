@@ -10,6 +10,7 @@ args:
   clip_ratio_high: 0.28
   entropy_coef: 0.0
   advantage_epsilon: 0.000001
+  update_micro_batch_size: 16
 policy_adapter:
   required_capabilities: [action, grpo]
   args:

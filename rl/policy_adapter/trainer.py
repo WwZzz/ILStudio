@@ -4,7 +4,7 @@ import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Optional
 
 if TYPE_CHECKING:
     from rl.algorithm import AlgorithmOutput
@@ -35,6 +35,32 @@ class BaseTrainerAdapter(ABC):
         context: Optional[Mapping[str, Any]] = None,
     ) -> TrainerStepResult:
         """Apply one parameter update from an algorithm output."""
+
+    def step_many(
+        self,
+        outputs: Iterable["AlgorithmOutput"],
+        *,
+        policy_adapter: BasePolicyAdapter,
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> TrainerStepResult:
+        """Apply one update from a stream, if the adapter supports it."""
+
+        iterator = iter(outputs)
+        try:
+            output = next(iterator)
+        except StopIteration:
+            return TrainerStepResult(updated=False)
+        try:
+            next(iterator)
+        except StopIteration:
+            return self.step(
+                output,
+                policy_adapter=policy_adapter,
+                context=context,
+            )
+        raise RuntimeError(
+            f"{type(self).__name__} does not support gradient accumulation"
+        )
 
     @abstractmethod
     def state_dict(self) -> Dict[str, Any]:

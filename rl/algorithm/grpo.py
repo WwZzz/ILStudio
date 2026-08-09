@@ -1,6 +1,7 @@
 """Group Relative Policy Optimization for outcome-reward VLA rollouts."""
 
 from collections import defaultdict
+from dataclasses import replace
 from numbers import Real
 
 import torch
@@ -30,6 +31,7 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         clip_ratio_high: float = 0.28,
         entropy_coef: float = 0.0,
         advantage_epsilon: float = 1e-6,
+        update_micro_batch_size: int = 16,
         objective_builder=None,
     ):
         if not isinstance(reward_key, str) or not reward_key:
@@ -44,6 +46,12 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             raise ValueError("entropy_coef must be non-negative")
         if not isinstance(advantage_epsilon, Real) or float(advantage_epsilon) <= 0:
             raise ValueError("advantage_epsilon must be positive")
+        if (
+            isinstance(update_micro_batch_size, bool)
+            or not isinstance(update_micro_batch_size, int)
+            or update_micro_batch_size <= 0
+        ):
+            raise ValueError("update_micro_batch_size must be a positive integer")
         if not isinstance(objective_builder, BasePolicyObjectiveBuilder):
             raise TypeError("GRPO requires a policy objective builder")
         super().__init__(
@@ -55,6 +63,7 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         self.clip_ratio_high = float(clip_ratio_high)
         self.entropy_coef = float(entropy_coef)
         self.advantage_epsilon = float(advantage_epsilon)
+        self.update_micro_batch_size = update_micro_batch_size
         self.objective_builder = objective_builder
 
     def _trajectory_records(self, rollout):
@@ -134,20 +143,14 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         ]
         if missing:
             raise KeyError(f"GRPO could not assign decisions: {missing!r}")
-        return (
-            torch.stack(
-                [by_decision[group.decision.decision_id] for group in groups]
-            ),
-            torch.cat(rewards),
-            len(grouped),
-            active_groups,
-        )
+        return by_decision, torch.cat(rewards), len(grouped), active_groups
 
     def compute_update(
         self, batch, *, policy_adapter: BasePolicyAdapter, context=None
     ):
         rollout = getattr(batch, "rollout", None)
-        if rollout is None:
+        source_rollout = getattr(batch, "source_rollout", None) or rollout
+        if rollout is None or source_rollout is None:
             raise ValueError("GRPO requires a rollout-aware RolloutBuffer batch")
         result = forward_result(
             policy_adapter,
@@ -158,8 +161,12 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         )
         first_trace = next(iter(result["traces"].values()))
         like = torch.as_tensor(first_trace.old_logprobs)
-        advantages, outcomes, num_groups, active_groups = self._decision_advantages(
-            rollout, like=like
+        by_decision, outcomes, num_groups, active_groups = self._decision_advantages(
+            source_rollout, like=like
+        )
+        groups = rollout.decision_transitions()
+        advantages = torch.stack(
+            [by_decision[group.decision.decision_id] for group in groups]
         )
         objective = self.objective_builder.build(
             rollout, result["traces"], advantages
@@ -207,6 +214,52 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
                 "grpo/num_groups": num_groups,
                 "grpo/active_groups": active_groups,
                 "grpo/num_trajectories": int(outcomes.numel()),
-                "grpo/num_objectives": int(mask.sum()),
+                "grpo/num_objectives": self._num_trace_objectives(source_rollout),
+                "grpo/micro_num_objectives": int(mask.sum()),
             },
         )
+
+    @staticmethod
+    def _num_trace_objectives(rollout):
+        total = 0
+        for decision in rollout.decisions:
+            trace = decision.trace
+            if trace is None:
+                raise ValueError("GRPO decisions require stored policy traces")
+            logprobs = torch.as_tensor(trace.old_logprobs)
+            if trace.valid_mask is None:
+                total += logprobs.numel()
+            else:
+                total += int(torch.as_tensor(trace.valid_mask).sum())
+        if total <= 0:
+            raise ValueError("GRPO rollout has no valid policy objectives")
+        return total
+
+    def iter_compute_updates(
+        self,
+        batch,
+        *,
+        policy_adapter: BasePolicyAdapter,
+        context=None,
+    ):
+        rollout = getattr(batch, "rollout", None)
+        if rollout is None:
+            raise ValueError("GRPO requires a rollout-aware RolloutBuffer batch")
+        decisions = tuple(rollout.decisions)
+        total_objectives = self._num_trace_objectives(rollout)
+        for start in range(0, len(decisions), self.update_micro_batch_size):
+            selected = decisions[start : start + self.update_micro_batch_size]
+            micro_batch = batch.select_decisions(
+                decision.decision_id for decision in selected
+            )
+            output = self.compute_update(
+                micro_batch,
+                policy_adapter=policy_adapter,
+                context=context,
+            )
+            micro_objectives = output.metrics["grpo/micro_num_objectives"]
+            weight = float(micro_objectives) / float(total_objectives)
+            payload = dict(output.payload)
+            payload["loss_weight"] = weight
+            payload["metric_weight"] = weight
+            yield replace(output, payload=payload)
