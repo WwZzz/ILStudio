@@ -1,0 +1,63 @@
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_0
+  args: &openvla_object_args
+    task: libero_object_0
+    max_timesteps: 512
+    ctrl_space: ee
+    image_size: [256, 256]
+    camera_ids: [0]
+    use_openvla_gripper: true
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_1
+  args:
+    <<: *openvla_object_args
+    task: libero_object_1
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_2
+  args:
+    <<: *openvla_object_args
+    task: libero_object_2
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_3
+  args:
+    <<: *openvla_object_args
+    task: libero_object_3
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_4
+  args:
+    <<: *openvla_object_args
+    task: libero_object_4
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_5
+  args:
+    <<: *openvla_object_args
+    task: libero_object_5
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_6
+  args:
+    <<: *openvla_object_args
+    task: libero_object_6
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_7
+  args:
+    <<: *openvla_object_args
+    task: libero_object_7
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_8
+  args:
+    <<: *openvla_object_args
+    task: libero_object_8
+
+- type: benchmark.libero.LiberoEnv
+  name: libero_object_9
+  args:
+    <<: *openvla_object_args
+    task: libero_object_9
