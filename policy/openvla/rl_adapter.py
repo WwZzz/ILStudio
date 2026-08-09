@@ -197,6 +197,80 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
             rows.append(ids)
         return rows
 
+    def _sample_next_token(self, input_ids, logits, *, deterministic):
+        scores = self._logits_processor(input_ids, logits.float())
+        if not deterministic:
+            scores = scores / self.temperature
+        log_distribution = torch.log_softmax(scores, dim=-1)
+        if deterministic:
+            token = scores.argmax(dim=-1)
+        else:
+            token = torch.multinomial(log_distribution.exp(), num_samples=1).squeeze(1)
+        logprob = log_distribution.gather(1, token[:, None]).squeeze(1)
+        return token, logprob
+
+    def _generate_batched_tokens(
+        self,
+        input_ids,
+        attention_mask,
+        pixel_values,
+        *,
+        deterministic,
+    ):
+        """Generate with one visual pass and a batched language-model KV cache.
+
+        Upstream Prismatic rejects batch sizes above one in its GenerationMixin
+        and cached ``forward`` branch, even though its underlying causal LM
+        supports a batched cache.  Entering those submodules directly preserves
+        all injected LoRA layers while avoiding sequential environment rollout.
+        """
+
+        if pixel_values is None:
+            raise ValueError("OpenVLA action generation requires pixel_values")
+        patch_features = self.backbone.vision_backbone(pixel_values)
+        projected = self.backbone.projector(patch_features)
+        token_embeddings = self.backbone.get_input_embeddings()(input_ids)
+        multimodal_embeddings = torch.cat(
+            [token_embeddings[:, :1], projected, token_embeddings[:, 1:]],
+            dim=1,
+        )
+        patch_mask = torch.ones(
+            (projected.shape[0], projected.shape[1]),
+            dtype=attention_mask.dtype,
+            device=attention_mask.device,
+        )
+        multimodal_mask = torch.cat(
+            [attention_mask[:, :1], patch_mask, attention_mask[:, 1:]],
+            dim=1,
+        )
+        output = self.backbone.language_model(
+            inputs_embeds=multimodal_embeddings,
+            attention_mask=multimodal_mask,
+            use_cache=True,
+            return_dict=True,
+        )
+        generated = []
+        logprobs = []
+        running_ids = input_ids
+        for offset in range(self.action_dim):
+            token, logprob = self._sample_next_token(
+                running_ids,
+                output.logits[:, -1],
+                deterministic=deterministic,
+            )
+            generated.append(token)
+            logprobs.append(logprob)
+            running_ids = torch.cat([running_ids, token[:, None]], dim=1)
+            if offset + 1 == self.action_dim:
+                break
+            output = self.backbone.language_model(
+                input_ids=token[:, None],
+                past_key_values=output.past_key_values,
+                use_cache=True,
+                return_dict=True,
+            )
+        return torch.stack(generated, dim=1), torch.stack(logprobs, dim=1)
+
     def _sample_tokens(self, observations, *, deterministic):
         encoded = self._encode(observations)
         rows = self._prompt_rows(encoded)
@@ -209,33 +283,15 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
         for indices in by_length.values():
             input_ids = torch.stack([rows[index] for index in indices])
             attention_mask = torch.ones_like(input_ids)
-            kwargs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "max_new_tokens": self.action_dim,
-                "min_new_tokens": self.action_dim,
-                "do_sample": not deterministic,
-                "return_dict_in_generate": True,
-                "output_scores": True,
-                "logits_processor": self._logits_processor,
-            }
-            if "pixel_values" in encoded:
-                kwargs["pixel_values"] = encoded["pixel_values"][indices]
-            if not deterministic:
-                kwargs["temperature"] = self.temperature
-            generated = self.backbone.generate(**kwargs)
-            if len(generated.scores) != self.action_dim:
-                raise RuntimeError("OpenVLA generation returned an incomplete action")
-            tokens = generated.sequences[:, -self.action_dim :]
-            per_token = []
-            for offset, scores in enumerate(generated.scores):
-                selected = tokens[:, offset]
-                per_token.append(
-                    torch.log_softmax(scores.float(), dim=-1)
-                    .gather(1, selected[:, None])
-                    .squeeze(1)
-                )
-            logprobs = torch.stack(per_token, dim=1)
+            pixel_values = encoded.get("pixel_values")
+            if pixel_values is not None:
+                pixel_values = pixel_values[indices]
+            tokens, logprobs = self._generate_batched_tokens(
+                input_ids,
+                attention_mask,
+                pixel_values,
+                deterministic=deterministic,
+            )
             for local_index, original_index in enumerate(indices):
                 token_rows[original_index] = tokens[local_index].detach()
                 logprob_rows[original_index] = logprobs[local_index].detach()
