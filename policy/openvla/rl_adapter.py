@@ -452,7 +452,7 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
     def save_pretrained(self, output_dir):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.policy.save_pretrained(output_dir)
+        result = super().save_pretrained(output_dir)
         self.open_policy.config.save_pretrained(output_dir)
         self.open_policy.processor.save_pretrained(output_dir)
         return result
