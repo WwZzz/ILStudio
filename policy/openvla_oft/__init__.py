@@ -77,7 +77,11 @@ def load_model(args):
             # Load base policy first
             model = OpenVLAOFTPolicy(config)
             # Load LoRA adapter into the VLA backbone
-            model.vla = PeftModel.from_pretrained(model.vla, args.model_name_or_path)
+            model.vla = PeftModel.from_pretrained(
+                model.vla,
+                args.model_name_or_path,
+                is_trainable=bool(getattr(args, "rl_training", False)),
+            )
         else:
             # Load full model
             model = OpenVLAOFTPolicy.from_pretrained(args.model_name_or_path, config=config)
