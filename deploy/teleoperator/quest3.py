@@ -16,6 +16,7 @@ from scipy.spatial.transform import Rotation as R
 from loguru import logger
 
 from deploy.teleoperator.base import BaseTeleopDevice
+from deploy.teleoperator.quest_keep_awake import QuestKeepAwake
 from deploy.utils import RateLimiter
 
 # Set the absolute path to the XLeVR folder
@@ -83,6 +84,9 @@ class Quest3Teleop(BaseTeleopDevice):
         gripper_trigger_analog_deadband: float = 0.06,
         debug: bool = False,
         gripper_trace: bool = False,
+        keep_screen_awake: bool = True,
+        keep_screen_awake_interval: float = 5.0,
+        adb_path: Optional[str] = None,
         **kwargs
     ):
         """
@@ -119,6 +123,9 @@ class Quest3Teleop(BaseTeleopDevice):
             gripper_trigger_analog_deadband: |tr-0.5| below this → no trigger delta (analog_travel)
             debug: Enable debug output
             gripper_trace: Log [GripperTrace:teleop] on each SHM write (pair with robot gripper_trace)
+            keep_screen_awake: Try to keep Quest display awake via adb prox_close while teleoping
+            keep_screen_awake_interval: Seconds between keep-awake pulses
+            adb_path: Optional explicit path to adb binary
         """
         super().__init__(name=name, max_size_mb=max_size_mb, fps=fps)
         
@@ -148,6 +155,13 @@ class Quest3Teleop(BaseTeleopDevice):
         self.gripper_trigger_analog_deadband = float(gripper_trigger_analog_deadband)
         self.debug = debug
         self.gripper_trace = gripper_trace
+        self.keep_screen_awake = keep_screen_awake
+        self._keep_awake = QuestKeepAwake(
+            enabled=keep_screen_awake,
+            interval_s=keep_screen_awake_interval,
+            adb_path=adb_path,
+        )
+        self._closed = False
         
         # Calibration transform matrix (3x3)
         # Used for both position and rotation coordinate transformation
@@ -217,6 +231,9 @@ class Quest3Teleop(BaseTeleopDevice):
             True if connected successfully, False otherwise
         """
         print("[Quest3Teleop] Initializing VR connection...")
+
+        # Best-effort: keep Quest awake while removed (adb). Warns at most once on failure.
+        self._keep_awake.start()
         
         # Setup XLeVR environment
         setup_xlevr_environment()
@@ -245,6 +262,7 @@ class Quest3Teleop(BaseTeleopDevice):
             time.sleep(0.1)
         
         print(f"[Quest3Teleop] VR connection timeout after {self.connect_timeout}s")
+        self._keep_awake.stop()
         return False
     
     def get_data(self) -> Optional[dict]:
@@ -453,11 +471,13 @@ class Quest3Teleop(BaseTeleopDevice):
                     close_button = False
 
                 if self.gripper_use_trigger and is_unsqueeze_pressed:
+                    # Absolute open amount [0,1] (1=fully open). Tracks trigger continuously.
                     if self.gripper_default_closed:
-                        gripper_value = 0.0 if trigger_active else 1.0
+                        gripper_value = 1.0 - trv
                     else:
-                        gripper_value = 1.0 if trigger_active else 0.0
+                        gripper_value = trv
                 else:
+                    # Frozen: placeholder (robot ignores when gripper_absolute and not unsqueeze)
                     gripper_value = 1.0 if not self.gripper_default_closed else 0.0
                 if open_button and self.gripper_a_maps_to_open and not close_button:
                     gripper_value = 1.0
@@ -871,11 +891,11 @@ class Quest3Teleop(BaseTeleopDevice):
         # Create shared memory for output
         self.shm = self.create_shm(name=self.name, max_size_mb=self.max_size_mb, is_writer=True)
         
-        # Setup signal handler
+        # Signal: only request loop exit. Do NOT close() here — adb restore must run
+        # in finally without being interrupted by raise KeyboardInterrupt / double-close.
         def cleanup_handler(signum, frame):
-            self.close()
-            raise KeyboardInterrupt
-        
+            self.is_running = False
+
         signal.signal(signal.SIGTERM, cleanup_handler)
         signal.signal(signal.SIGINT, cleanup_handler)
         
@@ -901,8 +921,18 @@ class Quest3Teleop(BaseTeleopDevice):
             self.close()
     
     def close(self):
-        """Close the teleoperator."""
+        """Close the teleoperator (idempotent)."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self.is_running = False
+
+        # Stop keep-awake / restore proximity first (must finish before parent kill).
+        if getattr(self, "_keep_awake", None) is not None:
+            try:
+                self._keep_awake.stop()
+            except BaseException as e:
+                logger.warning(f"[Quest3Teleop] keep_awake.stop failed: {e!r}")
         
         # Stop VR monitor
         if self.vr_monitor is not None:
@@ -912,7 +942,10 @@ class Quest3Teleop(BaseTeleopDevice):
         if self._vr_thread is not None and self._vr_thread.is_alive():
             self._vr_thread.join(timeout=2.0)
         
-        super().close()
+        try:
+            super().close()
+        except Exception as e:
+            logger.warning(f"[Quest3Teleop] super().close failed: {e!r}")
         print("[Quest3Teleop] Closed")
 
 
