@@ -35,6 +35,10 @@ def summarize_rl_iteration(result, runner):
         metrics["throughput/env_steps_per_second"] = (
             result.collection.num_steps / collection_seconds
         )
+    for key, value in getattr(result.collection, "metrics", {}).items():
+        if key in metrics:
+            raise KeyError(f"collection metric conflicts with runner metric: {key}")
+        metrics[key] = value
     if update_seconds > 0 and result.updates:
         metrics["throughput/updates_per_second"] = (
             len(result.updates) / update_seconds

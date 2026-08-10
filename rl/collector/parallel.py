@@ -14,6 +14,8 @@ from .base import (
     BaseCollector,
     CollectResult,
     EpisodeSummary,
+    _CollectorRuntime,
+    _inference_batch_size,
     annotate_episode_timestep,
     apply_episode_time_limit,
     apply_episode_semantics,
@@ -150,6 +152,7 @@ class ParallelCollector(BaseCollector):
         episodes = []
         rollout_steps = []
         decisions = {}
+        runtime = _CollectorRuntime(self.runner.num_envs)
         while True:
             if num_steps is not None:
                 remaining = num_steps - len(transitions)
@@ -158,22 +161,32 @@ class ParallelCollector(BaseCollector):
             if remaining <= 0:
                 break
             env_indices = self._active_indices(min(self.runner.num_envs, remaining))
-            self._ensure_episodes(env_indices)
+            if any(self._observations[index] is None for index in env_indices):
+                with runtime.measure("reset"):
+                    self._ensure_episodes(env_indices)
+            else:
+                self._ensure_episodes(env_indices)
             observations = tuple(self._observations[index] for index in env_indices)
-            outputs = tuple(
-                self.executor.select_actions(
-                    observations,
-                    env_indices=env_indices,
-                    deterministic=deterministic,
-                    context=context,
+            with runtime.measure("policy"):
+                outputs = tuple(
+                    self.executor.select_actions(
+                        observations,
+                        env_indices=env_indices,
+                        deterministic=deterministic,
+                        context=context,
+                    )
                 )
+            runtime.record_step(
+                active_envs=len(env_indices),
+                inference_batch_size=_inference_batch_size(outputs),
             )
-            step_results = tuple(
-                self.runner.step(
-                    tuple(output.action for output in outputs),
-                    env_indices=env_indices,
+            with runtime.measure("env"):
+                step_results = tuple(
+                    self.runner.step(
+                        tuple(output.action for output in outputs),
+                        env_indices=env_indices,
+                    )
                 )
-            )
             if len(outputs) != len(env_indices) or len(step_results) != len(env_indices):
                 raise ValueError("parallel step results do not align with env_indices")
 
@@ -212,9 +225,10 @@ class ParallelCollector(BaseCollector):
                         bootstrap_on_truncation=self.bootstrap_on_truncation,
                     )
                 )
-            rewards = self.reward_composer.compute_batch(
-                tuple(raw_transitions), context=context
-            )
+            with runtime.measure("reward"):
+                rewards = self.reward_composer.compute_batch(
+                    tuple(raw_transitions), context=context
+                )
 
             for env_index, output, raw_transition, reward in zip(
                 env_indices, outputs, raw_transitions, rewards
@@ -259,6 +273,7 @@ class ParallelCollector(BaseCollector):
             transitions=tuple(transitions),
             episodes=tuple(episodes),
             rollout=rollout,
+            metrics=runtime.finish(),
         )
 
     def close(self) -> None:

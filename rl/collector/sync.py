@@ -19,6 +19,8 @@ from .base import (
     BaseCollector,
     CollectResult,
     EpisodeSummary,
+    _CollectorRuntime,
+    _inference_batch_size,
     annotate_episode_timestep,
     apply_episode_time_limit,
     apply_episode_semantics,
@@ -144,21 +146,32 @@ class SyncCollector(BaseCollector):
         rollout_steps = []
         decisions = {}
         provenance_mode = None
+        runtime = _CollectorRuntime(self.runner.num_envs)
         while True:
             if num_steps is not None and len(transitions) >= num_steps:
                 break
             if num_episodes is not None and len(episodes) >= num_episodes:
                 break
 
-            self._ensure_episode()
-            output = self.executor.select_action(
-                self._obs,
-                deterministic=deterministic,
-                context=context,
+            if self._obs is None:
+                with runtime.measure("reset"):
+                    self._ensure_episode()
+            else:
+                self._ensure_episode()
+            with runtime.measure("policy"):
+                output = self.executor.select_action(
+                    self._obs,
+                    deterministic=deterministic,
+                    context=context,
+                )
+            runtime.record_step(
+                active_envs=1,
+                inference_batch_size=_inference_batch_size((output,)),
             )
-            next_obs, env_reward, terminated, truncated, info = self.runner.step(
-                output.action
-            )
+            with runtime.measure("env"):
+                next_obs, env_reward, terminated, truncated, info = self.runner.step(
+                    output.action
+                )
             next_obs = annotate_episode_timestep(
                 next_obs, self._episode_length + 1
             )
@@ -182,10 +195,11 @@ class SyncCollector(BaseCollector):
                 terminate_on_success=self.terminate_on_success,
                 bootstrap_on_truncation=self.bootstrap_on_truncation,
             )
-            reward = self.reward_composer.compute_step(
-                transition,
-                context=context,
-            )
+            with runtime.measure("reward"):
+                reward = self.reward_composer.compute_step(
+                    transition,
+                    context=context,
+                )
             transition = replace(transition, reward=reward)
             transitions.append(transition)
             has_decision = output.decision is not None
@@ -231,6 +245,7 @@ class SyncCollector(BaseCollector):
             transitions=tuple(transitions),
             episodes=tuple(episodes),
             rollout=rollout,
+            metrics=runtime.finish(),
         )
 
     def close(self) -> None:
