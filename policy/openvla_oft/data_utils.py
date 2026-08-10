@@ -24,6 +24,41 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 
 
 IGNORE_INDEX = -100
+OPENVLA_EMPTY_TOKEN_ID = 29871
+
+
+def _center_crop_image(image: Image.Image, crop_scale: float = 0.9) -> Image.Image:
+    """Match the dlimp/OpenVLA evaluation-time center crop exactly."""
+    import tensorflow as tf
+
+    image = tf.convert_to_tensor(np.asarray(image))
+    original_dtype = image.dtype
+    image = tf.image.convert_image_dtype(image, tf.float32)
+
+    side = tf.clip_by_value(tf.sqrt(crop_scale), 0, 1)
+    offset = (1 - side) / 2
+    boxes = tf.reshape(
+        tf.stack([offset, offset, offset + side, offset + side]),
+        (1, 4),
+    )
+    image = tf.image.crop_and_resize(
+        tf.expand_dims(image, axis=0), boxes, tf.range(1), (224, 224)
+    )[0]
+    image = tf.clip_by_value(image, 0, 1)
+    image = tf.image.convert_image_dtype(image, original_dtype, saturate=True)
+    return Image.fromarray(image.numpy()).convert("RGB")
+
+
+def _openvla_oft_inference_prompt(tokenizer, language: str) -> torch.Tensor:
+    """Build the exact prompt consumed by the official OpenVLA-OFT evaluator."""
+    prompt = (
+        "In: What action should the robot take to "
+        f"{language.lower()}?\nOut:"
+    )
+    input_ids = tokenizer(prompt, add_special_tokens=True).input_ids
+    if not input_ids or input_ids[-1] != OPENVLA_EMPTY_TOKEN_ID:
+        input_ids = [*input_ids, OPENVLA_EMPTY_TOKEN_ID]
+    return torch.tensor(input_ids, dtype=torch.long)
 
 
 class OpenVLAOFTCollator:
@@ -325,6 +360,7 @@ class OpenVLAOFTInferenceProcessor:
         use_proprio: bool = True,
         num_images_in_input: int = 2,
         camera_names: List[str] = None,
+        center_crop: bool = True,
     ):
         """
         Initialize the inference processor.
@@ -335,12 +371,14 @@ class OpenVLAOFTInferenceProcessor:
             use_proprio: Whether to include proprioceptive state
             num_images_in_input: Number of images expected
             camera_names: List of camera names to use
+            center_crop: Apply the OpenVLA evaluation-time center crop
         """
         self.tokenizer = tokenizer
         self.image_transform = image_transform
         self.use_proprio = use_proprio
         self.num_images_in_input = num_images_in_input
         self.camera_names = camera_names if camera_names is not None else ["primary"]
+        self.center_crop = center_crop
         self.prompt_builder_fn = PurePromptBuilder
     
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, torch.Tensor]:
@@ -372,25 +410,16 @@ class OpenVLAOFTInferenceProcessor:
             image_array = primary_image.permute(1, 2, 0).numpy().astype(np.uint8)
         else:
             image_array = np.array(primary_image).astype(np.uint8)
-        primary_img = Image.fromarray(image_array)
+        primary_img = Image.fromarray(image_array).convert("RGB")
+        if self.center_crop:
+            primary_img = _center_crop_image(primary_img)
         
         # Get language instruction
         lang = sample.get('raw_lang', 'perform the task')
         if lang is None or lang == '':
             lang = 'perform the task'
         
-        # Construct prompt for inference (no response yet)
-        prompt_builder = self.prompt_builder_fn("openvla")
-        conversation = [
-            {"from": "human", "value": f"What action should the robot take to {lang}?"},
-            {"from": "gpt", "value": ""},
-        ]
-        for turn in conversation:
-            prompt_builder.add_turn(turn["from"], turn["value"])
-        
-        # Tokenize
-        input_ids = self.tokenizer(prompt_builder.get_prompt(), add_special_tokens=True).input_ids
-        input_ids = torch.tensor(input_ids)
+        input_ids = _openvla_oft_inference_prompt(self.tokenizer, str(lang))
         
         # Transform primary image
         pixel_values = self.image_transform(primary_img)
@@ -409,7 +438,9 @@ class OpenVLAOFTInferenceProcessor:
                     add_array = add_img.permute(1, 2, 0).numpy().astype(np.uint8)
                 else:
                     add_array = np.array(add_img).astype(np.uint8)
-                add_pil = Image.fromarray(add_array)
+                add_pil = Image.fromarray(add_array).convert("RGB")
+                if self.center_crop:
+                    add_pil = _center_crop_image(add_pil)
                 additional_images.append(self.image_transform(add_pil))
             
             if additional_images:

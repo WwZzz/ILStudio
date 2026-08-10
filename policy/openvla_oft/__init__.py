@@ -152,6 +152,7 @@ def load_model(args):
             use_proprio=config.use_proprio,
             num_images_in_input=config.num_images_in_input,
             camera_names=config.camera_names,
+            center_crop=config.center_crop,
         )
         model.data_collator = OpenVLAOFTCollator(
             model.tokenizer,
