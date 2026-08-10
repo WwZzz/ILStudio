@@ -123,6 +123,7 @@ def load_model(args):
             use_quantization=getattr(args, 'use_quantization', False),
             load_in_8bit=getattr(args, 'load_in_8bit', False),
             load_in_4bit=getattr(args, 'load_in_4bit', False),
+            vla_attn_implementation=getattr(args, 'vla_attn_implementation', 'eager'),
             camera_names=getattr(args, 'camera_names', ['primary']),
             num_open_loop_steps=getattr(args, 'num_open_loop_steps', 8),
         )

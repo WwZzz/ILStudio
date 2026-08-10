@@ -95,6 +95,7 @@ class OpenVLAOFTConfig(PretrainedConfig):
         use_quantization: bool = False,
         load_in_8bit: bool = False,
         load_in_4bit: bool = False,
+        vla_attn_implementation: str = "eager",
         # Task parameters
         camera_names: List[str] = None,
         # Inference
@@ -128,6 +129,7 @@ class OpenVLAOFTConfig(PretrainedConfig):
         self.use_quantization = use_quantization
         self.load_in_8bit = load_in_8bit
         self.load_in_4bit = load_in_4bit
+        self.vla_attn_implementation = vla_attn_implementation
         
         # Task parameters
         self.camera_names = camera_names if camera_names is not None else ["primary"]
@@ -181,6 +183,11 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         # Load base VLA model directly using openvla-oft's OpenVLAForActionPrediction
         # This ensures we get the extended PrismaticVisionBackbone with set_num_images_in_input,
         # proprio support, and other openvla-oft specific features
+        attn_implementation = getattr(config, "vla_attn_implementation", "eager")
+        if attn_implementation not in {"eager", "sdpa", "flash_attention_2"}:
+            raise ValueError(
+                "attn_implementation must be eager, sdpa, or flash_attention_2"
+            )
         self.vla = OpenVLAForActionPrediction.from_pretrained(
             config.pretrained_checkpoint,
             torch_dtype=torch.bfloat16,
@@ -188,7 +195,7 @@ class OpenVLAOFTPolicy(PreTrainedModel):
             load_in_4bit=config.load_in_4bit,
             low_cpu_mem_usage=True,
             trust_remote_code=True,
-            attn_implementation="eager",  # Use eager attention to avoid SDPA issues
+            attn_implementation=attn_implementation,
         )
         
         # Set number of images in model input
