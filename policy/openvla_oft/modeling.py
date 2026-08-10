@@ -83,6 +83,7 @@ class OpenVLAOFTConfig(PretrainedConfig):
         num_images_in_input: int = 2,
         use_proprio: bool = True,
         center_crop: bool = True,
+        rlds_resize: bool = False,
         # Action parameters
         action_dim: int = 7,
         state_dim: int = 8,
@@ -114,6 +115,7 @@ class OpenVLAOFTConfig(PretrainedConfig):
         self.num_images_in_input = num_images_in_input
         self.use_proprio = use_proprio
         self.center_crop = center_crop
+        self.rlds_resize = rlds_resize
         
         # Action parameters
         self.action_dim = action_dim

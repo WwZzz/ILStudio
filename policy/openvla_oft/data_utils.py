@@ -49,6 +49,24 @@ def _center_crop_image(image: Image.Image, crop_scale: float = 0.9) -> Image.Ima
     return Image.fromarray(image.numpy()).convert("RGB")
 
 
+def _rlds_resize_image(image: Image.Image, size: int = 224) -> Image.Image:
+    """Match the JPEG/Lanczos resize used by OpenVLA's LIBERO evaluator."""
+    import tensorflow as tf
+
+    image = tf.image.encode_jpeg(np.asarray(image))
+    image = tf.io.decode_image(
+        image, expand_animations=False, dtype=tf.uint8
+    )
+    image = tf.image.resize(
+        image,
+        (size, size),
+        method="lanczos3",
+        antialias=True,
+    )
+    image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
+    return Image.fromarray(image.numpy()).convert("RGB")
+
+
 def _openvla_oft_inference_prompt(tokenizer, language: str) -> torch.Tensor:
     """Build the exact prompt consumed by the official OpenVLA-OFT evaluator."""
     prompt = (
@@ -361,6 +379,7 @@ class OpenVLAOFTInferenceProcessor:
         num_images_in_input: int = 2,
         camera_names: List[str] = None,
         center_crop: bool = True,
+        rlds_resize: bool = False,
     ):
         """
         Initialize the inference processor.
@@ -372,6 +391,7 @@ class OpenVLAOFTInferenceProcessor:
             num_images_in_input: Number of images expected
             camera_names: List of camera names to use
             center_crop: Apply the OpenVLA evaluation-time center crop
+            rlds_resize: Apply OpenVLA's RLDS JPEG/Lanczos resize first
         """
         self.tokenizer = tokenizer
         self.image_transform = image_transform
@@ -379,6 +399,7 @@ class OpenVLAOFTInferenceProcessor:
         self.num_images_in_input = num_images_in_input
         self.camera_names = camera_names if camera_names is not None else ["primary"]
         self.center_crop = center_crop
+        self.rlds_resize = rlds_resize
         self.prompt_builder_fn = PurePromptBuilder
     
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, torch.Tensor]:
@@ -411,6 +432,8 @@ class OpenVLAOFTInferenceProcessor:
         else:
             image_array = np.array(primary_image).astype(np.uint8)
         primary_img = Image.fromarray(image_array).convert("RGB")
+        if self.rlds_resize:
+            primary_img = _rlds_resize_image(primary_img)
         if self.center_crop:
             primary_img = _center_crop_image(primary_img)
         
@@ -439,6 +462,8 @@ class OpenVLAOFTInferenceProcessor:
                 else:
                     add_array = np.array(add_img).astype(np.uint8)
                 add_pil = Image.fromarray(add_array).convert("RGB")
+                if self.rlds_resize:
+                    add_pil = _rlds_resize_image(add_pil)
                 if self.center_crop:
                     add_pil = _center_crop_image(add_pil)
                 additional_images.append(self.image_transform(add_pil))

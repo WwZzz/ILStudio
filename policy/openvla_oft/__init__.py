@@ -113,6 +113,7 @@ def load_model(args):
             num_images_in_input=getattr(args, 'num_images_in_input', 2),
             use_proprio=getattr(args, 'use_proprio', True),
             center_crop=getattr(args, 'center_crop', True),
+            rlds_resize=getattr(args, 'rlds_resize', False),
             action_dim=getattr(args, 'action_dim', 7),
             state_dim=getattr(args, 'state_dim', 8),
             chunk_size=getattr(args, 'chunk_size', 8),
@@ -154,6 +155,7 @@ def load_model(args):
             num_images_in_input=config.num_images_in_input,
             camera_names=config.camera_names,
             center_crop=config.center_crop,
+            rlds_resize=getattr(config, 'rlds_resize', False),
         )
         model.data_collator = OpenVLAOFTCollator(
             model.tokenizer,
