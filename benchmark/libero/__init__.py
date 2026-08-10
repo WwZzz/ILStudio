@@ -39,6 +39,7 @@ class LiberoEnv(MetaEnv):
         self.use_wrist = getattr(self.config, 'use_wrist', False)
         self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
         self.seed = getattr(self.config, 'seed', None)
+        self.env_seed = getattr(self.config, 'env_seed', 0)
         self._rng = np.random.default_rng(self.seed)
         self._configured_init_state_index = getattr(
             self.config, 'init_state_index', None
@@ -78,6 +79,10 @@ class LiberoEnv(MetaEnv):
             "camera_widths": 256,
         }
         env = OffScreenRenderEnv(**env_args)
+        # LIBERO object placements remain sensitive to the simulator seed even
+        # after ``set_init_state``.  Match the official OpenVLA/SimpleVLA
+        # rollout protocol so a fixed task init state denotes the same scene.
+        env.seed(self.env_seed)
         
         # Get action bounds from action_space
         # LIBERO uses robosuite environments with Box action space
