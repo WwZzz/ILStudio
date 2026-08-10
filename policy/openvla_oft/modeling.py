@@ -97,6 +97,7 @@ class OpenVLAOFTConfig(PretrainedConfig):
         load_in_8bit: bool = False,
         load_in_4bit: bool = False,
         vla_attn_implementation: str = "eager",
+        unnorm_key: Optional[str] = None,
         # Task parameters
         camera_names: List[str] = None,
         # Inference
@@ -132,6 +133,10 @@ class OpenVLAOFTConfig(PretrainedConfig):
         self.load_in_8bit = load_in_8bit
         self.load_in_4bit = load_in_4bit
         self.vla_attn_implementation = vla_attn_implementation
+        # Optional OpenVLA dataset-statistics key. ILStudio checkpoints keep
+        # using the framework normalizer by default; imported OpenVLA-OFT
+        # checkpoints can opt into their native action unnormalization.
+        self.unnorm_key = unnorm_key
         
         # Task parameters
         self.camera_names = camera_names if camera_names is not None else ["primary"]
@@ -447,6 +452,43 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         if logits.shape[1:] != expected_shape:
             raise RuntimeError("OpenVLA-OFT action-token logits have an unexpected shape")
         return logits
+
+    def unnormalize_actions(self, normalized_actions: np.ndarray) -> np.ndarray:
+        """Apply checkpoint-native OpenVLA action statistics when configured.
+
+        SimpleVLA-RL passes ``libero_10`` and resolves the checkpoint key
+        ``libero_10_no_noops`` when necessary. Keeping ``unnorm_key=None``
+        preserves ILStudio's existing external-normalizer behavior.
+        """
+
+        actions = np.asarray(normalized_actions, dtype=np.float32)
+        unnorm_key = getattr(self.config, "unnorm_key", None)
+        if unnorm_key is None:
+            return actions
+        if not isinstance(unnorm_key, str) or not unnorm_key:
+            raise ValueError("unnorm_key must be null or a non-empty string")
+
+        norm_stats = getattr(self.vla, "norm_stats", None)
+        if not isinstance(norm_stats, dict) or not norm_stats:
+            raise ValueError(
+                "OpenVLA-OFT checkpoint does not contain action normalization statistics"
+            )
+        resolved_key = unnorm_key
+        no_noops_key = f"{unnorm_key}_no_noops"
+        if resolved_key not in norm_stats and no_noops_key in norm_stats:
+            resolved_key = no_noops_key
+        if resolved_key not in norm_stats:
+            available = ", ".join(sorted(norm_stats))
+            raise KeyError(
+                f"unnorm_key {unnorm_key!r} is unavailable; found: {available}"
+            )
+
+        unnormalize = getattr(self.vla, "_unnormalize_actions", None)
+        if not callable(unnormalize):
+            raise AttributeError(
+                "OpenVLA-OFT remote model must provide _unnormalize_actions()"
+            )
+        return np.asarray(unnormalize(actions, resolved_key), dtype=np.float32)
     
     @torch.inference_mode()
     def select_action(self, batch_obs: Dict[str, torch.Tensor], **kwargs) -> np.ndarray:
@@ -571,8 +613,7 @@ class OpenVLAOFTPolicy(PreTrainedModel):
                     )
             actions = np.stack(action_rows).astype(np.float32)
         
-        # Note: Action unnormalization is handled by ILStudio's external normalization pipeline
-        return actions
+        return self.unnormalize_actions(actions)
     
     def _run_diffusion_sampling(
         self,

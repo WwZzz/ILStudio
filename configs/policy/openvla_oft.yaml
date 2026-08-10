@@ -29,6 +29,7 @@ args:
   use_proprio: true           # Include proprioceptive state
   center_crop: true           # Center crop (recommended if trained with random crop aug)
   rlds_resize: false          # OpenVLA LIBERO JPEG/Lanczos resize; opt in per checkpoint
+  unnorm_key: null            # Native OpenVLA action stats key; null keeps ILStudio normalizers
   
   # Action parameters
   action_dim: 7               # Action dimension (e.g., 7 for end-effector control)

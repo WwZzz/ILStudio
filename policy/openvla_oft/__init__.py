@@ -125,6 +125,7 @@ def load_model(args):
             load_in_8bit=getattr(args, 'load_in_8bit', False),
             load_in_4bit=getattr(args, 'load_in_4bit', False),
             vla_attn_implementation=getattr(args, 'vla_attn_implementation', 'eager'),
+            unnorm_key=getattr(args, 'unnorm_key', None),
             camera_names=getattr(args, 'camera_names', ['primary']),
             num_open_loop_steps=getattr(args, 'num_open_loop_steps', 8),
         )

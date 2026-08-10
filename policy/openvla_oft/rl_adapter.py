@@ -197,6 +197,7 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
         normalized = self.action_tokenizer.decode_token_ids_to_actions(
             token_ids.detach().cpu().numpy()
         ).astype(np.float32)
+        normalized = self.policy.unnormalize_actions(normalized)
         normalized = normalized.reshape(1, self.chunk_size, self.action_dim)
         action = self.meta_policy.act2meta(
             normalized,
