@@ -106,6 +106,26 @@ class BasePolicyObjectiveBuilder(ABC):
     ) -> PolicyObjective:
         pass
 
+    def count_objectives(self, rollout):
+        """Count scalar likelihood terms produced for a stored rollout."""
+
+        if not isinstance(rollout, Rollout):
+            raise TypeError("objective count rollout must be Rollout")
+        total = 0
+        for decision in rollout.decisions:
+            trace = decision.trace
+            if trace is None:
+                raise ValueError("objective count requires stored policy traces")
+            mask = (
+                torch.ones_like(_as_tensor(trace.old_logprobs), dtype=torch.bool)
+                if trace.valid_mask is None
+                else _as_tensor(trace.valid_mask, dtype=torch.bool)
+            )
+            total += int(mask.sum())
+        if total <= 0:
+            raise ValueError("rollout has no valid policy objectives")
+        return total
+
     @staticmethod
     def _inputs(rollout, new_traces, advantages):
         if not isinstance(rollout, Rollout):
@@ -157,6 +177,12 @@ class ChunkPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
             axis_names=("decision",),
         )
 
+    def count_objectives(self, rollout):
+        groups = rollout.decision_transitions()
+        if not groups:
+            raise ValueError("rollout has no valid policy objectives")
+        return len(groups)
+
 
 class ActionChunkPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
     """Clip each executed action likelihood while sharing decision credit.
@@ -200,6 +226,28 @@ class ActionChunkPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
             axis_names=("objective",),
         )
 
+    def count_objectives(self, rollout):
+        total = 0
+        for group in rollout.decision_transitions():
+            trace = group.decision.trace
+            if trace is None or "action" not in trace.axis_names:
+                raise ValueError("action-chunk objective requires an action trace axis")
+            values = _as_tensor(trace.old_logprobs)
+            mask = (
+                torch.ones_like(values, dtype=torch.bool)
+                if trace.valid_mask is None
+                else _as_tensor(trace.valid_mask, like=values, dtype=torch.bool)
+            )
+            mask = _apply_executed_action_mask(
+                mask,
+                trace.axis_names,
+                {step.action_offset for step in group.steps},
+            )
+            total += int(mask.sum())
+        if total <= 0:
+            raise ValueError("rollout has no valid policy objectives")
+        return total
+
 
 class DenoisingPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
     """Repeat each decision advantage over its valid denoising steps."""
@@ -242,6 +290,30 @@ class DenoisingPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
             returns=returns,
             axis_names=("objective",),
         )
+
+    def count_objectives(self, rollout):
+        total = 0
+        for group in rollout.decision_transitions():
+            trace = group.decision.trace
+            if trace is None or "denoise" not in trace.axis_names:
+                raise ValueError("denoising objective requires a denoise trace axis")
+            values = _as_tensor(trace.old_logprobs)
+            mask = (
+                torch.ones_like(values, dtype=torch.bool)
+                if trace.valid_mask is None
+                else _as_tensor(trace.valid_mask, like=values, dtype=torch.bool)
+            )
+            mask = _apply_executed_action_mask(
+                mask,
+                trace.axis_names,
+                {step.action_offset for step in group.steps},
+            )
+            axis = trace.axis_names.index("denoise")
+            mask = mask.movedim(axis, 0).reshape(mask.shape[axis], -1)
+            total += int(mask.any(dim=1).sum())
+        if total <= 0:
+            raise ValueError("rollout has no valid policy objectives")
+        return total
 
 
 class TokenPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
@@ -294,3 +366,36 @@ class TokenPolicyObjectiveBuilder(BasePolicyObjectiveBuilder):
             returns=returns,
             axis_names=("objective",),
         )
+
+    def count_objectives(self, rollout):
+        total = 0
+        for group in rollout.decision_transitions():
+            trace = group.decision.trace
+            if trace is None or "token" not in trace.axis_names:
+                raise ValueError("token objective requires a token trace axis")
+            values = _as_tensor(trace.old_logprobs)
+            mask = (
+                torch.ones_like(values, dtype=torch.bool)
+                if trace.valid_mask is None
+                else _as_tensor(trace.valid_mask, like=values, dtype=torch.bool)
+            )
+            executed = {step.action_offset for step in group.steps}
+            if len(executed) < group.decision.chunk_size:
+                action_offsets = trace.extras.get("action_offsets")
+                if action_offsets is None:
+                    raise ValueError(
+                        "partial token chunks require trace action_offsets"
+                    )
+                action_offsets = _as_tensor(
+                    action_offsets, like=values, dtype=torch.long
+                )
+                if action_offsets.shape != values.shape:
+                    raise ValueError("token action_offsets must match trace shape")
+                executed_mask = torch.zeros_like(mask)
+                for offset in executed:
+                    executed_mask |= action_offsets == offset
+                mask &= executed_mask
+            total += int(mask.sum())
+        if total <= 0:
+            raise ValueError("rollout has no valid policy objectives")
+        return total

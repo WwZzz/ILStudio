@@ -214,7 +214,9 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
                 "grpo/num_groups": num_groups,
                 "grpo/active_groups": active_groups,
                 "grpo/num_trajectories": int(outcomes.numel()),
-                "grpo/num_objectives": self._num_trace_objectives(source_rollout),
+                "grpo/num_objectives": self.objective_builder.count_objectives(
+                    source_rollout
+                ),
                 "grpo/micro_num_objectives": int(mask.sum()),
             },
         )
@@ -246,7 +248,7 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         if rollout is None:
             raise ValueError("GRPO requires a rollout-aware RolloutBuffer batch")
         decisions = tuple(rollout.decisions)
-        total_objectives = self._num_trace_objectives(rollout)
+        total_objectives = self.objective_builder.count_objectives(rollout)
         for selected in iter_likelihood_micro_batches(
             decisions, self.update_micro_batch_size
         ):
