@@ -188,8 +188,25 @@ class OpenVLAOFTPolicy(PreTrainedModel):
             raise ValueError(
                 "attn_implementation must be eager, sdpa, or flash_attention_2"
             )
+
+        # openvla-oft checkpoints predate some fields consumed by the current
+        # OFT remote code.  SimpleVLA-RL injects these values into the VLA
+        # config before constructing the actor; do the same here so the exact
+        # same checkpoint can be used by ILStudio without rewriting it.
+        vla_config = OpenVLAConfig.from_pretrained(
+            config.pretrained_checkpoint,
+            trust_remote_code=True,
+        )
+        vla_config.bos_token_id = self.tokenizer.bos_token_id
+        vla_config.eos_token_id = self.tokenizer.eos_token_id
+        vla_config.pad_token_id = self.tokenizer.pad_token_id
+        vla_config.use_proprio = config.use_proprio
+        vla_config.proprio_dim = (
+            config.state_dim if config.use_proprio else config.action_dim
+        )
         self.vla = OpenVLAForActionPrediction.from_pretrained(
             config.pretrained_checkpoint,
+            config=vla_config,
             torch_dtype=torch.bfloat16,
             load_in_8bit=config.load_in_8bit,
             load_in_4bit=config.load_in_4bit,
