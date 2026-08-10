@@ -430,9 +430,19 @@ class OpenVLAOFTPolicy(PreTrainedModel):
         multimodal_embeddings = torch.cat(
             [text_embeddings[:, :1], projected, text_embeddings[:, 1:]], dim=1
         )
-        attention_mask = torch.ones(
-            multimodal_embeddings.shape[:2],
-            dtype=torch.long,
+        # OpenVLA-OFT predicts all action placeholders in parallel. They must
+        # therefore use bidirectional attention rather than a causal decoder
+        # mask. The official OpenVLA-OFT Transformers fork implements this in
+        # Llama SDPA globally. Supplying an already-inverted 4-D additive mask
+        # expresses the same contract through the public Transformers API and
+        # keeps the rest of ILStudio on its existing Transformers runtime.
+        sequence_length = multimodal_embeddings.shape[1]
+        attention_mask = torch.zeros(
+            batch_size,
+            1,
+            sequence_length,
+            sequence_length,
+            dtype=multimodal_embeddings.dtype,
             device=multimodal_embeddings.device,
         )
         output = self.vla.language_model(
