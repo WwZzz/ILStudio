@@ -8,6 +8,7 @@ existing action-chunk executor unchanged.
 
 import copy
 import os
+import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -363,6 +364,18 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
         if extra_state_dict:
             torch.save(extra_state_dict, os.path.join(output_dir, "extra_weights.bin"))
         self._copy_checkpoint_assets(output_dir)
+        if self.checkpoint_path is None:
+            raise RuntimeError("OpenVLA-OFT RL save requires a checkpoint source")
+        source_root = self._checkpoint_root(self.checkpoint_path)
+        statistics = source_root / "dataset_statistics.json"
+        if not statistics.is_file():
+            raise FileNotFoundError(
+                "OpenVLA-OFT checkpoint is missing dataset_statistics.json: "
+                f"{statistics}"
+            )
+        destination = output_dir / statistics.name
+        if statistics.resolve() != destination.resolve():
+            shutil.copy2(statistics, destination)
         return result
 
 
