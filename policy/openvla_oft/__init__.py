@@ -67,6 +67,11 @@ def _load_checkpoint_norm_stats(model, checkpoint_path):
             f"{stats_path}"
         )
     model.vla.norm_stats = dict(norm_stats)
+    get_base_model = getattr(model.vla, "get_base_model", None)
+    if callable(get_base_model):
+        base_model = get_base_model()
+        if base_model is not model.vla:
+            base_model.norm_stats = dict(norm_stats)
 
 
 def load_model(args):
