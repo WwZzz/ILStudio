@@ -97,7 +97,8 @@ class RLRunner:
             kwargs["num_steps"] = self.config.collect_steps
         else:
             kwargs["num_episodes"] = self.config.collect_episodes
-        return self.collector.collect(**kwargs)
+        with self.policy_adapter.collection_context():
+            return self.collector.collect(**kwargs)
 
     def _can_update(self) -> bool:
         if self.config.updates_per_iteration == 0 or len(self.buffer) == 0:

@@ -10,6 +10,7 @@ import copy
 import os
 import shutil
 from collections.abc import Iterable, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
         required_capabilities: Iterable[str] = (),
         temperature: float = 1.6,
         action_vocab_size: int = 256,
+        collection_num_threads: int | None = 1,
     ):
         if not isinstance(model_components, Mapping):
             raise TypeError("model_components must be a mapping")
@@ -73,11 +75,20 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
             or action_vocab_size <= 0
         ):
             raise ValueError("action_vocab_size must be a positive integer")
+        if collection_num_threads is not None and (
+            isinstance(collection_num_threads, bool)
+            or not isinstance(collection_num_threads, int)
+            or collection_num_threads <= 0
+        ):
+            raise ValueError(
+                "collection_num_threads must be a positive integer or None"
+            )
         if bool(getattr(policy.config, "use_film", False)):
             raise ValueError("SimpleVLA-RL-compatible token updates do not support FiLM")
 
         self.temperature = float(temperature)
         self.action_vocab_size = action_vocab_size
+        self.collection_num_threads = collection_num_threads
         self.meta_policy = meta_policy
         self.vla = policy.vla
         self.tokenizer = policy.tokenizer
@@ -102,6 +113,24 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
     @property
     def device(self):
         return next(self.policy.parameters()).device
+
+    @contextmanager
+    def collection_context(self):
+        """Limit actor-side CPU work without throttling policy updates."""
+
+        target = self.collection_num_threads
+        if target is None:
+            yield
+            return
+        original = torch.get_num_threads()
+        changed = original != target
+        if changed:
+            torch.set_num_threads(target)
+        try:
+            yield
+        finally:
+            if changed:
+                torch.set_num_threads(original)
 
     def _obs_to_sample(self, obs: MetaObs):
         self._validate_obs(obs)

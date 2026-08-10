@@ -4,6 +4,7 @@ import json
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -66,6 +67,11 @@ class BasePolicyAdapter(ABC):
         method = getattr(self.policy, method_name, None)
         if callable(method):
             method()
+
+    def collection_context(self):
+        """Return a policy-local runtime context used only during collection."""
+
+        return nullcontext()
 
     @abstractmethod
     def select_action(
