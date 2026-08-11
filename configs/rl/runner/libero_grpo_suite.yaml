@@ -2,8 +2,8 @@ version: 1
 name: libero_grpo_suite
 metadata:
   description: Filtered grouped outcome RL over a LIBERO environment suite
-type: rl.runner.RLRunner
-config_type: rl.runner.RLRunnerConfig
+type: rl.runtime.RLRunner
+config_type: rl.runtime.RLRunnerConfig
 args:
   iterations: 1
   collect_episodes: 8

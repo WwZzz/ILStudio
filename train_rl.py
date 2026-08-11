@@ -10,7 +10,7 @@ from loguru import logger
 
 from configs.loader import ConfigLoader
 from data_utils.utils import set_seed
-from rl.pipeline import build_rl_pipeline, compose_rl_config, validate_rl_config
+from rl.runtime import build_rl_pipeline, compose_rl_config, validate_rl_config
 from utils.torch_backend import configure_torch_backends_from_env
 
 def summarize_rl_iteration(result, runner):
@@ -215,6 +215,33 @@ def parse_param(argv=None):
         help="Output ILStudio checkpoint directory",
     )
     parser.add_argument(
+        "--resume-from",
+        default=None,
+        help="Prior output directory or rl_state.pt to resume",
+    )
+    parser.add_argument(
+        "--resume-replay-from",
+        default=None,
+        help=(
+            "Optional independent replay snapshot; use 'auto' to follow the "
+            "reference stored in rl_state.pt"
+        ),
+    )
+    parser.add_argument(
+        "--save-replay-to",
+        default=None,
+        help=(
+            "Optional path for a reusable replay snapshot; replay is excluded "
+            "from rl_state.pt"
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=0,
+        help="Save a resumable checkpoint every N iterations; 0 saves only at exit",
+    )
+    parser.add_argument(
         "--device",
         default="cuda",
         help="Device used to load and update the checkpoint",
@@ -251,6 +278,10 @@ def parse_param(argv=None):
         parser.error("--offline-pretrain-iterations cannot be negative")
     if args.mode != "hybrid" and args.offline_pretrain_iterations:
         parser.error("--offline-pretrain-iterations requires --mode hybrid")
+    if args.checkpoint_interval < 0:
+        parser.error("--checkpoint-interval cannot be negative")
+    if args.resume_replay_from == "auto" and args.resume_from is None:
+        parser.error("--resume-replay-from auto requires --resume-from")
     if args.env_index is not None and args.env_indices is not None:
         parser.error("--env_index and --env_indices are mutually exclusive")
     return args
@@ -392,6 +423,28 @@ def main(argv=None):
     )
     pipeline = build_rl_pipeline(config)
     try:
+        if args.resume_from is not None:
+            resume = pipeline.entry.load_checkpoint(
+                args.resume_from,
+                replay_path=args.resume_replay_from,
+            )
+            logger.info(
+                "Resumed RL state from {} at iteration={} env_steps={} updates={}",
+                resume["state_path"],
+                resume["iteration"],
+                resume["global_env_steps"],
+                resume["global_update_steps"],
+            )
+        elif args.resume_replay_from is not None:
+            replay = pipeline.entry.load_replay_checkpoint(
+                args.resume_replay_from
+            )
+            logger.info(
+                "Loaded reusable replay snapshot from {} (items={}, env_steps={})",
+                replay["path"],
+                replay["num_items"],
+                replay["num_env_steps"],
+            )
         try:
             import torch
 
@@ -400,16 +453,28 @@ def main(argv=None):
                 torch.cuda.reset_peak_memory_stats()
         except (ImportError, RuntimeError):
             pass
-        pipeline.entry.callbacks = (
+        callbacks = [
             *tuple(getattr(pipeline.entry, "callbacks", ())),
             build_metrics_callback(args.output_dir),
-        )
+        ]
+        if args.checkpoint_interval:
+
+            def save_periodic_checkpoint(result, runner):
+                if (result.iteration + 1) % args.checkpoint_interval == 0:
+                    state_path = runner.save_checkpoint(
+                        args.output_dir,
+                        replay_path=args.save_replay_to,
+                    )
+                    logger.info("Saved periodic RL checkpoint to: {}", state_path)
+
+            callbacks.append(save_periodic_checkpoint)
+        pipeline.entry.callbacks = tuple(callbacks)
         result = pipeline.run()
-        save_policy = getattr(pipeline.entry, "save_policy", None)
-        if not callable(save_policy):
-            raise TypeError("RLRunner must provide save_policy()")
-        save_policy(args.output_dir)
-        logger.info(f"Saved RL policy to: {args.output_dir}")
+        state_path = pipeline.entry.save_checkpoint(
+            args.output_dir,
+            replay_path=args.save_replay_to,
+        )
+        logger.info("Saved RL policy and training state to: {}", state_path)
         return result
     finally:
         pipeline.close()

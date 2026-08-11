@@ -9,6 +9,7 @@ args:
   value_coef: 0.5
   entropy_coef: 0.01
   normalize_advantage: true
+  decision_discount_mode: env_step
 policy_adapter:
   fallback_adapter: base
   required_capabilities: [action, evaluate_actions]

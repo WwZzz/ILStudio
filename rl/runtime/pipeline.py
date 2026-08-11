@@ -163,6 +163,43 @@ def _resolve_refs(value, components):
     return value
 
 
+def _configured_type(config):
+    if isinstance(config, Mapping):
+        return config.get("type")
+    return getattr(config, "type", None)
+
+
+def _validate_observation_contract(env_config, critic_spec):
+    """Fail before construction when both components declare static fields."""
+
+    if env_config is None or critic_spec is None:
+        return
+    env_type = _configured_type(env_config)
+    if not isinstance(env_type, str) or not env_type:
+        return
+    # Legacy short names resolve through a module-level ``create_env`` factory,
+    # so there is no statically declared environment class to inspect.
+    if "." not in env_type:
+        return
+    env_class = import_symbol(env_type)
+    critic_class = import_symbol(critic_spec["type"])
+    available = getattr(env_class, "observation_fields", None)
+    required = getattr(critic_class, "required_observation_fields", None)
+    if available is None or required is None:
+        return
+    available = frozenset(available)
+    required = frozenset(required)
+    missing = required - available
+    if missing:
+        raise ValueError(
+            f"critic {critic_spec['type']} requires observation fields "
+            f"{sorted(required)}, but environment {env_type} declares "
+            f"{sorted(available)}; missing {sorted(missing)}. Select a "
+            "compatible critic (Gym state tasks can use -a ppo_state or "
+            "--critic state_value)."
+        )
+
+
 def _fragment(value, *, label, allowed):
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} config must be a mapping")
@@ -418,6 +455,8 @@ def compose_rl_config(
             algorithm_spec,
             {"critic": {"$ref": "critic"}},
         )
+    if uses_online:
+        _validate_observation_contract(env_config, critic_spec)
 
     buffer_spec = _component_spec(algorithm.get("buffer"), label="algorithm buffer")
     env_runner_spec = None
@@ -473,14 +512,14 @@ def compose_rl_config(
 
     components = {
         "policy_components": {
-            "type": "rl.builders.build_policy_components_from_checkpoint",
+            "type": "rl.runtime.builder.build_policy_components_from_checkpoint",
             "args": {
                 "checkpoint": model_name_or_path,
                 "runtime_args": deepcopy(dict(runtime_args or {})),
             },
         },
         "policy_adapter": {
-            "type": "rl.builders.build_policy_adapter_from_components",
+            "type": "rl.runtime.builder.build_policy_adapter_from_components",
             "args": _policy_adapter_spec(algorithm),
         },
     }
@@ -499,7 +538,7 @@ def compose_rl_config(
             "reward_key", algorithm_spec["args"].get("reward_key", "train/total")
         )
         components["offline_data"] = {
-            "type": "rl.builders.build_offline_replay_dataset",
+            "type": "rl.runtime.builder.build_offline_replay_dataset",
             "args": {
                 "task_config": deepcopy(dict(offline_config["task_config"])),
                 "training_args": training_args,
@@ -542,7 +581,7 @@ def compose_rl_config(
         )
         if env_indices is None:
             components["env"] = {
-                "type": "rl.builders.build_env_from_loaded_config",
+                "type": "rl.runtime.builder.build_env_from_loaded_config",
                 "args": {"env_config": env_config, "env_index": env_index},
             }
             components["env_runner"] = _with_dependencies(
@@ -551,7 +590,7 @@ def compose_rl_config(
             )
         else:
             components["envs"] = {
-                "type": "rl.builders.build_env_specs_from_loaded_config",
+                "type": "rl.runtime.builder.build_env_specs_from_loaded_config",
                 "args": {
                     "env_config": env_config,
                     "env_indices": list(env_indices),
@@ -565,7 +604,7 @@ def compose_rl_config(
         components["objective_builder"] = objective_spec
     if critic_spec is not None:
         components["critic"] = {
-            "type": "rl.builders.build_torch_module",
+            "type": "rl.runtime.builder.build_torch_module",
             "args": {
                 "module_type": critic_spec["type"],
                 "args": critic_spec["args"],
@@ -596,7 +635,7 @@ def compose_rl_config(
         {
             "algorithm": algorithm_spec,
             "optimizer": {
-                "type": "rl.builders.build_optimizer_from_training",
+                "type": "rl.runtime.builder.build_optimizer_from_training",
                 "args": {
                     "model": {"$ref": "policy_components.model"},
                     "training_args": training_args,
@@ -608,7 +647,7 @@ def compose_rl_config(
                 },
             },
             "trainer_adapter": {
-                "type": "rl.builders.build_trainer_adapter_from_components",
+                "type": "rl.runtime.builder.build_trainer_adapter_from_components",
                 "args": {
                     "policy_components": {"$ref": "policy_components"},
                     "policy_adapter": {"$ref": "policy_adapter"},

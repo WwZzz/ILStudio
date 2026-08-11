@@ -286,9 +286,11 @@ class RLRunner:
                 results.append(result)
         return tuple(results)
 
-    def state_dict(self):
+    def state_dict(self, *, include_buffer=True):
+        if not isinstance(include_buffer, bool):
+            raise TypeError("include_buffer must be bool")
         reward_composer = getattr(self.collector, "reward_composer", None)
-        return {
+        state = {
             "version": self.STATE_VERSION,
             "iteration": self.iteration,
             "global_env_steps": self.global_env_steps,
@@ -297,15 +299,19 @@ class RLRunner:
             "algorithm": self.algorithm.state_dict(),
             "policy_adapter": self.policy_adapter.state_dict(),
             "trainer_adapter": self.trainer_adapter.state_dict(),
-            "buffer": self.buffer.state_dict(),
             "reward_composer": (
                 None if reward_composer is None else reward_composer.state_dict()
             ),
         }
+        if include_buffer:
+            state["buffer"] = self.buffer.state_dict()
+        return state
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state, *, load_buffer=True):
         if not isinstance(state, Mapping):
             raise TypeError("RLRunner state must be a mapping")
+        if not isinstance(load_buffer, bool):
+            raise TypeError("load_buffer must be bool")
         version = state.get("version")
         if version not in {1, self.STATE_VERSION}:
             raise ValueError("unsupported RLRunner state version")
@@ -320,7 +326,8 @@ class RLRunner:
             "policy_trainer" if version == 1 else "trainer_adapter"
         )
         self.trainer_adapter.load_state_dict(state[trainer_state_key])
-        self.buffer.load_state_dict(state["buffer"])
+        if load_buffer:
+            self.buffer.load_state_dict(state["buffer"])
         reward_state = state.get("reward_composer")
         reward_composer = getattr(self.collector, "reward_composer", None)
         if reward_state is not None:
@@ -341,6 +348,21 @@ class RLRunner:
                 raise TypeError("composed critic must provide save_pretrained()")
             save_critic(output_dir)
         return result
+
+    def save_checkpoint(self, output_dir, *, replay_path=None):
+        from .checkpoint import save_rl_checkpoint
+
+        return save_rl_checkpoint(self, output_dir, replay_path=replay_path)
+
+    def load_checkpoint(self, path, *, replay_path=None):
+        from .checkpoint import load_rl_checkpoint
+
+        return load_rl_checkpoint(self, path, replay_path=replay_path)
+
+    def load_replay_checkpoint(self, path):
+        from .checkpoint import load_replay_checkpoint
+
+        return load_replay_checkpoint(self.buffer, path)
 
     def close(self):
         if self.collector is not None:

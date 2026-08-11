@@ -369,6 +369,16 @@ class BaseBuffer(ABC):
             "metadata": self._state_metadata(),
         }
 
+    def checkpoint_state_dict(self) -> Dict[str, Any]:
+        """Return replay persistence state.
+
+        In-memory buffers use their ordinary state dict. A future disk-backed
+        buffer can override this hook to return shard or database references
+        without teaching RLRunner about its storage backend.
+        """
+
+        return self.state_dict()
+
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         if not isinstance(state, dict):
             raise TypeError("buffer state must be a dict")
@@ -391,3 +401,8 @@ class BaseBuffer(ABC):
 
         self.storage.load_state_dict(storage_state)
         self._load_state_metadata(metadata)
+
+    def load_checkpoint_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore replay persistence state produced by the matching hook."""
+
+        self.load_state_dict(state)

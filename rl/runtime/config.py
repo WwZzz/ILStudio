@@ -1,4 +1,4 @@
-"""Validated configuration for the outer reinforcement-learning loop."""
+"""Validated configuration for the reinforcement-learning runtime."""
 
 from dataclasses import dataclass
 from typing import Optional

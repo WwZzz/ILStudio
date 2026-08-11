@@ -36,6 +36,8 @@ class GymEnv(MetaEnv):
     supported so the same benchmark can validate value- and policy-based RL.
     """
 
+    observation_fields = frozenset({"state"})
+
     def __init__(self, config):
         self.config = config
         self.task = getattr(config, "task", None)

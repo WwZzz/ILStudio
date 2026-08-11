@@ -381,7 +381,7 @@ def build_trainer_adapter(
 ) -> TrainerAdapter:
     """Resolve a policy-local, native-Trainer, or generic update adapter."""
 
-    from ..registry import _load_policy_local_adapter
+    from ..utils import _load_policy_local_adapter
 
     if not isinstance(policy_components, Mapping):
         raise TypeError("policy_components must be a mapping")

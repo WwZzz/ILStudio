@@ -6,7 +6,7 @@ import copy
 
 import numpy as np
 
-from rl.offline import OfflineReplayDataset
+from data_utils.offline_rl import OfflineReplayDataset
 
 from .base import BaseBuffer, BufferBatch, TransitionStorage
 

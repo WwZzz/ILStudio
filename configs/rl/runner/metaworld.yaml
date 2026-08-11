@@ -1,6 +1,6 @@
 version: 1
-type: rl.runner.RLRunner
-config_type: rl.runner.RLRunnerConfig
+type: rl.runtime.RLRunner
+config_type: rl.runtime.RLRunnerConfig
 args:
   iterations: 1000
   batch_size: 256

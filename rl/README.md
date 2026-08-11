@@ -45,9 +45,9 @@ Policy -> MetaPolicy -> BasePolicyAdapter -> RLPolicyExecutor   RLRunner
   `build_trainer_adapter_from_components` prefers a policy-local RL adapter,
   then an explicit `Trainer.build_trainer_adapter` hook, then the generic optimizer
   adapter; it never starts a policy-specific full SFT `Trainer.train()` loop.
-- `RLRunner.state_dict()` aggregates non-weight RL state for callbacks that use
-  the existing ILStudio policy and project `ckpt/` workflow; RL does not own a
-  second checkpoint storage manager.
+- `RLRunner.save_checkpoint()` keeps policy files and non-replay resumable state in
+  the existing project `ckpt/` workflow. Replay snapshots are separate and
+  opt-in because they can be much larger and may be shared by later runs.
 
 ## Unified entrypoint
 
@@ -66,6 +66,45 @@ are rejected because they cannot expose local trainable parameters.
   -c rl \
   -o ckpt/my_policy_ppo
 ```
+
+Stateful resume uses the saved policy directory for `-m` and its
+`rl_state.pt` for optimizer, critic, adapter, counters, reward modules, and RNG
+state:
+
+```bash
+.venv/bin/python train_rl.py \
+  -m ckpt/my_policy_ppo \
+  --resume-from ckpt/my_policy_ppo \
+  -e metaworld.easy00 -a ppo -o ckpt/my_policy_ppo
+```
+
+Replay is deliberately not embedded in `rl_state.pt`. Save it only when an
+off-policy or hybrid run needs an exact reusable snapshot:
+
+```bash
+# Save policy/state and a separate replay snapshot.
+.venv/bin/python train_rl.py ... \
+  --save-replay-to replay/run_001_iter_100.pt
+
+# Exact resume; "auto" follows the path recorded in rl_state.pt.
+.venv/bin/python train_rl.py \
+  -m ckpt/run_001 --resume-from ckpt/run_001 \
+  --resume-replay-from auto ...
+
+# A replay snapshot can seed another run without restoring its optimizer.
+.venv/bin/python train_rl.py ... \
+  --resume-replay-from replay/run_001_iter_100.pt
+```
+
+`--checkpoint-interval N` adds periodic checkpoints. It defaults to zero
+(end-of-run only), since repeatedly rewriting a large policy, optimizer, or
+explicit replay snapshot can be expensive. Use a versioned replay path when
+historical snapshots must coexist.
+
+The current replay serializer streams an atomic snapshot for the existing
+in-memory replay buffers. `BaseBuffer.checkpoint_state_dict()` is a storage
+hook, so a future sharded or database-backed replay can persist references
+without adding storage-specific branches to `RLRunner` or an algorithm.
 
 Config choices are independent native ILStudio YAML categories:
 
@@ -138,7 +177,7 @@ optional `success`, `reward`, `terminated`, and `truncated` fields. If an
 episode has no success label, it is treated as a successful demonstration by
 default: only its terminal transition gets `success=true` and a default sparse
 `train/total=1` reward. Use `--offline-missing-success failure` to change that
-policy. These defaults are applied by `rl.offline.OfflineReplayDataset`; the
+policy. These defaults are applied by `data_utils.offline_rl.OfflineReplayDataset`; the
 samples returned to `train.py` are never modified.
 
 Offline replay is lazy: images and transitions are converted only for sampled
@@ -268,12 +307,26 @@ TD/GAE targets, clipping, critics, target networks, temperature, exploration
 schedules, and post-update maintenance. Policy adapters never branch on an
 algorithm name.
 
+For decision-aware PPO, `decision_discount_mode` makes the action-chunk
+timebase explicit:
+
+- `env_step` (default) treats a length-`k` chunk as an SMDP decision. It uses
+  rewards discounted inside the chunk, `gamma ** k` for value bootstrapping,
+  and `(gamma * gae_lambda) ** k` for GAE continuation.
+- `decision` treats every chunk as one abstract time step, regardless of its
+  executed length. It sums the chunk rewards and applies `gamma` and
+  `gamma * gae_lambda` once. This preserves the earlier behavior and is useful
+  only when the task's discount factors are intentionally defined per chunk.
+
+Use `-a ppo_state` for state-only environments such as Gym/Pendulum; the
+standard `ppo` preset intentionally selects the vision-plus-state DINO critic.
+
 Multiple optimizers remain ordinary graph components and are injected into the
 single trainer-adapter file as a mapping:
 
 ```yaml
 trainer_adapter:
-  type: rl.builders.build_trainer_adapter_from_components
+  type: rl.runtime.builder.build_trainer_adapter_from_components
   args:
     policy_components: {$ref: policy_components}
     optimizer:

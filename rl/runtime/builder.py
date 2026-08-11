@@ -13,8 +13,8 @@ from policy.policy_loader import (
     load_policy_model_for_training,
 )
 from policy.utils import load_policy
-from rl.pipeline import import_symbol
-from rl.offline import OfflineReplayDataset
+from .pipeline import import_symbol
+from data_utils.offline_rl import OfflineReplayDataset
 from rl.policy_adapter import build_policy_adapter
 from rl.policy_adapter.training import (
     build_grouped_trainer_adapter,

@@ -12,7 +12,7 @@ from benchmark.base import MetaObs
 from rl.base import DecisionTransition, PolicyOutput
 from rl.policy_adapter import BasePolicyAdapter, OptimizerTrainerAdapter
 from rl.policy_adapter.action import ActionAdapter
-from rl.policy_adapter.runtime import (
+from rl.policy_adapter.utils import (
     explore_action,
     infer_action,
     model_device,

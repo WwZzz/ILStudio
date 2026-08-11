@@ -14,6 +14,8 @@ from .heads import FeatureValueHead
 class DinoStateCritic(BaseCritic):
     """Frozen-DINO visual encoder plus a trainable state/value head."""
 
+    required_observation_fields = frozenset({"image", "state"})
+
     def __init__(
         self,
         *,
@@ -130,6 +132,8 @@ class DinoStateCritic(BaseCritic):
 
 class DinoVisualCritic(DinoStateCritic):
     """Independent DINO critic that intentionally ignores robot state."""
+
+    required_observation_fields = frozenset({"image"})
 
     def __init__(self, *, hidden_dim=256, **kwargs):
         super().__init__(hidden_dim=hidden_dim, **kwargs)

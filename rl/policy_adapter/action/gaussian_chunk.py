@@ -13,7 +13,7 @@ from benchmark.base import MetaAction, MetaObs, MetaPolicy
 from rl.base import ACTION_POLICY_INFO_KEY, MetaTransition, PolicyTrace
 
 from .base import ActionAdapter
-from ..runtime import (
+from ..utils import (
     model_device,
     move_to_device,
     native_training_forward,

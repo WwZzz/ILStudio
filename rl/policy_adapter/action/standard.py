@@ -12,7 +12,7 @@ from benchmark.base import MetaAction
 from rl.base import PolicyOutput
 
 from .base import ActionAdapter
-from ..runtime import (
+from ..utils import (
     explore_action,
     infer_action,
     native_training_forward,

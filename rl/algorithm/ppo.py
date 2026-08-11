@@ -34,6 +34,7 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         value_coef: float = 0.5,
         entropy_coef: float = 0.0,
         normalize_advantage: bool = True,
+        decision_discount_mode: str = "env_step",
         objective_builder=None,
         critic=None,
     ):
@@ -50,6 +51,10 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             raise ValueError("entropy_coef must be non-negative")
         if not isinstance(normalize_advantage, bool):
             raise TypeError("normalize_advantage must be bool")
+        if decision_discount_mode not in {"env_step", "decision"}:
+            raise ValueError(
+                "decision_discount_mode must be 'env_step' or 'decision'"
+            )
         if objective_builder is not None and not isinstance(
             objective_builder, BasePolicyObjectiveBuilder
         ):
@@ -72,6 +77,7 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         self.value_coef = float(value_coef)
         self.entropy_coef = float(entropy_coef)
         self.normalize_advantage = normalize_advantage
+        self.decision_discount_mode = decision_discount_mode
         self.objective_builder = objective_builder
         self.critic = critic
         self._cached_rollout_key = None
@@ -164,18 +170,58 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         )
         return old_value, old_next_value
 
-    def _decision_advantages(self, groups, reward, old_value, old_next_value):
-        bootstrap = old_value.new_tensor(
-            [0.0 if group.terminated else 1.0 for group in groups]
-        )
-        delta = reward + self.gamma * bootstrap * old_next_value - old_value
+    def _decision_discount_terms(self, groups, *, like):
+        if self.decision_discount_mode == "env_step":
+            reward = like.new_tensor(
+                [
+                    group.discounted_reward(self.reward_key, self.gamma)
+                    for group in groups
+                ]
+            )
+            bootstrap_discount = like.new_tensor(
+                [
+                    self.gamma**group.duration * float(group.bootstrap_mask)
+                    for group in groups
+                ]
+            )
+            continuation_discount = like.new_tensor(
+                [
+                    (self.gamma * self.gae_lambda) ** group.duration
+                    for group in groups
+                ]
+            )
+        else:
+            reward = like.new_tensor(
+                [group.reward_sum(self.reward_key) for group in groups]
+            )
+            bootstrap_discount = like.new_tensor(
+                [
+                    self.gamma * float(group.bootstrap_mask)
+                    for group in groups
+                ]
+            )
+            continuation_discount = like.new_full(
+                (len(groups),), self.gamma * self.gae_lambda
+            )
+        return reward, bootstrap_discount, continuation_discount
+
+    def _decision_advantages(
+        self,
+        groups,
+        reward,
+        old_value,
+        old_next_value,
+        bootstrap_discount,
+        continuation_discount,
+    ):
+        delta = reward + bootstrap_discount * old_next_value - old_value
         advantage = torch.empty_like(delta)
         running = torch.zeros((), dtype=delta.dtype, device=delta.device)
         for index in range(len(groups) - 1, -1, -1):
             continuation = 0.0 if groups[index].episode_done else 1.0
             running = (
                 delta[index]
-                + self.gamma * self.gae_lambda * continuation * running
+                + continuation_discount[index] * continuation * running
             )
             advantage[index] = running
         return advantage
@@ -219,11 +265,18 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             old_value, old_next_value = self._decision_values(
                 groups, result, like=value
             )
-            reward = value.new_tensor(
-                [group.reward_sum(self.reward_key) for group in groups]
-            )
+            (
+                reward,
+                bootstrap_discount,
+                continuation_discount,
+            ) = self._decision_discount_terms(groups, like=value)
             advantage = self._decision_advantages(
-                groups, reward, old_value, old_next_value
+                groups,
+                reward,
+                old_value,
+                old_next_value,
+                bootstrap_discount,
+                continuation_discount,
             )
             self._cached_decision_rollout_key = rollout_key
             self._cached_decision_rollout_values = (
@@ -283,6 +336,7 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
 
     def state_dict(self):
         state = super().state_dict()
+        state["decision_discount_mode"] = self.decision_discount_mode
         state["critic"] = (
             None if self.critic is None else self.critic.state_dict()
         )
@@ -290,6 +344,14 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
 
     def load_state_dict(self, state):
         super().load_state_dict(state)
+        saved_discount_mode = state.get(
+            "decision_discount_mode", self.decision_discount_mode
+        )
+        if saved_discount_mode != self.decision_discount_mode:
+            raise ValueError(
+                "PPO decision_discount_mode mismatch: "
+                f"{saved_discount_mode!r} != {self.decision_discount_mode!r}"
+            )
         critic_state = state.get("critic")
         if critic_state is not None:
             if self.critic is None:

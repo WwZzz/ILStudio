@@ -7,6 +7,8 @@ from ..common import activation as resolve_activation, observations, states
 
 
 class StateValueCritic(BaseCritic):
+    required_observation_fields = frozenset({"state"})
+
     def __init__(self, *, hidden_dim=256, activation="tanh"):
         super().__init__()
         activation_class = resolve_activation(activation)

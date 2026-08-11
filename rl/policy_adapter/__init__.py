@@ -8,7 +8,7 @@ from .action import (
     GaussianChunkActionAdapter,
     NativeActionAdapter,
 )
-from .registry import build_policy_adapter, register_policy_adapter
+from .utils import build_policy_adapter, register_policy_adapter
 from .training import (
     OptimizerTrainerAdapter,
     TrainerAdapter,

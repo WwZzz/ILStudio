@@ -8,7 +8,7 @@ from dataclasses import replace
 import numpy as np
 
 from rl.base import DecisionTransition, MetaTransition
-from rl.offline import RL_DATA_SOURCE_KEY
+from data_utils.offline_rl import RL_DATA_SOURCE_KEY
 
 from .base import BaseBuffer, BufferBatch, TransitionStorage
 from .offline import OfflineReplayBuffer
@@ -67,6 +67,7 @@ class HybridReplayBuffer(BaseBuffer):
         self.online_buffer = online_buffer
         self.offline_ratio = float(offline_ratio)
         self._rng = np.random.default_rng(seed)
+        self._marked_decisions = {}
 
     @property
     def buffer_type(self):
@@ -105,19 +106,41 @@ class HybridReplayBuffer(BaseBuffer):
     def add_step(self, step, decision):
         add_step = getattr(self.online_buffer, "add_step", None)
         if callable(add_step):
+            pending = self._marked_decisions.get(decision.decision_id)
+            if pending is None:
+                extras = dict(decision.extras)
+                extras[RL_DATA_SOURCE_KEY] = "online"
+                marked_decision = replace(decision, extras=extras)
+                self._marked_decisions[decision.decision_id] = (
+                    decision,
+                    marked_decision,
+                )
+            else:
+                original_decision, marked_decision = pending
+                if original_decision is not decision:
+                    raise ValueError("one decision_id refers to different decisions")
             marked_step = replace(
                 step,
                 transition=_mark_online(step.transition),
             )
-            return add_step(marked_step, decision)
+            result = add_step(marked_step, marked_decision)
+            if (
+                step.transition.episode_done
+                or step.action_offset + 1 == decision.chunk_size
+            ):
+                self._marked_decisions.pop(decision.decision_id, None)
+            return result
         return self.add(step.transition)
 
     def flush_pending(self):
         flush = getattr(self.online_buffer, "flush_pending", None)
-        return flush() if callable(flush) else None
+        result = flush() if callable(flush) else None
+        self._marked_decisions.clear()
+        return result
 
     def clear(self):
         self.online_buffer.clear()
+        self._marked_decisions.clear()
 
     @staticmethod
     def _sample_counts(batch_size, offline_size, online_size, offline_ratio):
@@ -199,6 +222,7 @@ class HybridReplayBuffer(BaseBuffer):
         self.offline_buffer.load_state_dict(state["offline_buffer"])
         self.online_buffer.load_state_dict(state["online_buffer"])
         self._rng.bit_generator.state = copy.deepcopy(state["rng_state"])
+        self._marked_decisions.clear()
 
 
 __all__ = ["HybridReplayBuffer"]

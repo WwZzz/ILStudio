@@ -1,7 +1,7 @@
 version: 1
 type: rl.algorithm.PPOAlgorithm
 objective: chunk
-critic: dino_state
+critic: state_value
 args:
   gamma: 0.99
   gae_lambda: 0.95
@@ -10,8 +10,6 @@ args:
   value_coef: 0.5
   entropy_coef: 0.0
   normalize_advantage: true
-  # env_step treats a chunk as a variable-duration SMDP decision. Set to
-  # decision only when gamma and lambda are intentionally defined per chunk.
   decision_discount_mode: env_step
 policy_adapter:
   fallback_adapter: base
