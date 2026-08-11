@@ -1,13 +1,17 @@
-"""Policy-specific and reusable adapters for ILStudio RL."""
+"""Modular policy adapters for ILStudio reinforcement learning."""
 
-from .base import BasePolicyAdapter
-from .basic import BasicPolicyAdapter
-from .gaussian_chunk import GaussianChunkPolicyAdapter
-from .meta_policy import MetaPolicyAdapter
+from .base import BasePolicyAdapter, MetaPolicyAdapter
+from .action import (
+    ActionAdapter,
+    CategoricalActionAdapter,
+    GaussianActionAdapter,
+    GaussianChunkActionAdapter,
+    NativeActionAdapter,
+)
 from .registry import build_policy_adapter, register_policy_adapter
-from .trainer import (
-    BaseTrainerAdapter,
-    BasicTrainerAdapter,
+from .training import (
+    OptimizerTrainerAdapter,
+    TrainerAdapter,
     TrainerStepResult,
     build_trainer_adapter,
     register_trainer_adapter,
@@ -15,14 +19,17 @@ from .trainer import (
 
 __all__ = [
     "BasePolicyAdapter",
-    "BasicPolicyAdapter",
-    "GaussianChunkPolicyAdapter",
+    "ActionAdapter",
+    "CategoricalActionAdapter",
+    "GaussianActionAdapter",
+    "GaussianChunkActionAdapter",
     "MetaPolicyAdapter",
-    "build_policy_adapter",
-    "register_policy_adapter",
-    "BaseTrainerAdapter",
-    "BasicTrainerAdapter",
+    "NativeActionAdapter",
+    "OptimizerTrainerAdapter",
+    "TrainerAdapter",
     "TrainerStepResult",
+    "build_policy_adapter",
     "build_trainer_adapter",
+    "register_policy_adapter",
     "register_trainer_adapter",
 ]

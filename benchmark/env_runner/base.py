@@ -1,12 +1,25 @@
 """Base interface for environment execution around ``MetaEnv`` instances."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Tuple
 
 from benchmark.base import MetaAction, MetaObs
 
 
 EnvStep = Tuple[MetaObs, Any, bool, bool, Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class MetaEnvSpec:
+    """Lightweight, spawn-safe description of one configured ``MetaEnv``."""
+
+    factory: Callable
+    config: Any
+
+    def __post_init__(self):
+        if not callable(self.factory):
+            raise TypeError("environment factory must be callable")
 
 
 class BaseEnvRunner(ABC):

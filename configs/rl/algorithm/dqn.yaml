@@ -7,13 +7,15 @@ args:
   huber_loss: true
   target_update_interval: 200
   target_tau: 1.0
+  epsilon_start: 0.08
+  epsilon_end: 0.01
+  epsilon_decay_steps: 30000
 policy_adapter:
-  required_capabilities: [action, dqn, target_update]
+  fallback_adapter: base
+  required_capabilities: [action, action_scores]
   args:
-    epsilon_start: 0.08
-    epsilon_end: 0.01
-    epsilon_decay_steps: 30000
-    seed: 0
+    action_adapter:
+      type: rl.policy_adapter.action.CategoricalActionAdapter
 buffer:
   type: rl.buffer.ReplayBuffer
   args:

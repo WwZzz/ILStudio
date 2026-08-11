@@ -1,172 +1,213 @@
-"""Twin Delayed Deep Deterministic Policy Gradient."""
+"""Twin Delayed DDPG with algorithm-owned target policy and target critics."""
 
 from numbers import Real
 
 import torch
 import torch.nn.functional as F
 
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
-from .base import AlgorithmOutput, BaseRLAlgorithm
+from .base import AlgorithmOutput
+from .ddpg import DDPGAlgorithm, _action_batch, _masked_action_mse
 from .utils import (
     bootstrap_discounts,
     decision_rewards,
     detached_metric,
-    forward_result,
     transitions,
+    validate_policy_result,
     vector,
 )
 
 
-class TD3Algorithm(BaseRLAlgorithm):
-    """Twin critics, smoothed targets, and delayed deterministic actor updates."""
+def _chunk_ar1_noise_like(reference, *, std, rho, clip):
+    """Sample stationary correlated target noise for action chunks."""
+
+    if not torch.is_tensor(reference) or reference.ndim != 3:
+        raise ValueError("chunk noise reference must be rank three")
+    for name, value in (("std", std), ("rho", rho)):
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise TypeError(f"{name} must be a real number")
+    if float(std) < 0.0:
+        raise ValueError("std must be non-negative")
+    if not 0.0 <= float(rho) < 1.0:
+        raise ValueError("rho must be in [0, 1)")
+    if clip is not None and float(clip) <= 0.0:
+        raise ValueError("clip must be positive or None")
+    noise = torch.randn_like(reference) * float(std)
+    innovation_scale = (1.0 - float(rho) ** 2) ** 0.5
+    for index in range(1, reference.shape[1]):
+        noise[:, index] = (
+            float(rho) * noise[:, index - 1]
+            + innovation_scale * noise[:, index]
+        )
+    return noise if clip is None else noise.clamp(-float(clip), float(clip))
+
+
+class TD3Algorithm(DDPGAlgorithm):
+    METRIC_PREFIX = "td3"
 
     def __init__(
         self,
         *,
-        gamma: float = 0.99,
-        reward_key: str = "train/total",
-        target_tau: float = 0.005,
         target_policy_noise: float = 0.2,
         target_noise_clip: float = 0.5,
+        target_policy_noise_rho: float = 0.0,
         policy_delay: int = 2,
-        actor_bc_coef: float = 0.0,
-    ) -> None:
-        if not isinstance(gamma, Real) or not 0.0 <= float(gamma) <= 1.0:
-            raise ValueError("gamma must be in [0, 1]")
-        if not isinstance(reward_key, str) or not reward_key:
-            raise TypeError("reward_key must be a non-empty string")
-        if not isinstance(target_tau, Real) or not 0.0 < float(target_tau) <= 1.0:
-            raise ValueError("target_tau must be in (0, 1]")
+        **kwargs,
+    ):
         for name, value in (
             ("target_policy_noise", target_policy_noise),
             ("target_noise_clip", target_noise_clip),
         ):
             if not isinstance(value, Real) or float(value) < 0.0:
                 raise ValueError(f"{name} must be non-negative")
-        if not isinstance(actor_bc_coef, Real) or float(actor_bc_coef) < 0.0:
-            raise ValueError("actor_bc_coef must be non-negative")
-        if (
-            isinstance(policy_delay, bool)
-            or not isinstance(policy_delay, int)
-            or policy_delay <= 0
-        ):
+        if not isinstance(target_policy_noise_rho, Real) or not 0.0 <= float(target_policy_noise_rho) < 1.0:
+            raise ValueError("target_policy_noise_rho must be in [0, 1)")
+        if isinstance(policy_delay, bool) or not isinstance(policy_delay, int) or policy_delay <= 0:
             raise ValueError("policy_delay must be a positive integer")
-        super().__init__(
-            required_capabilities=("action", "td3", "target_update"),
-            required_buffer_type="replay",
-        )
-        self.gamma = float(gamma)
-        self.reward_key = reward_key
-        self.target_tau = float(target_tau)
+        super().__init__(**kwargs)
         self.target_policy_noise = float(target_policy_noise)
         self.target_noise_clip = float(target_noise_clip)
+        self.target_policy_noise_rho = float(target_policy_noise_rho)
         self.policy_delay = policy_delay
-        self.actor_bc_coef = float(actor_bc_coef)
         self._update_step = 0
 
     @property
-    def update_step(self) -> int:
+    def update_step(self):
         return self._update_step
 
-    def compute_update(self, batch, *, policy_adapter: BasePolicyAdapter, context=None):
+    def _twin_values(self, value, *, prefix):
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            raise TypeError("TD3 requires a twin-Q critic")
+        return vector(value[0], name=f"{prefix}1"), vector(
+            value[1], name=f"{prefix}2"
+        )
+
+    def _target_noise(self, actions):
+        if actions.ndim == 3:
+            return _chunk_ar1_noise_like(
+                actions,
+                std=self.target_policy_noise,
+                rho=self.target_policy_noise_rho,
+                clip=self.target_noise_clip,
+            )
+        noise = torch.randn_like(actions) * self.target_policy_noise
+        return noise.clamp(-self.target_noise_clip, self.target_noise_clip)
+
+    def _actor_loss(self, batch, items, policy_adapter, context):
+        observations = tuple(item.obs for item in items)
+        replay_actions, action_mask = _action_batch(
+            policy_adapter.batch_actions(batch, context=context)
+        )
+        actor = validate_policy_result(
+            policy_adapter.sample_actions(
+                batch, source="obs", deterministic=True, context=context
+            ),
+            operation="sample_actions",
+            required=("action",),
+        )
+        actor_q1, _ = self._twin_values(
+            self.critic(
+                observations,
+                actor["action"],
+                action_mask=action_mask,
+                context=context,
+            ),
+            prefix="actor_q",
+        )
+        bc_loss = _masked_action_mse(actor["action"], replay_actions, action_mask)
+        return self._combine_actor_loss(actor_q1, bc_loss), actor_q1, bc_loss
+
+    def _combine_actor_loss(self, actor_q1, bc_loss):
+        return -actor_q1.mean() + self.actor_bc_coef * bc_loss
+
+    def _extra_actor_metrics(self, actor_q1):
+        del actor_q1
+        return {}
+
+    def compute_update(self, batch, *, policy_adapter: MetaPolicyAdapter, context=None):
         items = transitions(batch)
-        forward_context = {
-            **dict(context or {}),
-            "target_policy_noise": self.target_policy_noise,
-            "target_noise_clip": self.target_noise_clip,
-        }
-        required = (
-            "critic_q1",
-            "critic_q2",
-            "target_next_q1",
-            "target_next_q2",
-            "actor_q1",
+        observations = tuple(item.obs for item in items)
+        next_observations = tuple(item.next_obs for item in items)
+        replay_actions, action_mask = _action_batch(
+            policy_adapter.batch_actions(batch, context=context)
         )
-        result = forward_result(
-            policy_adapter,
-            "td3",
-            batch,
-            context=forward_context,
-            required=required,
+        critic_q1, critic_q2 = self._twin_values(
+            self.critic(
+                observations,
+                replay_actions,
+                action_mask=action_mask,
+                context=context,
+            ),
+            prefix="critic_q",
         )
-        values = {name: vector(result[name], name=name) for name in required}
-        if any(len(value) != len(items) for value in values.values()):
-            raise ValueError("TD3 outputs must align with transitions")
-
-        target_next_q = torch.minimum(
-            values["target_next_q1"], values["target_next_q2"]
-        )
+        target_policy = self._ensure_target_policy(policy_adapter)
+        with torch.no_grad():
+            target_actor = validate_policy_result(
+                policy_adapter.sample_actions(
+                    batch,
+                    source="next_obs",
+                    deterministic=True,
+                    policy=target_policy,
+                    context=context,
+                ),
+                operation="sample_actions",
+                required=("action",),
+            )
+            noise = self._target_noise(target_actor["action"])
+            target_action = policy_adapter.clamp_actions(target_actor["action"] + noise)
+            target_q1, target_q2 = self._twin_values(
+                self.critic.target(
+                    next_observations,
+                    target_action,
+                    context={**dict(context or {}), "feature_policy": target_policy},
+                ),
+                prefix="target_q",
+            )
         target = decision_rewards(
-            items,
-            self.reward_key,
-            self.gamma,
-            like=values["critic_q1"],
-        ) + bootstrap_discounts(
-            items,
-            self.gamma,
-            like=values["critic_q1"],
-        ) * target_next_q.detach()
-        critic1_loss = F.mse_loss(values["critic_q1"], target)
-        critic2_loss = F.mse_loss(values["critic_q2"], target)
-        critic_loss = critic1_loss + critic2_loss
-        actor_bc_loss = result.get("actor_bc_loss")
-        if actor_bc_loss is None:
-            actor_bc_loss = values["actor_q1"].new_zeros(())
-        elif not hasattr(actor_bc_loss, "numel") or actor_bc_loss.numel() != 1:
-            raise ValueError("TD3 actor_bc_loss must be a scalar tensor")
-        actor_loss = -values["actor_q1"].mean() + self.actor_bc_coef * actor_bc_loss
-        actor_due = (self._update_step + 1) % self.policy_delay == 0
-
+            items, self.reward_key, self.gamma, like=critic_q1
+        ) + bootstrap_discounts(items, self.gamma, like=critic_q1) * torch.minimum(
+            target_q1, target_q2
+        )
+        critic_loss = F.mse_loss(critic_q1, target.detach()) + F.mse_loss(
+            critic_q2, target.detach()
+        )
+        update_actor = (self._update_step + 1) % self.policy_delay == 0
         losses = {"critic": critic_loss}
-        update_order = ["critic"]
-        payload = {"update_order": update_order}
-        if actor_due:
+        order = ["critic"]
+        prefix = self.METRIC_PREFIX
+        metrics = {
+            f"{prefix}/critic_loss": detached_metric(critic_loss),
+            f"{prefix}/target_mean": detached_metric(target.mean()),
+            f"{prefix}/actor_updated": float(update_actor),
+        }
+        payload = {"update_order": tuple(order)}
+        if update_actor:
+            actor_loss, actor_q1, bc_loss = self._actor_loss(
+                batch, items, policy_adapter, context
+            )
 
             def fresh_actor_loss():
-                actor_result = forward_result(
-                    policy_adapter,
-                    "td3",
-                    batch,
-                    context={**forward_context, "phase": "actor"},
-                    required=("actor_q1",),
-                )
-                fresh_actor_q1 = vector(
-                    actor_result["actor_q1"], name="actor_q1"
-                )
-                if len(fresh_actor_q1) != len(items):
-                    raise ValueError("TD3 actor_q1 must align with transitions")
-                fresh_bc_loss = actor_result.get("actor_bc_loss")
-                if fresh_bc_loss is None:
-                    fresh_bc_loss = fresh_actor_q1.new_zeros(())
-                elif not hasattr(fresh_bc_loss, "numel") or fresh_bc_loss.numel() != 1:
-                    raise ValueError("TD3 actor_bc_loss must be a scalar tensor")
-                return -fresh_actor_q1.mean() + self.actor_bc_coef * fresh_bc_loss
+                return self._actor_loss(batch, items, policy_adapter, context)[0]
 
             losses["actor"] = fresh_actor_loss
-            update_order.append("actor")
+            order.append("actor")
             payload.update(
                 {
-                    "post_step": "td3_target",
+                    "update_order": tuple(order),
+                    "post_step": "target_networks",
                     "post_step_context": {"tau": self.target_tau},
                 }
             )
-
-        return AlgorithmOutput(
-            loss=losses,
-            metrics={
-                "td3/critic1_loss": detached_metric(critic1_loss),
-                "td3/critic2_loss": detached_metric(critic2_loss),
-                "td3/actor_loss": detached_metric(actor_loss),
-                "td3/actor_bc_loss": detached_metric(actor_bc_loss),
-                "td3/actor_bc_coef": self.actor_bc_coef,
-                "td3/q1_mean": detached_metric(values["critic_q1"].mean()),
-                "td3/q2_mean": detached_metric(values["critic_q2"].mean()),
-                "td3/target_mean": detached_metric(target.mean()),
-                "td3/actor_updated": float(actor_due),
-            },
-            payload=payload,
-        )
+            metrics.update(
+                {
+                    f"{prefix}/actor_loss": detached_metric(actor_loss),
+                    f"{prefix}/actor_q_mean": detached_metric(actor_q1.mean()),
+                    f"{prefix}/actor_bc_loss": detached_metric(bc_loss),
+                }
+            )
+            metrics.update(self._extra_actor_metrics(actor_q1))
+        return AlgorithmOutput(loss=losses, metrics=metrics, payload=payload)
 
     def update(self, *args, **kwargs):
         result = super().update(*args, **kwargs)
@@ -175,17 +216,10 @@ class TD3Algorithm(BaseRLAlgorithm):
         return result
 
     def state_dict(self):
-        return {
-            "version": self.STATE_VERSION,
-            "update_step": self._update_step,
-        }
+        state = super().state_dict()
+        state["update_step"] = self._update_step
+        return state
 
     def load_state_dict(self, state):
-        if not isinstance(state, dict):
-            raise TypeError("TD3 algorithm state must be a mapping")
-        if state.get("version") != self.STATE_VERSION:
-            raise ValueError("unsupported TD3 algorithm state version")
-        update_step = state.get("update_step")
-        if isinstance(update_step, bool) or not isinstance(update_step, int) or update_step < 0:
-            raise ValueError("TD3 update_step must be a non-negative integer")
-        self._update_step = update_step
+        super().load_state_dict(state)
+        self._update_step = int(state.get("update_step", 0))

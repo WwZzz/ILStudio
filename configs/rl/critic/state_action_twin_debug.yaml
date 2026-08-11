@@ -1,0 +1,7 @@
+version: 1
+type: rl.critic.TwinQCritic
+args:
+  q_type: rl.critic.StateActionQCritic
+  q_args:
+    hidden_dim: 64
+    activation: relu

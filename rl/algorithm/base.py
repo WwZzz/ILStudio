@@ -7,8 +7,8 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 
 import numpy as np
 
-from rl.buffer import BaseBuffer, ReplayBuffer
-from rl.policy_adapter import BasePolicyAdapter
+from rl.buffer import BaseBuffer
+from rl.policy_adapter import MetaPolicyAdapter
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,16 @@ class AlgorithmUpdateResult:
         object.__setattr__(self, "updated", bool(self.updated))
 
 
+@dataclass(frozen=True)
+class CollectionAcceptance:
+    accepted: bool = True
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        object.__setattr__(self, "accepted", bool(self.accepted))
+        object.__setattr__(self, "metrics", dict(self.metrics))
+
+
 class BaseRLAlgorithm(ABC):
     """Define RL loss semantics while delegating policy gradient mechanics."""
 
@@ -53,9 +63,9 @@ class BaseRLAlgorithm(ABC):
         self.required_capabilities = capabilities
         self.required_buffer_type = required_buffer_type
 
-    def validate(self, policy_adapter: BasePolicyAdapter, buffer: BaseBuffer) -> None:
-        if not isinstance(policy_adapter, BasePolicyAdapter):
-            raise TypeError("policy_adapter must inherit BasePolicyAdapter")
+    def validate(self, policy_adapter: MetaPolicyAdapter, buffer: BaseBuffer) -> None:
+        if not isinstance(policy_adapter, MetaPolicyAdapter):
+            raise TypeError("policy_adapter must inherit MetaPolicyAdapter")
         if not isinstance(buffer, BaseBuffer):
             raise TypeError("buffer must inherit BaseBuffer")
         policy_adapter.require_capabilities(self.required_capabilities)
@@ -68,12 +78,24 @@ class BaseRLAlgorithm(ABC):
                 f"got {buffer.buffer_type}"
             )
 
+    def evaluate_collection(self, collection) -> CollectionAcceptance:
+        """Decide whether a rollout is informative enough for an update."""
+
+        del collection
+        return CollectionAcceptance()
+
+    def collection_context(self, context=None):
+        """Return algorithm-owned behavior settings used during collection."""
+
+        del context
+        return {}
+
     @abstractmethod
     def compute_update(
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> AlgorithmOutput:
         """Compute algorithm losses and metrics for one update batch."""
@@ -82,7 +104,7 @@ class BaseRLAlgorithm(ABC):
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         trainer_adapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> AlgorithmUpdateResult:
@@ -158,8 +180,9 @@ class BaseRLAlgorithm(ABC):
                 raise TypeError("algorithm post_step payload must be a non-empty string")
             post_context = dict(context or {})
             post_context.update(post_step_context)
-            policy_adapter.algorithm_post_step(
+            self.algorithm_post_step(
                 post_step,
+                policy_adapter=policy_adapter,
                 context=post_context,
             )
         collisions = set(metrics).intersection(trainer_result.metrics)
@@ -174,11 +197,36 @@ class BaseRLAlgorithm(ABC):
             updated=trainer_result.updated,
         )
 
+    def algorithm_post_step(
+        self,
+        operation: str,
+        *,
+        policy_adapter: MetaPolicyAdapter,
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Run algorithm-owned maintenance after optimizer stepping."""
+
+        del policy_adapter, context
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement post-step {operation!r}"
+        )
+
+    def parameters(self):
+        """Return algorithm-owned parameters such as critics or temperature."""
+
+        return ()
+
+    def optimizer_parameter_groups(self, policy_adapter: MetaPolicyAdapter):
+        """Optionally describe named optimizer groups for a generic trainer."""
+
+        del policy_adapter
+        return None
+
     def iter_compute_updates(
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ):
         """Yield loss graphs consumed and released by the TrainerAdapter."""
@@ -203,8 +251,11 @@ class BaseRLAlgorithm(ABC):
             return
         for _ in range(num_updates):
             size = min(batch_size, len(buffer))
-            if isinstance(buffer, ReplayBuffer):
-                yield buffer.sample(size, replace=False)
+            if buffer.buffer_type == "replay":
+                sample = getattr(buffer, "sample", None)
+                if not callable(sample):
+                    raise TypeError("replay buffers must provide sample()")
+                yield sample(size, replace=False)
             else:
                 indices = rng.choice(len(buffer), size=size, replace=False)
                 yield buffer.get_batch(indices)

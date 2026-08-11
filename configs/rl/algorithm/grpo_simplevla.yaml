@@ -1,0 +1,29 @@
+version: 1
+name: grpo_simplevla
+metadata:
+  description: SimpleVLA-RL-aligned grouped outcome optimization
+type: rl.algorithm.GRPOAlgorithm
+objective: token
+args:
+  reward_key: train/total
+  clip_ratio_low: 0.2
+  clip_ratio_high: 0.28
+  entropy_coef: 0.0
+  advantage_epsilon: 0.000001
+  update_micro_batch_size: 8
+  filter_accuracy: true
+  filter_accuracy_lower: 0.1
+  filter_accuracy_upper: 0.9
+policy_adapter:
+  required_capabilities: [action, recompute_traces]
+  args:
+    action_adapter:
+      type: policy.openvla_oft.rl_adapter.OpenVLAOFTActionAdapter
+      args:
+        temperature: 1.6
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 8
+  updates_per_iteration: 1

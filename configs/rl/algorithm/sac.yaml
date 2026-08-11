@@ -1,20 +1,24 @@
 version: 1
 type: rl.algorithm.SACAlgorithm
+critic: state_action_twin
 args:
   gamma: 0.99
   reward_key: train/total
   alpha: auto
   target_entropy: -1.0
   target_tau: 0.01
+  actor_learning_rate: 0.0005
+  critic_learning_rate: 0.001
+  alpha_learning_rate: 0.001
 policy_adapter:
-  required_capabilities: [action, sac, target_update, temperature]
+  fallback_adapter: base
+  required_capabilities: [action, sample_actions, batch_actions]
   args:
-    policy_std: 0.2
-    critic_activation: relu
-    actor_learning_rate: 0.0005
-    critic_learning_rate: 0.001
-    alpha_learning_rate: 0.001
-    seed: 0
+    action_adapter:
+      type: rl.policy_adapter.action.GaussianActionAdapter
+      args:
+        initial_std: 0.2
+        learn_std: true
 buffer:
   type: rl.buffer.ReplayBuffer
   args:

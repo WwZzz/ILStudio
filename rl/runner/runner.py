@@ -1,6 +1,7 @@
 """Outer RL loop composing collection, algorithms and policy updates."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from numbers import Real
 from time import perf_counter
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -10,8 +11,7 @@ from data_utils.utils import set_seed
 from rl.algorithm import AlgorithmUpdateResult, BaseRLAlgorithm
 from rl.buffer import BaseBuffer, RolloutBuffer
 from rl.collector import BaseCollector, CollectResult
-from rl.policy_adapter import BasePolicyAdapter
-from rl.policy_adapter.trainer import BaseTrainerAdapter
+from rl.policy_adapter import MetaPolicyAdapter, TrainerAdapter
 
 from .config import RLRunnerConfig
 
@@ -36,28 +36,37 @@ class RLRunner:
     def __init__(
         self,
         *,
-        collector: BaseCollector,
+        collector: Optional[BaseCollector] = None,
         buffer: BaseBuffer,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         algorithm: BaseRLAlgorithm,
-        trainer_adapter: BaseTrainerAdapter,
+        trainer_adapter: TrainerAdapter,
         config: RLRunnerConfig,
         callbacks=(),
     ) -> None:
-        if not isinstance(collector, BaseCollector):
-            raise TypeError("collector must inherit BaseCollector")
+        if collector is not None and not isinstance(collector, BaseCollector):
+            raise TypeError("collector must inherit BaseCollector or be None")
         if not isinstance(buffer, BaseBuffer):
             raise TypeError("buffer must inherit BaseBuffer")
-        if getattr(collector, "buffer", None) is not buffer:
+        if collector is not None and getattr(collector, "buffer", None) is not buffer:
             raise ValueError("collector and RLRunner must share the same buffer")
-        if not isinstance(policy_adapter, BasePolicyAdapter):
-            raise TypeError("policy_adapter must inherit BasePolicyAdapter")
+        if not isinstance(policy_adapter, MetaPolicyAdapter):
+            raise TypeError("policy_adapter must inherit MetaPolicyAdapter")
         if not isinstance(algorithm, BaseRLAlgorithm):
             raise TypeError("algorithm must inherit BaseRLAlgorithm")
-        if not isinstance(trainer_adapter, BaseTrainerAdapter):
-            raise TypeError("trainer_adapter must inherit BaseTrainerAdapter")
+        if not isinstance(trainer_adapter, TrainerAdapter):
+            raise TypeError("trainer_adapter must inherit TrainerAdapter")
         if not isinstance(config, RLRunnerConfig):
             raise TypeError("config must be RLRunnerConfig")
+        if config.mode == "offline":
+            if collector is not None:
+                raise ValueError("offline mode must not construct a collector")
+            if buffer.buffer_type != "replay":
+                raise ValueError("offline mode requires replay buffer semantics")
+        elif collector is None:
+            raise ValueError(f"{config.mode} mode requires a collector")
+        if config.mode == "hybrid" and buffer.buffer_type != "replay":
+            raise ValueError("hybrid mode requires replay buffer semantics")
         callbacks = tuple(callbacks)
         if not all(callable(callback) for callback in callbacks):
             raise TypeError("RLRunner callbacks must be callable")
@@ -89,9 +98,16 @@ class RLRunner:
         return result
 
     def _collect(self, context):
+        if self.collector is None:
+            raise RuntimeError("offline mode has no collector")
+        collection_context = dict(context)
+        algorithm = getattr(self, "algorithm", None)
+        algorithm_context = getattr(algorithm, "collection_context", None)
+        if callable(algorithm_context):
+            collection_context.update(algorithm_context(context))
         kwargs = {
             "deterministic": self.config.deterministic_collection,
-            "context": context,
+            "context": collection_context,
         }
         if self.config.collect_steps is not None:
             kwargs["num_steps"] = self.config.collect_steps
@@ -100,10 +116,117 @@ class RLRunner:
         with self.policy_adapter.collection_context():
             return self.collector.collect(**kwargs)
 
+    def _collect_for_update(self, context):
+        total_steps = 0
+        rejected_steps = 0
+        for attempt in range(1, self.config.max_collection_attempts + 1):
+            collection = self._collect(context)
+            total_steps += collection.num_steps
+            acceptance = self.algorithm.evaluate_collection(collection)
+            exhausted = attempt == self.config.max_collection_attempts
+            if acceptance.accepted or exhausted:
+                if exhausted and not acceptance.accepted:
+                    self.buffer.clear()
+                metrics = dict(collection.metrics)
+                metrics.update(acceptance.metrics)
+                metrics.update(
+                    {
+                        "collection/attempts": float(attempt),
+                        "collection/rejected_steps": float(rejected_steps),
+                        "collection/total_steps": float(total_steps),
+                        "collection/filter_exhausted": float(
+                            exhausted and not acceptance.accepted
+                        ),
+                    }
+                )
+                return replace(collection, metrics=metrics), total_steps
+            rejected_steps += collection.num_steps
+            self.buffer.clear()
+        raise RuntimeError("collection attempt loop did not produce a rollout")
+
     def _can_update(self) -> bool:
         if self.config.updates_per_iteration == 0 or len(self.buffer) == 0:
             return False
         return self.buffer.num_env_steps >= self.config.warmup_steps
+
+    def _iter_update_batches(self):
+        return self.algorithm.iter_update_batches(
+            self.buffer,
+            batch_size=self.config.batch_size,
+            num_updates=self.config.updates_per_iteration,
+            rng=self._rng,
+        )
+
+    def _run_updates(self, context):
+        updates = []
+        policy_was_updated = False
+        update_started = perf_counter()
+
+        if not self._can_update():
+            return tuple(updates), perf_counter() - update_started
+
+        self.policy_adapter.set_training(True)
+        try:
+            for batch in self._iter_update_batches():
+                update_context = self._context(context)
+                update = self.algorithm.update(
+                    batch,
+                    policy_adapter=self.policy_adapter,
+                    trainer_adapter=self.trainer_adapter,
+                    context=update_context,
+                )
+                sampling_metrics = {
+                    f"replay/{key}": float(value)
+                    for key, value in getattr(batch, "metadata", {}).items()
+                    if isinstance(value, Real) and not isinstance(value, bool)
+                }
+                collisions = set(update.metrics).intersection(sampling_metrics)
+                if collisions:
+                    raise KeyError(
+                        "algorithm metrics conflict with replay metrics: "
+                        + ", ".join(sorted(collisions))
+                    )
+                if sampling_metrics:
+                    update = replace(
+                        update,
+                        metrics={**update.metrics, **sampling_metrics},
+                    )
+                updates.append(update)
+                if update.updated:
+                    policy_was_updated = True
+                    self.global_update_steps += 1
+                    self.policy_adapter.bump_policy_version()
+        finally:
+            self.policy_adapter.set_training(False)
+
+        if policy_was_updated and self.collector is not None:
+            self.collector.policy_updated()
+
+        return tuple(updates), perf_counter() - update_started
+
+    def _should_collect(self):
+        if self.config.mode == "offline":
+            return False
+        if self.config.mode == "hybrid" and (
+            self.iteration < self.config.offline_pretrain_iterations
+        ):
+            return False
+        return True
+
+    def _empty_collection(self):
+        phase = (
+            "offline_pretrain"
+            if self.config.mode == "hybrid"
+            else "offline"
+        )
+        return CollectResult(
+            transitions=(),
+            episodes=(),
+            metrics={
+                "collection/skipped": 1.0,
+                f"collection/phase_{phase}": 1.0,
+            },
+        )
 
     def run(
         self,
@@ -128,40 +251,20 @@ class RLRunner:
             iteration_context = self._context(context)
             self.policy_adapter.set_training(False)
             collection_started = perf_counter()
-            collection = self._collect(iteration_context)
+            if self._should_collect():
+                collection, attempted_env_steps = self._collect_for_update(
+                    iteration_context
+                )
+            else:
+                collection = self._empty_collection()
+                attempted_env_steps = 0
             collection_seconds = perf_counter() - collection_started
-            self.global_env_steps += collection.num_steps
+            self.global_env_steps += attempted_env_steps
 
             if isinstance(self.buffer, RolloutBuffer):
                 self.buffer.seal()
 
-            updates = []
-            policy_was_updated = False
-            update_started = perf_counter()
-            if self._can_update():
-                self.policy_adapter.set_training(True)
-                for batch in self.algorithm.iter_update_batches(
-                    self.buffer,
-                    batch_size=self.config.batch_size,
-                    num_updates=self.config.updates_per_iteration,
-                    rng=self._rng,
-                ):
-                    update_context = self._context(context)
-                    update = self.algorithm.update(
-                        batch,
-                        policy_adapter=self.policy_adapter,
-                        trainer_adapter=self.trainer_adapter,
-                        context=update_context,
-                    )
-                    updates.append(update)
-                    if update.updated:
-                        policy_was_updated = True
-                        self.global_update_steps += 1
-                        self.policy_adapter.bump_policy_version()
-                self.policy_adapter.set_training(False)
-            update_seconds = perf_counter() - update_started
-            if policy_was_updated:
-                self.collector.policy_updated()
+            updates, update_seconds = self._run_updates(context)
 
             if (
                 isinstance(self.buffer, RolloutBuffer)
@@ -240,4 +343,5 @@ class RLRunner:
         return result
 
     def close(self):
-        self.collector.close()
+        if self.collector is not None:
+            self.collector.close()

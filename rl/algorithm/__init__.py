@@ -1,11 +1,18 @@
 """RL algorithm interfaces and callable baseline adapter."""
 
-from .base import AlgorithmOutput, AlgorithmUpdateResult, BaseRLAlgorithm
+from .base import (
+    AlgorithmOutput,
+    AlgorithmUpdateResult,
+    BaseRLAlgorithm,
+    CollectionAcceptance,
+)
 from .actor_critic import ActorCriticAlgorithm
 from .basic import BasicRLAlgorithm
+from .cql import CQLAlgorithm
 from .ddpg import DDPGAlgorithm
 from .dqn import DQNAlgorithm
 from .grpo import GRPOAlgorithm
+from .iql import IQLAlgorithm
 from .objective import (
     ActionChunkPolicyObjectiveBuilder,
     BasePolicyObjectiveBuilder,
@@ -19,6 +26,7 @@ from .rwr import ChunkTrainingBatch, RewardWeightedRegressionAlgorithm
 from .sac import SACAlgorithm
 from .sarsa import SARSAAlgorithm
 from .td3 import TD3Algorithm
+from .td3_bc import TD3BCAlgorithm
 
 __all__ = [
     "AlgorithmOutput",
@@ -26,13 +34,16 @@ __all__ = [
     "ActorCriticAlgorithm",
     "ActionChunkPolicyObjectiveBuilder",
     "BaseRLAlgorithm",
+    "CollectionAcceptance",
     "BasicRLAlgorithm",
     "BasePolicyObjectiveBuilder",
     "ChunkPolicyObjectiveBuilder",
     "ChunkTrainingBatch",
+    "CQLAlgorithm",
     "DDPGAlgorithm",
     "DQNAlgorithm",
     "GRPOAlgorithm",
+    "IQLAlgorithm",
     "DenoisingPolicyObjectiveBuilder",
     "PPOAlgorithm",
     "ReinforceAlgorithm",
@@ -40,5 +51,6 @@ __all__ = [
     "SACAlgorithm",
     "SARSAAlgorithm",
     "TD3Algorithm",
+    "TD3BCAlgorithm",
     "TokenPolicyObjectiveBuilder",
 ]

@@ -9,7 +9,7 @@ import numpy as np
 
 from rl.base import MetaTransition
 from rl.buffer import BaseBuffer, RolloutBuffer
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
 from .base import AlgorithmOutput, BaseRLAlgorithm
 
@@ -150,7 +150,7 @@ class RewardWeightedRegressionAlgorithm(BaseRLAlgorithm):
         if not isinstance(success_only, bool) or not isinstance(fallback_to_best, bool):
             raise TypeError("success_only and fallback_to_best must be bool values")
         super().__init__(
-            required_capabilities=("action", "chunk_training"),
+            required_capabilities=("action", "training_forward"),
             required_buffer_type="rollout",
         )
         self.reward_key = reward_key
@@ -283,7 +283,7 @@ class RewardWeightedRegressionAlgorithm(BaseRLAlgorithm):
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> AlgorithmOutput:
         if not isinstance(batch, ChunkTrainingBatch):

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 
 from benchmark.base import MetaEnv
+from benchmark.env_runner import MetaEnvSpec
 from configs.loader import ConfigLoader
 from policy.direct_loader import direct_policy_loader
 from policy.policy_loader import (
@@ -13,8 +14,12 @@ from policy.policy_loader import (
 )
 from policy.utils import load_policy
 from rl.pipeline import import_symbol
+from rl.offline import OfflineReplayDataset
 from rl.policy_adapter import build_policy_adapter
-from rl.policy_adapter.trainer import build_trainer_adapter
+from rl.policy_adapter.training import (
+    build_grouped_trainer_adapter,
+    build_trainer_adapter,
+)
 
 
 def _validate_override_groups(overrides):
@@ -56,6 +61,81 @@ def build_env_from_loaded_config(env_config, *, env_index=None) -> MetaEnv:
     if not isinstance(result, MetaEnv):
         raise TypeError("benchmark create_env must return an ILStudio MetaEnv")
     return result
+
+
+def build_offline_replay_dataset(
+    task_config,
+    training_args,
+    *,
+    item_type="transition",
+    default_success=True,
+    reward_key="train/total",
+    step_reward=0.0,
+    success_reward=1.0,
+    failure_reward=0.0,
+):
+    """Load raw task samples and attach RL-only episode semantics.
+
+    ``normalize=False`` is deliberate: replay stores environment-space state
+    and action values, and the checkpoint's MetaPolicy applies its own saved
+    normalizers during policy/algorithm forwards.
+    """
+
+    from data_utils.utils import load_datasets
+
+    datasets = load_datasets(
+        training_args,
+        task_config,
+        save_norm=False,
+        normalize=False,
+    )
+    return OfflineReplayDataset(
+        datasets,
+        item_type=item_type,
+        default_success=default_success,
+        reward_key=reward_key,
+        step_reward=step_reward,
+        success_reward=success_reward,
+        failure_reward=failure_reward,
+    )
+
+
+def build_env_specs_from_loaded_config(env_config, *, env_indices):
+    """Build lightweight specs for an explicit subset of a multi-env config."""
+
+    configs = tuple(env_config) if isinstance(env_config, list) else (env_config,)
+    if not isinstance(env_indices, (list, tuple)) or not env_indices:
+        raise TypeError("env_indices must be a non-empty list or tuple")
+    selected = []
+    seen = set()
+    for index in env_indices:
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError("environment indices must be integers")
+        if not 0 <= index < len(configs):
+            raise IndexError("env_index is outside the configured environment list")
+        if index in seen:
+            raise ValueError("environment indices must be unique")
+        seen.add(index)
+        selected.append(configs[index])
+
+    specs = []
+    for config in selected:
+        env_type = getattr(config, "type", None)
+        if not isinstance(env_type, str) or not env_type:
+            raise TypeError("environment config type must be a non-empty string")
+        module_name = (
+            env_type.rsplit(".", 1)[0]
+            if "." in env_type
+            else f"benchmark.{env_type}"
+        )
+        module = importlib.import_module(module_name)
+        create_env = getattr(module, "create_env", None)
+        if not callable(create_env):
+            raise AttributeError(
+                f"environment module {module_name!r} has no create_env"
+            )
+        specs.append(MetaEnvSpec(create_env, config))
+    return tuple(specs)
 
 
 def build_env_from_config(
@@ -344,6 +424,7 @@ def build_trainer_adapter_from_components(
     *,
     adapter: str = "auto",
     policy_adapter=None,
+    algorithm=None,
     optimizer=None,
     scheduler=None,
     step_fn=None,
@@ -384,6 +465,22 @@ def build_trainer_adapter_from_components(
         if name in kwargs:
             raise ValueError(f"{name} was provided twice")
         kwargs[name] = value
+
+    parameter_group_builder = getattr(
+        algorithm,
+        "optimizer_parameter_groups",
+        None,
+    )
+    if callable(parameter_group_builder):
+        parameter_groups = parameter_group_builder(policy_adapter)
+        if parameter_groups:
+            if step_fn is not None:
+                raise ValueError("algorithm-owned optimizer groups do not accept step_fn")
+            return build_grouped_trainer_adapter(
+                optimizer,
+                parameter_groups,
+                scheduler=scheduler,
+            )
 
     return build_trainer_adapter(
         policy_module,

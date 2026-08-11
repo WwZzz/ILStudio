@@ -6,12 +6,12 @@ from numbers import Real
 
 import torch
 
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
-from .base import AlgorithmOutput, BaseRLAlgorithm
+from .base import AlgorithmOutput, BaseRLAlgorithm, CollectionAcceptance
 from .objective import BasePolicyObjectiveBuilder
 from .on_policy import FullRolloutUpdates, iter_likelihood_micro_batches
-from .utils import detached_metric, forward_result
+from .utils import detached_metric, validate_policy_result
 
 
 class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
@@ -32,6 +32,9 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         entropy_coef: float = 0.0,
         advantage_epsilon: float = 1e-6,
         update_micro_batch_size: int = 16,
+        filter_accuracy: bool = False,
+        filter_accuracy_lower: float = 0.1,
+        filter_accuracy_upper: float = 0.9,
         objective_builder=None,
     ):
         if not isinstance(reward_key, str) or not reward_key:
@@ -52,10 +55,20 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             or update_micro_batch_size <= 0
         ):
             raise ValueError("update_micro_batch_size must be a positive integer")
+        if not isinstance(filter_accuracy, bool):
+            raise TypeError("filter_accuracy must be bool")
+        for name, value in (
+            ("filter_accuracy_lower", filter_accuracy_lower),
+            ("filter_accuracy_upper", filter_accuracy_upper),
+        ):
+            if not isinstance(value, Real) or not 0 <= float(value) <= 1:
+                raise ValueError(f"{name} must be between zero and one")
+        if float(filter_accuracy_lower) >= float(filter_accuracy_upper):
+            raise ValueError("filter accuracy lower bound must be below upper bound")
         if not isinstance(objective_builder, BasePolicyObjectiveBuilder):
             raise TypeError("GRPO requires a policy objective builder")
         super().__init__(
-            required_capabilities=("action", "grpo"),
+            required_capabilities=("action", "recompute_traces"),
             required_buffer_type="rollout",
         )
         self.reward_key = reward_key
@@ -64,7 +77,38 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         self.entropy_coef = float(entropy_coef)
         self.advantage_epsilon = float(advantage_epsilon)
         self.update_micro_batch_size = update_micro_batch_size
+        self.filter_accuracy = filter_accuracy
+        self.filter_accuracy_lower = float(filter_accuracy_lower)
+        self.filter_accuracy_upper = float(filter_accuracy_upper)
         self.objective_builder = objective_builder
+
+    def evaluate_collection(self, collection):
+        if not self.filter_accuracy:
+            return CollectionAcceptance()
+        episodes = tuple(getattr(collection, "episodes", ()))
+        if len(episodes) < 2:
+            raise ValueError("GRPO collection filtering requires at least two episodes")
+        outcomes = []
+        for episode in episodes:
+            value = episode.reward.get(self.reward_key)
+            if value is None:
+                raise KeyError(
+                    f"GRPO episode reward is missing {self.reward_key!r}"
+                )
+            value = torch.as_tensor(value)
+            if value.numel() != 1:
+                raise TypeError("GRPO episode reward must be scalar")
+            outcomes.append(float(value.reshape(-1)[0]) > 0.0)
+        accuracy = sum(outcomes) / len(outcomes)
+        accepted = (
+            self.filter_accuracy_lower
+            < accuracy
+            < self.filter_accuracy_upper
+        )
+        return CollectionAcceptance(
+            accepted=accepted,
+            metrics={"grpo/collection_accuracy": accuracy},
+        )
 
     def _trajectory_records(self, rollout):
         records = {}
@@ -146,17 +190,15 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         return by_decision, torch.cat(rewards), len(grouped), active_groups
 
     def compute_update(
-        self, batch, *, policy_adapter: BasePolicyAdapter, context=None
+        self, batch, *, policy_adapter: MetaPolicyAdapter, context=None
     ):
         rollout = getattr(batch, "rollout", None)
         source_rollout = getattr(batch, "source_rollout", None) or rollout
         if rollout is None or source_rollout is None:
             raise ValueError("GRPO requires a rollout-aware RolloutBuffer batch")
-        result = forward_result(
-            policy_adapter,
-            "grpo_trace",
-            batch,
-            context=context,
+        result = validate_policy_result(
+            policy_adapter.recompute_traces(batch, context=context),
+            operation="recompute_traces",
             required=("traces",),
         )
         first_trace = next(iter(result["traces"].values()))
@@ -241,7 +283,7 @@ class GRPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context=None,
     ):
         rollout = getattr(batch, "rollout", None)

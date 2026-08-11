@@ -1,0 +1,5 @@
+version: 1
+type: rl.critic.StateValueCritic
+args:
+  hidden_dim: 256
+  activation: tanh

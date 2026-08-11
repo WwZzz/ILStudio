@@ -2,17 +2,17 @@
 
 from numbers import Real
 
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
 from .base import AlgorithmOutput, BaseRLAlgorithm
 from .on_policy import FullRolloutUpdates
 from .utils import (
     detached_metric,
     discounted_returns,
-    forward_result,
     normalized,
     rewards,
     transitions,
+    validate_policy_result,
     vector,
 )
 
@@ -35,7 +35,7 @@ class ReinforceAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         if not isinstance(entropy_coef, Real) or float(entropy_coef) < 0.0:
             raise ValueError("entropy_coef must be non-negative")
         super().__init__(
-            required_capabilities=("action", "reinforce"),
+            required_capabilities=("action", "evaluate_actions"),
             required_buffer_type="rollout",
         )
         self.gamma = float(gamma)
@@ -43,13 +43,11 @@ class ReinforceAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
         self.normalize_returns = normalize_returns
         self.entropy_coef = float(entropy_coef)
 
-    def compute_update(self, batch, *, policy_adapter: BasePolicyAdapter, context=None):
+    def compute_update(self, batch, *, policy_adapter: MetaPolicyAdapter, context=None):
         items = transitions(batch)
-        result = forward_result(
-            policy_adapter,
-            "reinforce",
-            batch,
-            context=context,
+        result = validate_policy_result(
+            policy_adapter.evaluate_actions(batch, context=context),
+            operation="evaluate_actions",
             required=("log_prob",),
         )
         log_prob = vector(result["log_prob"], name="log_prob")

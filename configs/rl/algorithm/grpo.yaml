@@ -12,9 +12,12 @@ args:
   advantage_epsilon: 0.000001
   update_micro_batch_size: 16
 policy_adapter:
-  required_capabilities: [action, grpo]
+  required_capabilities: [action, recompute_traces]
   args:
-    temperature: 1.6
+    action_adapter:
+      type: policy.openvla.rl_adapter.OpenVLAActionAdapter
+      args:
+        temperature: 1.6
 buffer:
   type: rl.buffer.RolloutBuffer
   args: {}

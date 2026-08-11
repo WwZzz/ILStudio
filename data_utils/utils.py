@@ -997,7 +997,7 @@ def _maybe_assign_weights_to_datasets(datasets, task_config):
         dataset_i.__weight__ = wi
     return datasets
 
-def load_datasets(args, task_config, save_norm=True):
+def load_datasets(args, task_config, save_norm=True, *, normalize=True):
     """Create, normalize, and transform source datasets without splitting.
 
     Keeping this boundary separate lets the task-cache builder traverse each
@@ -1010,7 +1010,10 @@ def load_datasets(args, task_config, save_norm=True):
     if 'datasets' in task_config:
         datasets_config = task_config['datasets']
         datasets, _, merge_info = _parse_datasets_config(datasets_config, args)
-        datasets = _normalize_datasets(datasets, args, task_config, save_norm, merge_info)
+        if normalize:
+            datasets = _normalize_datasets(
+                datasets, args, task_config, save_norm, merge_info
+            )
         datasets = _apply_transforms_to_datasets(datasets, args, task_config)
     else:
         datasets = []

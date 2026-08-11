@@ -1,4 +1,4 @@
-"""Token-policy reinforcement-learning adapter for OpenVLA.
+"""OpenVLA action-token semantics for the shared RL policy adapter.
 
 The environment boundary remains ILStudio ``MetaObs``/``MetaAction``.  This
 module owns the OpenVLA-specific conversion between those values and
@@ -6,8 +6,7 @@ autoregressive action tokens, while algorithms own advantages and losses.
 """
 
 import copy
-from collections.abc import Iterable, Mapping
-from pathlib import Path
+from collections.abc import Mapping
 
 import numpy as np
 import torch
@@ -15,13 +14,12 @@ from transformers import LogitsProcessor, LogitsProcessorList
 
 from benchmark.base import MetaAction, MetaObs
 from rl.base import PolicyOutput, PolicyTrace
-from rl.policy_adapter import BasePolicyAdapter
-from rl.policy_adapter.trainer import BaseTrainerAdapter, TrainerStepResult
+from rl.policy_adapter import BasePolicyAdapter, TrainerAdapter, TrainerStepResult
+from rl.policy_adapter.action import ActionAdapter
 
 from .modeling import OpenPolicy
 
 
-_SUPPORTED_ALGORITHMS = frozenset({"ppo", "grpo"})
 
 
 class _ActionTokenLogitsProcessor(LogitsProcessor):
@@ -81,43 +79,27 @@ def _model_output_logits(output):
     return logits
 
 
-class OpenVLAPolicyAdapter(BasePolicyAdapter):
+class OpenVLAActionAdapter(ActionAdapter):
     """Sample OpenVLA action tokens and recompute their likelihoods."""
 
     def __init__(
         self,
-        model_components,
+        meta_policy,
         *,
-        required_capabilities: Iterable[str] = (),
         temperature: float = 1.0,
         action_dim: int | None = None,
         generation_suffix_token_id: int | None = 29871,
         restrict_action_tokens: bool = True,
     ):
-        if not isinstance(model_components, Mapping):
-            raise TypeError("model_components must be a mapping")
-        policy = model_components.get("model")
-        meta_policy = model_components.get("meta_policy")
-        if policy is None or meta_policy is None:
-            raise KeyError("OpenVLA RL requires model and meta_policy components")
-        requested = set(required_capabilities)
-        algorithms = requested.intersection(_SUPPORTED_ALGORITHMS)
-        unsupported = requested - {"action"} - _SUPPORTED_ALGORITHMS
-        if unsupported:
-            raise ValueError(
-                "OpenVLA RL adapter does not support capabilities: "
-                + ", ".join(sorted(unsupported))
-            )
-        if len(algorithms) > 1:
-            raise ValueError("select exactly one OpenVLA RL algorithm capability")
-        capabilities = {"action", *algorithms}
-        super().__init__(policy, capabilities=capabilities)
+        super().__init__(
+            meta_policy,
+            capabilities={"action", "recompute_traces"},
+        )
 
         if not isinstance(temperature, (int, float)) or float(temperature) <= 0:
             raise ValueError("temperature must be positive")
         self.temperature = float(temperature)
-        self.meta_policy = meta_policy
-        self.open_policy = _unwrap_open_policy(policy)
+        self.open_policy = _unwrap_open_policy(self.policy)
         self.backbone = self.open_policy.model
         configured_dim = getattr(self.open_policy.config, "action_dim", None)
         self.action_dim = int(action_dim if action_dim is not None else configured_dim)
@@ -156,7 +138,7 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
         return next(self.policy.parameters()).device
 
     def _obs_to_sample(self, obs: MetaObs):
-        self._validate_obs(obs)
+        self.validate_observation(obs)
         batched = copy.deepcopy(obs)
         batched.to_batch()
         normalized = self.meta_policy.state_normalizer.normalize_metaobs(
@@ -352,11 +334,9 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
                 },
             )
             outputs.append(
-                self._finalize_output(
-                    PolicyOutput(
-                        action=self._decode_meta_action(tokens),
-                        policy_info={"policy_trace": trace},
-                    )
+                PolicyOutput(
+                    action=self._decode_meta_action(tokens),
+                    policy_info={"policy_trace": trace},
                 )
             )
         return tuple(outputs)
@@ -439,26 +419,21 @@ class OpenVLAPolicyAdapter(BasePolicyAdapter):
             )
         return traces, torch.cat(entropies)
 
-    def algorithm_forward(self, operation, batch, *, context=None):
+    def recompute_traces(self, batch, *, context=None):
         del context
-        if operation not in {"ppo_trace", "grpo_trace"}:
-            raise ValueError(f"unsupported OpenVLA RL operation {operation!r}")
         rollout = getattr(batch, "rollout", None)
         if rollout is None:
             raise ValueError("OpenVLA token updates require a rollout-aware batch")
         traces, entropy = self._recompute_traces(rollout)
         return {"traces": traces, "entropy": entropy}
 
-    def save_pretrained(self, output_dir):
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        result = super().save_pretrained(output_dir)
+    def save_assets(self, output_dir, *, checkpoint_path=None):
+        del checkpoint_path
         self.open_policy.config.save_pretrained(output_dir)
         self.open_policy.processor.save_pretrained(output_dir)
-        return result
 
 
-class OpenVLATrainerAdapter(BaseTrainerAdapter):
+class OpenVLATrainerAdapter(TrainerAdapter):
     """One clipped optimizer step for the large autoregressive policy."""
 
     STATE_VERSION = 1
@@ -527,14 +502,20 @@ class OpenVLATrainerAdapter(BaseTrainerAdapter):
         self.step_count = int(state["step_count"])
 
 
-RLPolicyAdapter = OpenVLAPolicyAdapter
-
-
 def build_rl_adapter(*, model_components, required_capabilities=(), **kwargs):
-    return OpenVLAPolicyAdapter(
-        model_components,
+    meta_policy = model_components["meta_policy"]
+    action_adapter = kwargs.pop("action_adapter", None)
+    if action_adapter is None:
+        action_adapter = OpenVLAActionAdapter(meta_policy, **kwargs)
+    elif kwargs:
+        raise TypeError(
+            "OpenVLA action_adapter config cannot be combined with legacy arguments"
+        )
+    return BasePolicyAdapter(
+        meta_policy,
+        action_adapter=action_adapter,
         required_capabilities=required_capabilities,
-        **kwargs,
+        checkpoint_path=model_components.get("checkpoint_path"),
     )
 
 

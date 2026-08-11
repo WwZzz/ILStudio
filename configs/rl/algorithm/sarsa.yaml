@@ -4,13 +4,15 @@ args:
   gamma: 0.98
   reward_key: train/total
   huber_loss: true
+  epsilon_start: 0.10
+  epsilon_end: 0.01
+  epsilon_decay_steps: 10000
 policy_adapter:
-  required_capabilities: [action, sarsa]
+  fallback_adapter: base
+  required_capabilities: [action, action_scores]
   args:
-    epsilon_start: 0.10
-    epsilon_end: 0.01
-    epsilon_decay_steps: 10000
-    seed: 0
+    action_adapter:
+      type: rl.policy_adapter.action.CategoricalActionAdapter
 buffer:
   type: rl.buffer.RolloutBuffer
   args: {}

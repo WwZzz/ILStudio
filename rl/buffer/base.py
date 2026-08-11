@@ -1,8 +1,8 @@
 """Storage and lifecycle shared by all ILStudio RL buffers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Iterator, Optional, Sequence, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -17,6 +17,7 @@ class BufferBatch:
     indices: np.ndarray
     rollout: Optional[Rollout] = None
     source_rollout: Optional[Rollout] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         transitions = tuple(self.transitions)
@@ -51,8 +52,11 @@ class BufferBatch:
                 for decision in self.rollout.decisions
             ):
                 raise ValueError("batch decisions must come from source_rollout")
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("batch metadata must be a mapping")
         object.__setattr__(self, "transitions", transitions)
         object.__setattr__(self, "indices", indices.copy())
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
     def __len__(self) -> int:
         return len(self.transitions)
@@ -97,6 +101,7 @@ class BufferBatch:
             indices=selected_indices,
             rollout=selected_rollout,
             source_rollout=self.source_rollout or self.rollout,
+            metadata=self.metadata,
         )
 
 

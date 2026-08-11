@@ -6,7 +6,7 @@ from typing import Any, Optional
 from benchmark.base import MetaObs
 from deploy.action_manager.chunk import BasicActionChunkManager
 from rl.base import RL_LIKELIHOOD_GROUP_KEY, RL_LIKELIHOOD_GROUP_SIZE_KEY
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
 from .base import BasePolicyExecutor
 from .rl import RLPolicyExecutor
@@ -17,13 +17,13 @@ class BatchedRLPolicyExecutor(BasePolicyExecutor):
 
     def __init__(
         self,
-        adapter: BasePolicyAdapter,
+        adapter: MetaPolicyAdapter,
         *,
         num_envs: int,
         execution_horizon: Optional[int] = None,
     ) -> None:
-        if not isinstance(adapter, BasePolicyAdapter):
-            raise TypeError("adapter must inherit BasePolicyAdapter")
+        if not isinstance(adapter, MetaPolicyAdapter):
+            raise TypeError("adapter must inherit MetaPolicyAdapter")
         if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
             raise ValueError("num_envs must be a positive integer")
         self.adapter = adapter

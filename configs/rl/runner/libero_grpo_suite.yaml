@@ -1,0 +1,19 @@
+version: 1
+name: libero_grpo_suite
+metadata:
+  description: Filtered grouped outcome RL over a LIBERO environment suite
+type: rl.runner.RLRunner
+config_type: rl.runner.RLRunnerConfig
+args:
+  iterations: 1
+  collect_episodes: 8
+  batch_size: 8
+  updates_per_iteration: 1
+  max_collection_attempts: 32
+  deterministic_collection: false
+  clear_rollout_after_update: true
+collector:
+  args:
+    terminate_on_success: true
+    bootstrap_on_truncation: true
+    max_episode_steps: 512

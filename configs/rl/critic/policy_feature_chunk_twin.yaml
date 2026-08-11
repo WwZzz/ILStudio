@@ -1,0 +1,11 @@
+version: 1
+type: rl.critic.TwinQCritic
+args:
+  q_type: rl.critic.PolicyFeatureChunkQCritic
+  q_args:
+    policy_adapter:
+      $ref: policy_adapter
+    hidden_dim: 256
+    activation: relu
+    detach_features: true
+    use_language: false

@@ -18,7 +18,7 @@ from rl.base import (
     PolicyOutput,
     PolicyTrace,
 )
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
 from .base import BasePolicyExecutor
 
@@ -34,14 +34,14 @@ class RLPolicyExecutor(BasePolicyExecutor):
 
     def __init__(
         self,
-        adapter: BasePolicyAdapter,
+        adapter: MetaPolicyAdapter,
         *,
         chunk_manager: Optional[AbstractActionChunkManager] = None,
         execution_horizon: Optional[int] = None,
         owns_adapter: bool = True,
     ) -> None:
-        if not isinstance(adapter, BasePolicyAdapter):
-            raise TypeError("adapter must inherit BasePolicyAdapter")
+        if not isinstance(adapter, MetaPolicyAdapter):
+            raise TypeError("adapter must inherit MetaPolicyAdapter")
         if execution_horizon is not None and (
             not isinstance(execution_horizon, int)
             or isinstance(execution_horizon, bool)

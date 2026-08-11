@@ -9,7 +9,7 @@ existing action-chunk executor unchanged.
 import copy
 import os
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -23,49 +23,34 @@ from rl.base import (
     RL_LIKELIHOOD_GROUP_KEY,
     RL_LIKELIHOOD_GROUP_SIZE_KEY,
 )
-from rl.policy_adapter import BasePolicyAdapter
-from rl.policy_adapter.trainer import BaseTrainerAdapter, TrainerStepResult
+from rl.policy_adapter import BasePolicyAdapter, TrainerAdapter, TrainerStepResult
+from rl.policy_adapter.action import ActionAdapter
 
 from .modeling import OpenVLAOFTPolicy
 
 
-_SUPPORTED_ALGORITHMS = frozenset({"ppo", "grpo"})
 
 
-class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
+class OpenVLAOFTActionAdapter(ActionAdapter):
     """Sample and train the parallel action-token policy used by SimpleVLA-RL."""
 
     def __init__(
         self,
-        model_components,
+        meta_policy,
         *,
-        required_capabilities: Iterable[str] = (),
         temperature: float = 1.6,
         action_vocab_size: int = 256,
         collection_num_threads: int | None = 1,
     ):
-        if not isinstance(model_components, Mapping):
-            raise TypeError("model_components must be a mapping")
-        policy = model_components.get("model")
-        meta_policy = model_components.get("meta_policy")
-        if not isinstance(policy, OpenVLAOFTPolicy) or meta_policy is None:
+        policy = meta_policy.policy
+        if not isinstance(policy, OpenVLAOFTPolicy):
             raise TypeError(
                 "OpenVLA-OFT RL requires OpenVLAOFTPolicy and MetaPolicy components"
             )
-        if getattr(meta_policy, "policy", None) is not policy:
-            raise ValueError("meta_policy and model_components must share the model")
-
-        requested = set(required_capabilities)
-        algorithms = requested.intersection(_SUPPORTED_ALGORITHMS)
-        unsupported = requested - {"action"} - _SUPPORTED_ALGORITHMS
-        if unsupported:
-            raise ValueError(
-                "OpenVLA-OFT RL adapter does not support capabilities: "
-                + ", ".join(sorted(unsupported))
-            )
-        if len(algorithms) > 1:
-            raise ValueError("select exactly one OpenVLA-OFT RL algorithm capability")
-        super().__init__(policy, capabilities={"action", *algorithms})
+        super().__init__(
+            meta_policy,
+            capabilities={"action", "recompute_traces"},
+        )
 
         if not isinstance(temperature, (int, float)) or float(temperature) <= 0:
             raise ValueError("temperature must be positive")
@@ -89,7 +74,6 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
         self.temperature = float(temperature)
         self.action_vocab_size = action_vocab_size
         self.collection_num_threads = collection_num_threads
-        self.meta_policy = meta_policy
         self.vla = policy.vla
         self.tokenizer = policy.tokenizer
         self.action_tokenizer = policy.action_tokenizer
@@ -133,7 +117,7 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
                 torch.set_num_threads(original)
 
     def _obs_to_sample(self, obs: MetaObs):
-        self._validate_obs(obs)
+        self.validate_observation(obs)
         batched = copy.deepcopy(obs)
         batched.to_batch()
         normalized = self.meta_policy.state_normalizer.normalize_metaobs(
@@ -284,11 +268,9 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
                 },
             )
             outputs.append(
-                self._finalize_output(
-                    PolicyOutput(
-                        action=self._decode_meta_action(tokens),
-                        policy_info={"policy_trace": trace},
-                    )
+                PolicyOutput(
+                    action=self._decode_meta_action(tokens),
+                    policy_info={"policy_trace": trace},
                 )
             )
         return tuple(outputs)
@@ -368,20 +350,18 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
             )
         return traces, torch.cat(entropies)
 
-    def algorithm_forward(self, operation, batch, *, context=None):
+    def recompute_traces(self, batch, *, context=None):
         del context
-        if operation not in {"ppo_trace", "grpo_trace"}:
-            raise ValueError(f"unsupported OpenVLA-OFT RL operation {operation!r}")
         rollout = getattr(batch, "rollout", None)
         if rollout is None:
             raise ValueError("OpenVLA-OFT token updates require a rollout-aware batch")
         traces, entropy = self._recompute_traces(rollout)
         return {"traces": traces, "entropy": entropy}
 
-    def save_pretrained(self, output_dir):
+    def save_assets(self, output_dir, *, checkpoint_path=None):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.policy.vla.save_pretrained(output_dir)
+        self.policy.vla.save_pretrained(output_dir)
         self.policy.config.save_pretrained(output_dir)
         self.policy.processor.save_pretrained(output_dir)
 
@@ -392,10 +372,11 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
                 extra_state_dict[name] = module.state_dict()
         if extra_state_dict:
             torch.save(extra_state_dict, os.path.join(output_dir, "extra_weights.bin"))
-        self._copy_checkpoint_assets(output_dir)
-        if self.checkpoint_path is None:
+        if checkpoint_path is None:
             raise RuntimeError("OpenVLA-OFT RL save requires a checkpoint source")
-        source_root = self._checkpoint_root(self.checkpoint_path)
+        source_root = Path(checkpoint_path)
+        if source_root.name.startswith("checkpoint-"):
+            source_root = source_root.parent
         statistics = source_root / "dataset_statistics.json"
         if not statistics.is_file():
             raise FileNotFoundError(
@@ -405,10 +386,9 @@ class OpenVLAOFTPolicyAdapter(BasePolicyAdapter):
         destination = output_dir / statistics.name
         if statistics.resolve() != destination.resolve():
             shutil.copy2(statistics, destination)
-        return result
 
 
-class OpenVLAOFTTrainerAdapter(BaseTrainerAdapter):
+class OpenVLAOFTTrainerAdapter(TrainerAdapter):
     """Accumulate streamed token-objective micro-batches into one optimizer step."""
 
     STATE_VERSION = 1
@@ -475,14 +455,20 @@ class OpenVLAOFTTrainerAdapter(BaseTrainerAdapter):
         self.step_count = int(state["step_count"])
 
 
-RLPolicyAdapter = OpenVLAOFTPolicyAdapter
-
-
 def build_rl_adapter(*, model_components, required_capabilities=(), **kwargs):
-    return OpenVLAOFTPolicyAdapter(
-        model_components,
+    meta_policy = model_components["meta_policy"]
+    action_adapter = kwargs.pop("action_adapter", None)
+    if action_adapter is None:
+        action_adapter = OpenVLAOFTActionAdapter(meta_policy, **kwargs)
+    elif kwargs:
+        raise TypeError(
+            "OpenVLA-OFT action_adapter config cannot be combined with legacy arguments"
+        )
+    return BasePolicyAdapter(
+        meta_policy,
+        action_adapter=action_adapter,
         required_capabilities=required_capabilities,
-        **kwargs,
+        checkpoint_path=model_components.get("checkpoint_path"),
     )
 
 

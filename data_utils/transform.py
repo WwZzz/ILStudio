@@ -13,6 +13,13 @@ sample = {
     'episode_id': episode_id, # int
     'dataset_id': dataset_id, # str or int
     '__index__': index, # int
+
+    # Optional RL episode semantics. Supervised train.py ignores these fields;
+    # the RL offline adapter supplies defaults when a dataset omits them.
+    'success': success, # bool, usually true only on the terminal successful step
+    'reward': reward, # scalar or mapping[str, scalar]
+    'terminated': terminated, # bool
+    'truncated': truncated, # bool
 } 
 """
 

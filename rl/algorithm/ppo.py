@@ -5,7 +5,7 @@ from numbers import Real
 import torch
 import torch.nn.functional as F
 
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 from rl.critic import BaseCritic
 
 from .base import AlgorithmOutput, BaseRLAlgorithm
@@ -14,11 +14,11 @@ from .on_policy import FullRolloutUpdates
 from .utils import (
     bootstrap_masks,
     detached_metric,
-    forward_result,
     normalized,
     rewards,
     transition_values,
     transitions,
+    validate_policy_result,
     vector,
 )
 
@@ -56,12 +56,13 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             raise TypeError(
                 "objective_builder must inherit BasePolicyObjectiveBuilder or be None"
             )
-        if critic is not None and not isinstance(critic, BaseCritic):
-            raise TypeError("critic must inherit BaseCritic or be None")
-        if critic is not None and objective_builder is None:
-            raise ValueError("a composed critic requires an objective_builder")
+        if not isinstance(critic, BaseCritic):
+            raise TypeError("PPO requires a configured critic inheriting BaseCritic")
         super().__init__(
-            required_capabilities=("action", "ppo"),
+            required_capabilities=(
+                "action",
+                "recompute_traces" if objective_builder is not None else "evaluate_actions",
+            ),
             required_buffer_type="rollout",
         )
         self.gamma = float(gamma)
@@ -187,11 +188,9 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
             )
         groups = rollout.decision_transitions()
         required = ("traces",) if self.critic is not None else ("traces", "value")
-        result = dict(forward_result(
-            policy_adapter,
-            "ppo_trace",
-            batch,
-            context=context,
+        result = dict(validate_policy_result(
+            policy_adapter.recompute_traces(batch, context=context),
+            operation="recompute_traces",
             required=required,
         ))
         if self.critic is not None:
@@ -297,7 +296,7 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
                 raise ValueError("PPO state contains a critic but algorithm has none")
             self.critic.load_state_dict(critic_state)
 
-    def compute_update(self, batch, *, policy_adapter: BasePolicyAdapter, context=None):
+    def compute_update(self, batch, *, policy_adapter: MetaPolicyAdapter, context=None):
         if self.objective_builder is not None:
             return self._compute_decision_update(
                 batch,
@@ -305,13 +304,18 @@ class PPOAlgorithm(FullRolloutUpdates, BaseRLAlgorithm):
                 context=context,
             )
         items = transitions(batch)
-        result = forward_result(
-            policy_adapter,
-            "ppo",
-            batch,
-            context=context,
-            required=("log_prob", "value"),
-        )
+        result = dict(validate_policy_result(
+            policy_adapter.evaluate_actions(batch, context=context),
+            operation="evaluate_actions",
+            required=("log_prob",),
+        ))
+        observations = tuple(item.obs for item in items)
+        next_observations = tuple(item.next_obs for item in items)
+        result["value"] = self.critic(observations, context=context)
+        with torch.no_grad():
+            result["next_value"] = self.critic(
+                next_observations, context=context
+            ).detach()
         log_prob = vector(result["log_prob"], name="log_prob")
         value = vector(result["value"], name="value")
         if len(log_prob) != len(items) or len(value) != len(items):

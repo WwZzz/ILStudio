@@ -1,4 +1,4 @@
-"""Thin policy-facing contracts for reinforcement learning."""
+"""Meta-level RL policy contract and its default composed implementation."""
 
 import json
 import shutil
@@ -8,16 +8,23 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from benchmark.base import MetaAction, MetaObs
+import torch
+
+from benchmark.base import MetaAction, MetaObs, MetaPolicy
 from rl.base import PolicyOutput
 
+from .action import build_action_adapter
 
-class BasePolicyAdapter(ABC):
-    """Expose policy-specific RL operations without owning the RL loop.
 
-    The adapter keeps model inputs, action construction, token metadata and
-    train-time forward calls policy-specific.  Optimizer stepping and rollout
-    scheduling deliberately live outside this class.
+_STATE_FILENAME = "rl_adapter.pt"
+
+
+class MetaPolicyAdapter(ABC):
+    """Stable MetaObs/MetaAction boundary used by algorithms and runners.
+
+    This is the shared interface. ``BasePolicyAdapter`` below is the default
+    implementation and delegates action semantics to a configured
+    ``ActionAdapter``.
     """
 
     STATE_VERSION = 1
@@ -55,22 +62,16 @@ class BasePolicyAdapter(ABC):
         return self._policy_version
 
     def parameters(self):
-        """Return adapter-owned trainable parameters, excluding the policy.
+        """Return adapter-owned parameters, excluding policy parameters."""
 
-        Generic adapters own no additional parameters. Policy-local adapters
-        may override this hook for value, Q, temperature, or similar heads.
-        """
         return ()
 
     def set_training(self, training: bool) -> None:
-        method_name = "train" if training else "eval"
-        method = getattr(self.policy, method_name, None)
+        method = getattr(self.policy, "train" if training else "eval", None)
         if callable(method):
             method()
 
     def collection_context(self):
-        """Return a policy-local runtime context used only during collection."""
-
         return nullcontext()
 
     @abstractmethod
@@ -81,7 +82,7 @@ class BasePolicyAdapter(ABC):
         deterministic: bool = False,
         context: Optional[Mapping[str, Any]] = None,
     ) -> PolicyOutput:
-        """Produce one ILStudio action plus algorithm-specific metadata."""
+        """Produce one ILStudio action and its collection metadata."""
 
     def select_actions(
         self,
@@ -90,14 +91,6 @@ class BasePolicyAdapter(ABC):
         deterministic: bool = False,
         context: Optional[Mapping[str, Any]] = None,
     ):
-        """Produce a batch of actions, with a safe sequential fallback.
-
-        Policy-local adapters should override this method when their native
-        model can batch inference. The fallback preserves compatibility for
-        existing policies while allowing parallel collectors to share one
-        executor contract.
-        """
-
         observations = tuple(observations)
         if not observations:
             raise ValueError("observations cannot be empty")
@@ -112,68 +105,62 @@ class BasePolicyAdapter(ABC):
             for obs in observations
         )
 
-    def training_forward(
-        self,
-        batch: Any,
-        *,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> Mapping[str, Any]:
+    def training_forward(self, batch, *, context=None) -> Mapping[str, Any]:
+        del batch, context
         raise NotImplementedError(
             "this policy adapter does not implement training_forward"
         )
 
-    def algorithm_forward(
+    def evaluate_actions(self, batch, *, context=None) -> Mapping[str, Any]:
+        del batch, context
+        raise NotImplementedError("this policy adapter cannot evaluate actions")
+
+    def sample_actions(
         self,
-        operation: str,
-        batch: Any,
+        batch,
         *,
-        context: Optional[Mapping[str, Any]] = None,
+        source="obs",
+        deterministic=False,
+        policy=None,
+        context=None,
     ) -> Mapping[str, Any]:
-        """Run one named algorithm-facing policy operation.
+        del batch, source, deterministic, policy, context
+        raise NotImplementedError("this policy adapter cannot sample action batches")
 
-        Concrete adapters own observation/action tensorization and model-head
-        selection. Algorithms own return, target and loss construction.
-        """
+    def batch_actions(self, batch, *, context=None):
+        del batch, context
+        raise NotImplementedError("this policy adapter cannot tensorize action batches")
 
-        del operation, batch, context
-        raise NotImplementedError(
-            "this policy adapter does not implement algorithm_forward"
-        )
+    def uniform_actions(self, batch, *, num_samples, context=None):
+        del batch, num_samples, context
+        raise NotImplementedError("this policy adapter cannot sample its action space")
 
-    def algorithm_post_step(
-        self,
-        operation: str,
-        *,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> None:
-        """Run policy-specific maintenance such as a target-network update."""
+    def action_scores(self, batch, *, source="obs", policy=None, context=None):
+        del batch, source, policy, context
+        raise NotImplementedError("this policy adapter cannot compute action scores")
 
-        del operation, context
-        raise NotImplementedError(
-            "this policy adapter does not implement algorithm_post_step"
-        )
+    def clamp_actions(self, actions):
+        del actions
+        raise NotImplementedError("this policy adapter has no continuous bounds")
 
-    def critic_features(
-        self,
-        obs: Any,
-        *,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> Mapping[str, Any]:
-        """Return policy-specific visual/language features for a critic.
+    def features(self, observations, *, context=None) -> Mapping[str, Any]:
+        return self.critic_features(observations, context=context)
 
-        Policy-local ``rl_adapter.py`` implementations may override this hook.
-        The generic policy-feature critic detaches returned actor features by
-        default, so critic optimization cannot silently update the policy.
-        """
+    def feature_forward(self, observations, *, context=None):
+        del observations, context
+        raise NotImplementedError("this policy adapter has no feature forward path")
 
+    def recompute_traces(self, batch, *, context=None) -> Mapping[str, Any]:
+        del batch, context
+        raise NotImplementedError("this policy adapter cannot recompute traces")
+
+    def critic_features(self, obs, *, context=None) -> Mapping[str, Any]:
         del obs, context
         raise NotImplementedError(
             "this policy adapter does not expose critic features"
         )
 
     def set_checkpoint_source(self, checkpoint_path):
-        """Attach the ILStudio checkpoint whose loader assets must survive save."""
-
         if checkpoint_path is None:
             return self
         checkpoint_path = Path(checkpoint_path)
@@ -188,9 +175,7 @@ class BasePolicyAdapter(ABC):
     @staticmethod
     def _checkpoint_root(checkpoint_path):
         root = Path(checkpoint_path)
-        if root.name.startswith("checkpoint-"):
-            root = root.parent
-        return root
+        return root.parent if root.name.startswith("checkpoint-") else root
 
     def _copy_policy_metadata(self, output_dir):
         if self.checkpoint_path is None:
@@ -203,8 +188,6 @@ class BasePolicyAdapter(ABC):
             shutil.copy2(source, destination)
 
     def _copy_checkpoint_assets(self, output_dir):
-        """Preserve the native ILStudio loader contract in every RL save."""
-
         self._copy_policy_metadata(output_dir)
         if self.checkpoint_path is None:
             return
@@ -231,8 +214,6 @@ class BasePolicyAdapter(ABC):
                 shutil.copy2(source, destination)
 
     def save_pretrained(self, output_dir):
-        """Save policy weights plus ILStudio's policy-loader metadata."""
-
         save = getattr(self.policy, "save_pretrained", None)
         if not callable(save):
             raise TypeError(
@@ -269,7 +250,6 @@ class BasePolicyAdapter(ABC):
             raise TypeError(
                 "policy output must be PolicyOutput, MetaAction, or an action mapping"
             )
-
         policy_info.setdefault("policy_version", self.policy_version)
         return PolicyOutput(action=action, policy_info=policy_info)
 
@@ -288,3 +268,189 @@ class BasePolicyAdapter(ABC):
         if not isinstance(policy_version, int) or policy_version < 0:
             raise ValueError("policy_version must be a non-negative integer")
         self._policy_version = policy_version
+
+
+class BasePolicyAdapter(MetaPolicyAdapter):
+    """Uniform RL facade; policy-specific action semantics live in ActionAdapter."""
+
+    STATE_VERSION = 3
+
+    def __init__(
+        self,
+        meta_policy: MetaPolicy,
+        *,
+        action_adapter=None,
+        required_capabilities=(),
+        checkpoint_path=None,
+    ):
+        if not isinstance(meta_policy, MetaPolicy):
+            raise TypeError("BasePolicyAdapter requires benchmark.MetaPolicy")
+        if meta_policy.state_normalizer is None:
+            raise ValueError("MetaPolicy must provide state_normalizer")
+        if meta_policy.action_normalizer is None:
+            raise ValueError("MetaPolicy must provide action_normalizer")
+        self.meta_policy = meta_policy
+        self.action_adapter = build_action_adapter(
+            action_adapter,
+            meta_policy=meta_policy,
+        )
+        super().__init__(
+            meta_policy.policy,
+            capabilities=self.action_adapter.capabilities,
+        )
+        self.checkpoint_path = checkpoint_path
+        self.require_capabilities(required_capabilities)
+
+    @property
+    def device(self):
+        return next(self.policy.parameters()).device
+
+    def parameters(self):
+        return tuple(self.action_adapter.parameters())
+
+    def actor_parameters(self):
+        parameters = []
+        seen = set()
+        for owner in (self.policy, self.action_adapter):
+            for parameter in owner.parameters():
+                if parameter.requires_grad and id(parameter) not in seen:
+                    seen.add(id(parameter))
+                    parameters.append(parameter)
+        return tuple(parameters)
+
+    def collection_context(self):
+        return self.action_adapter.collection_context()
+
+    def select_action(self, obs, *, deterministic=False, context=None):
+        self._validate_obs(obs)
+        output = self.action_adapter.select_action(
+            obs,
+            deterministic=deterministic,
+            context=context,
+        )
+        return self._finalize_output(output)
+
+    def select_actions(self, observations, *, deterministic=False, context=None):
+        observations = tuple(observations)
+        if not observations:
+            raise ValueError("observations cannot be empty")
+        for obs in observations:
+            self._validate_obs(obs)
+        return tuple(
+            self._finalize_output(output)
+            for output in self.action_adapter.select_actions(
+                observations,
+                deterministic=deterministic,
+                context=context,
+            )
+        )
+
+    def training_forward(self, batch, *, context=None):
+        return self.action_adapter.training_forward(batch, context=context)
+
+    def evaluate_actions(self, batch, *, context=None):
+        return self.action_adapter.evaluate_actions(batch, context=context)
+
+    def sample_actions(
+        self,
+        batch,
+        *,
+        source="obs",
+        deterministic=False,
+        policy=None,
+        context=None,
+    ):
+        return self.action_adapter.sample_actions(
+            batch,
+            source=source,
+            deterministic=deterministic,
+            policy=policy,
+            context=context,
+        )
+
+    def batch_actions(self, batch, *, context=None):
+        return self.action_adapter.batch_actions(batch, context=context)
+
+    def uniform_actions(self, batch, *, num_samples, context=None):
+        return self.action_adapter.uniform_actions(
+            batch,
+            num_samples=num_samples,
+            context=context,
+        )
+
+    def action_scores(self, batch, *, source="obs", policy=None, context=None):
+        return self.action_adapter.action_scores(
+            batch,
+            source=source,
+            policy=policy,
+            context=context,
+        )
+
+    def clamp_actions(self, actions):
+        return self.action_adapter.clamp_actions(actions)
+
+    def recompute_traces(self, batch, *, context=None):
+        return self.action_adapter.recompute_traces(batch, context=context)
+
+    def feature_forward(self, observations, *, context=None):
+        return self.action_adapter.feature_forward(observations, context=context)
+
+    def critic_features(self, observations, *, context=None):
+        return self.action_adapter.critic_features(observations, context=context)
+
+    def reset(self):
+        self.action_adapter.reset()
+
+    def state_dict(self):
+        return {
+            "version": self.STATE_VERSION,
+            "base": super().state_dict(),
+            "action_adapter_type": (
+                f"{type(self.action_adapter).__module__}."
+                f"{type(self.action_adapter).__qualname__}"
+            ),
+            "action_adapter": self.action_adapter.state_dict(),
+        }
+
+    def load_state_dict(self, state):
+        if state.get("version") != self.STATE_VERSION:
+            raise ValueError("unsupported BasePolicyAdapter state version")
+        expected = (
+            f"{type(self.action_adapter).__module__}."
+            f"{type(self.action_adapter).__qualname__}"
+        )
+        if state.get("action_adapter_type") != expected:
+            raise ValueError("checkpoint action adapter type does not match config")
+        super().load_state_dict(state["base"])
+        self.action_adapter.load_state_dict(state["action_adapter"])
+
+    def save_pretrained(self, output_dir):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result = super().save_pretrained(output_dir)
+        self.action_adapter.save_assets(
+            output_dir,
+            checkpoint_path=self.checkpoint_path,
+        )
+        torch.save(self.state_dict(), output_dir / _STATE_FILENAME)
+        return result
+
+
+def build_rl_adapter(*, model_components, required_capabilities=(), **kwargs):
+    if "meta_policy" not in model_components:
+        raise KeyError("base policy adapter requires model_components.meta_policy")
+    adapter = BasePolicyAdapter(
+        model_components["meta_policy"],
+        required_capabilities=required_capabilities,
+        checkpoint_path=model_components.get("checkpoint_path"),
+        **kwargs,
+    )
+    checkpoint_path = model_components.get("checkpoint_path")
+    if checkpoint_path is not None:
+        state_path = Path(checkpoint_path) / _STATE_FILENAME
+        if state_path.is_file():
+            adapter.load_state_dict(torch.load(state_path, map_location=adapter.device))
+    return adapter
+
+
+__all__ = ["MetaPolicyAdapter", "BasePolicyAdapter", "build_rl_adapter"]

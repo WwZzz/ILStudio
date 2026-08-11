@@ -4,7 +4,7 @@ import inspect
 from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
-from rl.policy_adapter import BasePolicyAdapter
+from rl.policy_adapter import MetaPolicyAdapter
 
 from .base import AlgorithmOutput, BaseRLAlgorithm
 
@@ -60,7 +60,7 @@ class BasicRLAlgorithm(BaseRLAlgorithm):
         self,
         batch,
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> AlgorithmOutput:
         result = _call_compute(

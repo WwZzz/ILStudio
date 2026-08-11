@@ -1,0 +1,30 @@
+version: 1
+type: rl.algorithm.SACAlgorithm
+critic: state_action_twin_debug
+args:
+  gamma: 0.99
+  reward_key: train/total
+  alpha: auto
+  target_entropy: -1.0
+  target_tau: 0.01
+  actor_learning_rate: 0.0005
+  critic_learning_rate: 0.001
+  alpha_learning_rate: 0.001
+policy_adapter:
+  fallback_adapter: base
+  required_capabilities: [action, sample_actions, batch_actions]
+  args:
+    action_adapter:
+      type: rl.policy_adapter.action.GaussianActionAdapter
+      args:
+        initial_std: 0.2
+        learn_std: true
+buffer:
+  type: rl.buffer.ReplayBuffer
+  args:
+    capacity: 256
+    seed: 0
+runner:
+  collect_steps: 8
+  updates_per_iteration: 1
+  warmup_steps: 8

@@ -1,6 +1,7 @@
 """Gaussian action-chunk adapter for continuous policy-gradient algorithms."""
 
 import copy
+import math
 from collections.abc import Mapping
 from numbers import Integral, Real
 from typing import Any, Optional
@@ -11,14 +12,21 @@ import torch
 from benchmark.base import MetaAction, MetaObs, MetaPolicy
 from rl.base import ACTION_POLICY_INFO_KEY, MetaTransition, PolicyTrace
 
-from .meta_policy import MetaPolicyAdapter, _model_device, _move_to_device
+from .base import ActionAdapter
+from ..runtime import (
+    model_device,
+    move_to_device,
+    native_training_forward,
+    resolve_chunk_size,
+)
 
 
-class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
+class GaussianChunkActionAdapter(ActionAdapter):
     """Turn a differentiable action-chunk model into a Gaussian RL policy.
 
-    The existing policy predicts the mean of a fixed-standard-deviation Gaussian
-    in normalized action space. Environment actions still pass through the
+    The existing policy predicts the mean of a diagonal Gaussian in normalized
+    action space. Its state-independent per-action log standard deviations are
+    learnable by default. Environment actions still pass through the
     checkpoint's normalizer and optional post-processing. The sampled normalized
     action is retained so REINFORCE/PPO can recompute its exact log probability.
 
@@ -32,30 +40,83 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
         meta_policy: MetaPolicy,
         *,
         policy_std: float,
+        learn_fixed_std: bool = True,
+        action_dim: Optional[int] = None,
         inference_seed: int = 0,
         chunk_size: Optional[int] = None,
         seed: Optional[int] = None,
-        checkpoint_path=None,
     ) -> None:
-        if not isinstance(policy_std, Real) or float(policy_std) <= 0.0:
-            raise ValueError("policy_std must be positive")
+        policy_std = self._validate_std(policy_std)
+        if not isinstance(learn_fixed_std, bool):
+            raise TypeError("learn_fixed_std must be bool")
         if not isinstance(inference_seed, Integral) or isinstance(
             inference_seed, bool
         ):
             raise TypeError("inference_seed must be an integer")
         super().__init__(
             meta_policy,
-            exploration_std=0.0,
-            chunk_size=chunk_size,
-            seed=seed,
-            checkpoint_path=checkpoint_path,
+            capabilities={
+                "action", "training_forward", "evaluate_actions", "recompute_traces"
+            },
         )
-        self._capabilities = frozenset(
-            {"action", "chunk_training", "reinforce", "ppo"}
+        self.chunk_size = resolve_chunk_size(self.policy, chunk_size)
+        self._rng = np.random.default_rng(seed)
+        self.action_dim = self._resolve_action_dim(action_dim)
+        device = model_device(self.policy)
+        self.log_std = torch.nn.Parameter(
+            torch.full(
+                (self.action_dim,),
+                math.log(policy_std),
+                dtype=torch.float32,
+                device=device,
+            ),
+            requires_grad=learn_fixed_std,
         )
-        self.policy_std = float(policy_std)
+        self.learn_fixed_std = learn_fixed_std
         self.inference_seed = int(inference_seed)
         self._decision_index = 0
+
+    @property
+    def policy_std(self) -> np.ndarray:
+        """Return the current per-action standard deviations."""
+
+        return self.log_std.detach().exp().cpu().numpy().copy()
+
+    def parameters(self):
+        """Expose the shared log standard deviation to the composed optimizer."""
+
+        return (self.log_std,) if self.log_std.requires_grad else ()
+
+    def _std_tensor(self, like: torch.Tensor, *, collected_std=None):
+        if self.learn_fixed_std:
+            return self.log_std.exp().to(dtype=like.dtype, device=like.device)
+        if collected_std is None:
+            return self.log_std.detach().exp().to(dtype=like.dtype, device=like.device)
+        value = self._validate_collected_std(collected_std)
+        return torch.as_tensor(value, dtype=like.dtype, device=like.device)
+
+    def _distribution(self, mean: torch.Tensor, *, collected_std=None):
+        return torch.distributions.Normal(
+            mean,
+            self._std_tensor(mean, collected_std=collected_std),
+        )
+
+    def _resolve_action_dim(self, action_dim) -> int:
+        candidates = [action_dim]
+        config = getattr(self.policy, "config", None)
+        for owner in (self.policy, config):
+            if owner is not None:
+                candidates.extend(
+                    getattr(owner, name, None) for name in ("action_dim", "act_dim")
+                )
+        action_head = getattr(getattr(self.policy, "model", None), "action_head", None)
+        candidates.append(getattr(action_head, "out_features", None))
+        for value in candidates:
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        raise ValueError(
+            "action_dim is absent from adapter arguments and policy configuration"
+        )
 
     def _policy_batch(self, obs: MetaObs):
         normalized_obs = self.meta_policy.state_normalizer.normalize_metaobs(
@@ -65,15 +126,15 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
         samples = self.meta_policy.normed_mobs_to_samples(normalized_obs)
         if len(samples) != 1:
             raise ValueError(
-                "GaussianChunkPolicyAdapter supports one synchronous environment"
+                "GaussianChunkActionAdapter supports one synchronous environment"
             )
         policy_batch = self.meta_policy.meta2obs(samples)
         if not isinstance(policy_batch, Mapping):
             raise TypeError("MetaPolicy.meta2obs must return a mapping")
-        return _move_to_device(policy_batch, _model_device(self.policy))
+        return move_to_device(policy_batch, model_device(self.policy))
 
     def _seeded_forward(self, policy_batch, seed: int):
-        device = _model_device(self.policy) or torch.device("cpu")
+        device = model_device(self.policy) or torch.device("cpu")
         cuda_devices = []
         if device.type == "cuda":
             cuda_devices = [
@@ -159,14 +220,34 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
 
     @staticmethod
     def _validate_std(value: Any) -> float:
-        if not isinstance(value, Real) or float(value) <= 0.0:
-            raise ValueError("policy_std must be positive")
-        return float(value)
+        if not isinstance(value, Real):
+            raise TypeError("policy_std must be a real number")
+        value = float(value)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError("policy_std must be finite and positive")
+        return value
+
+    def _validate_collected_std(self, value: Any) -> np.ndarray:
+        array = np.asarray(value, dtype=np.float32)
+        if array.ndim == 0:
+            array = np.full((self.action_dim,), float(array), dtype=np.float32)
+        if array.shape != (self.action_dim,):
+            raise ValueError(
+                f"policy_std must have shape ({self.action_dim},) in policy metadata"
+            )
+        if not np.isfinite(array).all() or not np.all(array > 0.0):
+            raise ValueError("policy_std must be finite and positive")
+        return array
 
     def select_action(self, obs: MetaObs, *, deterministic=False, context=None):
-        self._validate_obs(obs)
-        std = self._validate_std(
-            dict(context or {}).get("policy_std", self.policy_std)
+        self.validate_observation(obs)
+        context = dict(context or {})
+        if self.learn_fixed_std and "policy_std" in context:
+            raise ValueError(
+                "runtime policy_std overrides require learn_fixed_std=False"
+            )
+        std = self._validate_collected_std(
+            context.get("policy_std", self.policy_std)
         )
         decision_id = self._decision_index
         action_seed = self.inference_seed + decision_id
@@ -196,25 +277,24 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
             if deterministic:
                 sampled_array = mean_array.copy()
             else:
-                noise = self._rng.normal(0.0, std, size=mean_array.shape)
+                noise = self._rng.normal(0.0, 1.0, size=mean_array.shape) * std
                 sampled_array = mean_array + noise.astype(mean_array.dtype)
             sampled = torch.as_tensor(
                 sampled_array,
                 dtype=mean.dtype,
                 device=mean.device,
             )
-            distribution = torch.distributions.Normal(mean, std)
+            distribution = self._distribution(mean, collected_std=std)
             log_prob = distribution.log_prob(sampled).sum(dim=-1)
 
         action = self._to_meta_action(sampled, policy_batch)
         self._decision_index += 1
-        return self._finalize_output(
-            {
+        return {
                 "action": action,
                 "decision_id": decision_id,
                 "decision_obs": copy.deepcopy(obs),
                 "action_seed": action_seed,
-                "policy_std": std,
+                "policy_std": std.copy(),
                 ACTION_POLICY_INFO_KEY: {
                     "sampled_action": sampled_array.copy(),
                     "log_prob": log_prob.cpu().numpy(),
@@ -222,7 +302,6 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
                     "next_value": np.zeros(self.chunk_size, dtype=np.float32),
                 },
             }
-        )
 
     @staticmethod
     def _batch_transitions(batch):
@@ -231,53 +310,52 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
             raise TypeError("algorithm batch must contain MetaTransition values")
         return items
 
-    def algorithm_forward(self, operation: str, batch, *, context=None):
+    def recompute_traces(self, batch, *, context=None):
         del context
-        if operation == "ppo_trace":
-            rollout = getattr(batch, "rollout", None)
-            if rollout is None:
-                raise ValueError("ppo_trace requires a rollout-aware batch")
-            traces = {}
-            entropies = []
-            values = []
-            for group in rollout.decision_transitions():
-                decision = group.decision
-                info = decision.extras
-                seed = info.get("action_seed")
-                if not isinstance(seed, Integral) or isinstance(seed, bool):
-                    raise TypeError("decision action_seed must be an integer")
-                mean = self._chunk_mean(decision.obs, int(seed))
-                mean = mean[: decision.chunk_size]
-                action_info = info.get(ACTION_POLICY_INFO_KEY)
-                if not isinstance(action_info, Mapping):
-                    raise TypeError("decision is missing per-action policy metadata")
-                sampled_action = torch.as_tensor(
-                    np.asarray(action_info["sampled_action"]),
-                    dtype=mean.dtype,
-                    device=mean.device,
-                )[: decision.chunk_size]
-                if sampled_action.shape != mean.shape:
-                    raise ValueError("sampled action chunk does not match policy mean")
-                std = self._validate_std(info.get("policy_std"))
-                distribution = torch.distributions.Normal(mean, std)
-                log_prob = distribution.log_prob(sampled_action).sum(dim=-1)
-                traces[decision.decision_id] = PolicyTrace(
-                    kind="chunk",
-                    old_logprobs=log_prob,
-                    valid_mask=torch.ones_like(log_prob, dtype=torch.bool),
-                    axis_names=("action",),
-                )
-                entropies.append(distribution.entropy().sum(dim=-1))
-                values.append(log_prob.new_zeros(()))
-            value = torch.stack(values)
-            return {
-                "traces": traces,
-                "value": value,
-                "next_value": torch.zeros_like(value),
-                "entropy": torch.cat(entropies),
-            }
-        if operation not in {"reinforce", "ppo"}:
-            raise ValueError(f"unsupported Gaussian chunk operation {operation!r}")
+        rollout = getattr(batch, "rollout", None)
+        if rollout is None:
+            raise ValueError("trace recomputation requires a rollout-aware batch")
+        traces = {}
+        entropies = []
+        values = []
+        for group in rollout.decision_transitions():
+            decision = group.decision
+            info = decision.extras
+            seed = info.get("action_seed")
+            if not isinstance(seed, Integral) or isinstance(seed, bool):
+                raise TypeError("decision action_seed must be an integer")
+            mean = self._chunk_mean(decision.obs, int(seed))[: decision.chunk_size]
+            action_info = info.get(ACTION_POLICY_INFO_KEY)
+            if not isinstance(action_info, Mapping):
+                raise TypeError("decision is missing per-action policy metadata")
+            sampled_action = torch.as_tensor(
+                np.asarray(action_info["sampled_action"]),
+                dtype=mean.dtype,
+                device=mean.device,
+            )[: decision.chunk_size]
+            if sampled_action.shape != mean.shape:
+                raise ValueError("sampled action chunk does not match policy mean")
+            std = self._validate_collected_std(info.get("policy_std"))
+            distribution = self._distribution(mean, collected_std=std)
+            log_prob = distribution.log_prob(sampled_action).sum(dim=-1)
+            traces[decision.decision_id] = PolicyTrace(
+                kind="chunk",
+                old_logprobs=log_prob,
+                valid_mask=torch.ones_like(log_prob, dtype=torch.bool),
+                axis_names=("action",),
+            )
+            entropies.append(distribution.entropy().sum(dim=-1))
+            values.append(log_prob.new_zeros(()))
+        value = torch.stack(values)
+        return {
+            "traces": traces,
+            "value": value,
+            "next_value": torch.zeros_like(value),
+            "entropy": torch.cat(entropies),
+        }
+
+    def evaluate_actions(self, batch, *, context=None):
+        del context
         items = self._batch_transitions(batch)
         groups = {}
         for position, transition in enumerate(items):
@@ -315,8 +393,11 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
                 )
                 if sampled_action.shape != mean[chunk_index].shape:
                     raise ValueError("sampled_action shape does not match policy action")
-                std = self._validate_std(info.get("policy_std"))
-                distribution = torch.distributions.Normal(mean[chunk_index], std)
+                std = self._validate_collected_std(info.get("policy_std"))
+                distribution = self._distribution(
+                    mean[chunk_index],
+                    collected_std=std,
+                )
                 log_probs[position] = distribution.log_prob(sampled_action).sum()
                 entropies[position] = distribution.entropy().sum()
 
@@ -333,6 +414,8 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
     def state_dict(self):
         state = super().state_dict()
         state["decision_index"] = self._decision_index
+        state["log_std"] = self.log_std.detach().cpu().tolist()
+        state["learn_fixed_std"] = self.learn_fixed_std
         return state
 
     def load_state_dict(self, state):
@@ -341,3 +424,29 @@ class GaussianChunkPolicyAdapter(MetaPolicyAdapter):
         if not isinstance(decision_index, int) or decision_index < 0:
             raise ValueError("decision_index must be a non-negative integer")
         self._decision_index = decision_index
+        if "log_std" in state:
+            log_std = np.asarray(state["log_std"], dtype=np.float32)
+            if log_std.ndim == 0:
+                log_std = np.full((self.action_dim,), float(log_std), dtype=np.float32)
+            if log_std.shape != (self.action_dim,) or not np.isfinite(log_std).all():
+                raise ValueError(
+                    f"log_std must contain {self.action_dim} finite values"
+                )
+            with torch.no_grad():
+                self.log_std.copy_(self.log_std.new_tensor(log_std))
+        saved_learn_fixed_std = state.get("learn_fixed_std")
+        if saved_learn_fixed_std is not None and not isinstance(
+            saved_learn_fixed_std, bool
+        ):
+            raise TypeError("learn_fixed_std state must be bool")
+
+    def training_forward(self, batch, *, context=None):
+        del context
+        return native_training_forward(
+            self.meta_policy,
+            batch,
+            chunk_size=self.chunk_size,
+        )
+
+
+__all__ = ["GaussianChunkActionAdapter"]

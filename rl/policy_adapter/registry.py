@@ -5,10 +5,8 @@ from collections.abc import Mapping
 from types import ModuleType
 from typing import Callable, Dict, Union
 
-from .base import BasePolicyAdapter
-from .basic import BasicPolicyAdapter
-from .gaussian_chunk import GaussianChunkPolicyAdapter
-from .meta_policy import MetaPolicyAdapter
+from .base import MetaPolicyAdapter
+from .base import build_rl_adapter as build_base_policy_adapter
 
 
 PolicyModule = Union[str, ModuleType]
@@ -26,44 +24,16 @@ def register_policy_adapter(name: str, factory: Callable, *, replace: bool = Fal
     return factory
 
 
-def _build_basic(*, policy, model_components=None, **kwargs):
-    del model_components
-    return BasicPolicyAdapter(policy, **kwargs)
+def _build_base(*, policy, model_components=None, **kwargs):
+    if model_components is None:
+        model_components = {"model": policy}
+    return build_base_policy_adapter(
+        model_components=model_components,
+        **kwargs,
+    )
 
 
-def _build_meta_policy(*, policy, model_components=None, **kwargs):
-    if model_components is None or "meta_policy" not in model_components:
-        raise KeyError("meta_policy adapter requires model_components meta_policy")
-    meta_policy = model_components["meta_policy"]
-    if getattr(meta_policy, "policy", None) is not policy:
-        raise ValueError("meta_policy and model_components must share the model")
-    if (
-        "checkpoint_path" not in kwargs
-        and model_components.get("checkpoint_path") is not None
-    ):
-        kwargs["checkpoint_path"] = model_components["checkpoint_path"]
-    return MetaPolicyAdapter(meta_policy, **kwargs)
-
-
-def _build_gaussian_chunk(*, policy, model_components=None, **kwargs):
-    if model_components is None or "meta_policy" not in model_components:
-        raise KeyError(
-            "gaussian_chunk adapter requires model_components meta_policy"
-        )
-    meta_policy = model_components["meta_policy"]
-    if getattr(meta_policy, "policy", None) is not policy:
-        raise ValueError("meta_policy and model_components must share the model")
-    if (
-        "checkpoint_path" not in kwargs
-        and model_components.get("checkpoint_path") is not None
-    ):
-        kwargs["checkpoint_path"] = model_components["checkpoint_path"]
-    return GaussianChunkPolicyAdapter(meta_policy, **kwargs)
-
-
-register_policy_adapter("basic", _build_basic)
-register_policy_adapter("meta_policy", _build_meta_policy)
-register_policy_adapter("gaussian_chunk", _build_gaussian_chunk)
+register_policy_adapter("base", _build_base)
 
 
 def _load_policy_local_adapter(policy_module: PolicyModule):
@@ -99,14 +69,8 @@ def _build_local(
             model_components=model_components,
             **local_kwargs,
         )
-    adapter_class = getattr(adapter_module, "RLPolicyAdapter", None)
-    if adapter_class is not None:
-        return adapter_class(
-            model_components=model_components,
-            **local_kwargs,
-        )
     raise AttributeError(
-        f"{adapter_module.__name__} must define build_rl_adapter or RLPolicyAdapter"
+        f"{adapter_module.__name__} must define build_rl_adapter"
     )
 
 
@@ -118,8 +82,8 @@ def build_policy_adapter(
     fallback_adapter=None,
     required_capabilities=(),
     **kwargs,
-) -> BasePolicyAdapter:
-    """Build an adapter, preferring ``policy/<name>/rl_adapter.py`` in auto mode."""
+) -> MetaPolicyAdapter:
+    """Build the meta contract, using ``BasePolicyAdapter`` by configuration."""
 
     if not isinstance(model_components, Mapping):
         raise TypeError("model_components must be a mapping")
@@ -138,7 +102,9 @@ def build_policy_adapter(
             )
 
     result = None
-    if adapter in {"auto", "policy"}:
+    if adapter in {"auto", "policy"} and not (
+        adapter == "auto" and fallback_adapter is not None
+    ):
         local_module = _load_policy_local_adapter(policy_module)
         if local_module is not None:
             result = _build_local(
@@ -156,10 +122,8 @@ def build_policy_adapter(
     if result is None:
         if adapter == "auto" and fallback_adapter is not None:
             generic_name = fallback_adapter
-        elif adapter == "auto" and "meta_policy" in model_components:
-            generic_name = "meta_policy"
         else:
-            generic_name = "basic" if adapter == "auto" else adapter
+            generic_name = "base" if adapter == "auto" else adapter
         try:
             factory = _ADAPTER_FACTORIES[generic_name]
         except KeyError as exc:
@@ -167,14 +131,17 @@ def build_policy_adapter(
             raise ValueError(
                 f"unknown policy adapter {generic_name!r}; available: {available}"
             ) from exc
+        factory_kwargs = dict(kwargs)
+        if generic_name == "base":
+            factory_kwargs["required_capabilities"] = required_capabilities
         result = factory(
             policy=model_components["model"],
             model_components=model_components,
-            **kwargs,
+            **factory_kwargs,
         )
 
-    if not isinstance(result, BasePolicyAdapter):
-        raise TypeError("policy adapter factory must return BasePolicyAdapter")
+    if not isinstance(result, MetaPolicyAdapter):
+        raise TypeError("policy adapter factory must return MetaPolicyAdapter")
     result.set_checkpoint_source(model_components.get("checkpoint_path"))
     result.require_capabilities(required_capabilities)
     return result

@@ -11,7 +11,9 @@ inference process.
 benchmark MetaEnv -> EnvRunner -> Collector -> RewardComposer -> Buffer
                               ^                         |
                               |                         v
-Policy -> PolicyAdapter -> RLPolicyExecutor       RLRunner
+Policy -> MetaPolicy -> BasePolicyAdapter -> RLPolicyExecutor   RLRunner
+                         |
+                    ActionAdapter
    ^                                                   |
    +----- TrainerAdapter <- RLAlgorithm <--------+
 ```
@@ -21,8 +23,9 @@ Policy -> PolicyAdapter -> RLPolicyExecutor       RLRunner
   multiprocessing-safe therefore work without a hidden subprocess. A future
   vector/async runner is a separate component, not a flag inside benchmark
   adapters.
-- `rl/policy_adapter`: first looks for `policy/<name>/rl_adapter.py`; otherwise
-  a reusable adapter from `rl/policy_adapter` can be selected explicitly.
+- `rl/policy_adapter`: composes the existing `MetaPolicy` with one configured
+  `ActionAdapter`. Policy-local modules provide only action semantics such as
+  OpenVLA token likelihoods, not parallel RL pipelines.
 - `rl/executor`: directly calls the current trainable policy and reuses the pure
   `deploy.action_manager.chunk.BasicActionChunkManager`. It remains independent
   of `BasicActionManager`, SHM inference, and the eval facade.
@@ -36,7 +39,7 @@ Policy -> PolicyAdapter -> RLPolicyExecutor       RLRunner
   It owns lifecycle counters but never performs backward or optimizer steps.
 - `rl/algorithm`: owns RL mathematics and declares required policy capabilities
   and buffer family.
-- `rl/policy_adapter/trainer.py`: owns backward/optimizer mechanics or delegates them to a
+- `rl/policy_adapter/training/optimizer.py`: owns backward/optimizer mechanics or delegates them to a
   policy-specific update hook. `Trainer` therefore only names parameter-updating
   objects, consistent with existing `policy/*/trainer.py` classes.
   `build_trainer_adapter_from_components` prefers a policy-local RL adapter,
@@ -89,6 +92,88 @@ root:
   --env.args.max_timesteps 128
 ```
 
+### Online, offline, and hybrid data modes
+
+The outer runner selects where replay data comes from; algorithms and policy
+adapters never branch on the mode:
+
+```text
+online:  environment collection -> replay/rollout -> update
+offline: task dataset -> lazy offline replay -> update
+hybrid:  task dataset + online replay -> ratio-controlled mixed update
+```
+
+Pure offline training requires a replay-based algorithm and does not construct
+an environment, executor, reward composer, or collector:
+
+```bash
+.venv/bin/python train_rl.py \
+  -m ckpt/my_policy \
+  --mode offline \
+  -t configs/task/d4rl/door_expert.yaml \
+  -a td3_bc \
+  --runner default \
+  -c rl \
+  -o ckpt/my_policy_offline
+```
+
+Hybrid mode keeps the task dataset read-only, writes new experience to a
+separate online replay buffer, and samples both sources without allowing
+collection rejection or buffer clearing to erase demonstrations:
+
+```bash
+.venv/bin/python train_rl.py \
+  -m ckpt/my_policy \
+  --mode hybrid \
+  -t configs/task/my_demonstrations.yaml \
+  -e metaworld.easy00 \
+  -a td3 \
+  --offline-ratio 0.75 \
+  --offline-pretrain-iterations 1000 \
+  -o ckpt/my_policy_hybrid
+```
+
+Task samples keep the existing supervised fields. RL additionally recognizes
+optional `success`, `reward`, `terminated`, and `truncated` fields. If an
+episode has no success label, it is treated as a successful demonstration by
+default: only its terminal transition gets `success=true` and a default sparse
+`train/total=1` reward. Use `--offline-missing-success failure` to change that
+policy. These defaults are applied by `rl.offline.OfflineReplayDataset`; the
+samples returned to `train.py` are never modified.
+
+Offline replay is lazy: images and transitions are converted only for sampled
+indices rather than copied into RAM. Raw environment-space state and action are
+stored in the RL contract, while the checkpoint's saved `MetaPolicy`
+normalizers are still applied in policy and action-adapter forwards.
+
+The continuous-action offline presets cover three different distribution-shift
+strategies:
+
+| Config | Main idea | Compatible policy |
+| --- | --- | --- |
+| `iql` | expectile V plus advantage-weighted log likelihood | stochastic one-step policy |
+| `iql_act` | the same IQL targets with fixed-variance-equivalent weighted chunk MSE | ACT action chunks |
+| `cql` | SAC plus conservative log-sum-exp Q regularization | stochastic bounded one-step policy |
+| `td3_bc` | TD3 with batch-normalized Q maximization and behavior cloning | deterministic ACT action chunks |
+
+For example, ACT demonstrations use:
+
+```bash
+.venv/bin/python train_rl.py \
+  -m ckpt/my_act_policy \
+  --mode offline \
+  -t configs/task/my_demonstrations.yaml \
+  -a iql_act \
+  --runner default \
+  -c rl \
+  -o ckpt/my_act_iql
+```
+
+`cql` intentionally requires an action adapter that can both sample policy
+actions with log probabilities and sample uniformly from its bounded action
+space. It therefore fails capability validation instead of silently applying a
+different loss to deterministic ACT outputs.
+
 Rewards compose by repeating `-r`; raw environment reward is always preserved
 as `env/raw`, while each additional config contributes namespaced modules and
 weights to one `RewardComposer`:
@@ -134,24 +219,28 @@ policy has no local RL adapter:
   -o ckpt/my_policy_reinforce
 ```
 
-The policy output is the mean of a fixed-standard-deviation Gaussian in the
-checkpoint's normalized action space. The adapter records the sampled action
+The policy output is the mean of a Gaussian in the checkpoint's normalized
+action space. By default, `policy_std` initializes one state-independent
+standard deviation per action dimension; their logarithms are optimized
+together with the policy;
+`learn_fixed_std: false` keeps them frozen for controlled debugging. The adapter
+records the sampled action
 and per-step log probability under `PolicyOutput.policy_info` before the shared
 action-chunk manager dispatches it. During an update it reconstructs the chunk
 from the original `MetaObs`; stochastic base policies are replayed with their
 stored per-decision torch seed, so gradients reach the original policy.
 
-`policy_std` is measured in normalized action space and must be tuned for the
-checkpoint and controller. In particular, absolute end-effector control can
+`policy_std` is the initial standard deviation in normalized action space and
+must be tuned for the checkpoint and controller. In particular, absolute end-effector control can
 require a much smaller value than delta control. The executed action still goes
 through the checkpoint's normalizer, optional post-processing, and benchmark
 `MetaEnv.meta2act` constraints.
 
 This reusable adapter defines an outer Gaussian over the final diffusion-policy
-chunk; it is not DPPO's per-denoising-step likelihood. It supplies a zero value
-baseline, so the provided PPO config deliberately sets `value_coef: 0.0`. A
-policy-local adapter should replace it when a learned critic, token likelihood,
-or denoising-step objective is required. Sparse environments also need a
+chunk; it is not DPPO's per-denoising-step likelihood. PPO obtains values from
+its separately configured critic; the action adapter never owns a value head.
+A trace adapter is still required for token likelihood or denoising-step
+objectives. Sparse environments also need a
 successful rollout or an additional reward module: an all-zero rollout
 correctly produces no policy update.
 
@@ -163,19 +252,21 @@ There is no algorithm switch in `train_rl.py`.
 
 | Algorithm | Component type | Buffer | Policy-adapter capabilities | Optimizer keys |
 | --- | --- | --- | --- | --- |
-| REINFORCE | `rl.algorithm.ReinforceAlgorithm` | rollout | `action`, `reinforce` | one optimizer |
-| Actor-Critic | `rl.algorithm.ActorCriticAlgorithm` | rollout | `action`, `actor_critic` | one optimizer |
-| PPO | `rl.algorithm.PPOAlgorithm` | rollout | `action`, `ppo` | one optimizer |
-| DQN / Double-DQN | `rl.algorithm.DQNAlgorithm` | replay | `action`, `dqn`, `target_update` | one optimizer |
-| SARSA | `rl.algorithm.SARSAAlgorithm` | rollout | `action`, `sarsa` | one optimizer |
-| DDPG | `rl.algorithm.DDPGAlgorithm` | replay | `action`, `ddpg`, `target_update` | `critic`, `actor` |
-| SAC | `rl.algorithm.SACAlgorithm` | replay | `action`, `sac`, `target_update`; plus `temperature` for auto-alpha | `critic1`, `critic2`, `actor`; optional `alpha` |
+| REINFORCE | `rl.algorithm.ReinforceAlgorithm` | rollout | `action`, `evaluate_actions` | one optimizer |
+| Actor-Critic | `rl.algorithm.ActorCriticAlgorithm` | rollout | `action`, `evaluate_actions` | one optimizer |
+| PPO | `rl.algorithm.PPOAlgorithm` | rollout | `evaluate_actions` or `recompute_traces` | one optimizer |
+| DQN / Double-DQN | `rl.algorithm.DQNAlgorithm` | replay | `action`, `action_scores` | one optimizer |
+| SARSA | `rl.algorithm.SARSAAlgorithm` | rollout | `action`, `action_scores` | one optimizer |
+| DDPG | `rl.algorithm.DDPGAlgorithm` | replay | `action`, `sample_actions`, `batch_actions` | `critic`, `actor` |
+| SAC | `rl.algorithm.SACAlgorithm` | replay | `action`, `sample_actions`, `batch_actions` | `critic1`, `critic2`, `actor`; optional `alpha` |
+| IQL | `rl.algorithm.IQLAlgorithm` | replay | `batch_actions` plus `evaluate_actions` or `sample_actions` | `critic1`, `critic2`, `value`, `actor` |
+| CQL | `rl.algorithm.CQLAlgorithm` | replay | `sample_actions`, `batch_actions`, `uniform_actions` | `critic1`, `critic2`, `actor`; optional `alpha` |
+| TD3+BC | `rl.algorithm.TD3BCAlgorithm` | replay | `sample_actions`, `batch_actions` | `critic`, `actor` |
 
-`PolicyAdapter.algorithm_forward(operation, batch, context=...)` is the thin
-boundary for model-specific tensorization and head selection. The algorithm
-classes construct returns, TD/GAE targets, clipping, entropy terms and losses.
-DDPG and SAC request a fresh actor forward after critic updates, then invoke
-`algorithm_post_step` for target-network maintenance.
+Algorithms call explicit distribution or tensor operations. They own returns,
+TD/GAE targets, clipping, critics, target networks, temperature, exploration
+schedules, and post-update maintenance. Policy adapters never branch on an
+algorithm name.
 
 Multiple optimizers remain ordinary graph components and are injected into the
 single trainer-adapter file as a mapping:
@@ -190,7 +281,7 @@ trainer_adapter:
       actor: {$ref: actor_optimizer}
 ```
 
-The default `meta_policy` adapter advertises only `action`/`chunk_training`, so
+The default `meta_policy` adapter advertises only `action`/`training_forward`, so
 incompatible algorithms fail during `RLRunner` construction. A policy becomes
 algorithm-capable only when its local `policy/<name>/rl_adapter.py` or an
 explicit reusable adapter such as `gaussian_chunk` supplies the corresponding

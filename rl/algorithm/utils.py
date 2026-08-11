@@ -18,10 +18,11 @@ def transitions(batch):
     return batch.transitions
 
 
-def forward_result(policy_adapter, operation, batch, *, context=None, required=()):
-    result = policy_adapter.algorithm_forward(operation, batch, context=context)
+def validate_policy_result(result, *, operation, required=()):
+    """Validate the named outputs returned by an explicit adapter method."""
+
     if not isinstance(result, Mapping):
-        raise TypeError("policy algorithm_forward must return a mapping")
+        raise TypeError(f"policy adapter operation {operation!r} must return a mapping")
     missing = set(required) - set(result)
     if missing:
         raise KeyError(

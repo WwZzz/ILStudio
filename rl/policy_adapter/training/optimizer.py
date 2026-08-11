@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Optional
 if TYPE_CHECKING:
     from rl.algorithm import AlgorithmOutput
 
-from .base import BasePolicyAdapter
-from .registry import _load_policy_local_adapter
+from ..base import MetaPolicyAdapter
 
 
 @dataclass(frozen=True)
@@ -23,7 +22,7 @@ class TrainerStepResult:
         object.__setattr__(self, "updated", bool(self.updated))
 
 
-class BaseTrainerAdapter(ABC):
+class TrainerAdapter(ABC):
     """Adapt one optimizer step without owning the outer RL lifecycle."""
 
     @abstractmethod
@@ -31,7 +30,7 @@ class BaseTrainerAdapter(ABC):
         self,
         output: "AlgorithmOutput",
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> TrainerStepResult:
         """Apply one parameter update from an algorithm output."""
@@ -40,7 +39,7 @@ class BaseTrainerAdapter(ABC):
         self,
         outputs: Iterable["AlgorithmOutput"],
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> TrainerStepResult:
         """Apply one update from a stream, if the adapter supports it."""
@@ -88,7 +87,7 @@ def _call_supported(function, *args, **kwargs):
     return function(*args, **kwargs)
 
 
-class BasicTrainerAdapter(BaseTrainerAdapter):
+class OptimizerTrainerAdapter(TrainerAdapter):
     """Apply normal backward/step mechanics or a policy-specific step hook."""
 
     STATE_VERSION = 2
@@ -154,15 +153,15 @@ class BasicTrainerAdapter(BaseTrainerAdapter):
         self,
         output: "AlgorithmOutput",
         *,
-        policy_adapter: BasePolicyAdapter,
+        policy_adapter: MetaPolicyAdapter,
         context: Optional[Mapping[str, Any]] = None,
     ) -> TrainerStepResult:
         from rl.algorithm import AlgorithmOutput
 
         if not isinstance(output, AlgorithmOutput):
             raise TypeError("trainer adapter input must be AlgorithmOutput")
-        if not isinstance(policy_adapter, BasePolicyAdapter):
-            raise TypeError("policy_adapter must inherit BasePolicyAdapter")
+        if not isinstance(policy_adapter, MetaPolicyAdapter):
+            raise TypeError("policy_adapter must inherit MetaPolicyAdapter")
 
         if self.step_fn is not None:
             result = _call_supported(
@@ -252,6 +251,73 @@ class BasicTrainerAdapter(BaseTrainerAdapter):
             component.load_state_dict(state)
 
 
+def clone_optimizer(template, parameters, *, learning_rate=None):
+    """Clone an optimizer's class/defaults for one named parameter group."""
+
+    parameters = tuple(parameters)
+    if not parameters:
+        raise ValueError("optimizer parameter group cannot be empty")
+    optimizer_class = type(template)
+    defaults = dict(template.defaults)
+    if learning_rate is not None:
+        learning_rate = float(learning_rate)
+        if learning_rate <= 0.0:
+            raise ValueError("optimizer learning rate must be positive")
+        defaults["lr"] = learning_rate
+    try:
+        signature = inspect.signature(optimizer_class.__init__)
+    except (TypeError, ValueError):
+        optimizer_args = defaults
+    else:
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        optimizer_args = (
+            defaults
+            if accepts_kwargs
+            else {
+                name: value
+                for name, value in defaults.items()
+                if name in signature.parameters
+            }
+        )
+    return optimizer_class(parameters, **optimizer_args)
+
+
+def build_grouped_trainer_adapter(optimizer, parameter_groups, *, scheduler=None):
+    """Build named optimizers from algorithm-owned parameter-group metadata."""
+
+    if optimizer is None:
+        raise ValueError("grouped trainer requires an optimizer template")
+    if scheduler is not None:
+        raise ValueError("grouped trainer requires per-group schedulers")
+    if not isinstance(parameter_groups, Mapping) or not parameter_groups:
+        raise TypeError("parameter_groups must be a non-empty mapping")
+    optimizers = {}
+    for name, spec in parameter_groups.items():
+        if not isinstance(name, str) or not name:
+            raise TypeError("optimizer group names must be non-empty strings")
+        if isinstance(spec, Mapping):
+            unknown = set(spec) - {"parameters", "learning_rate"}
+            if unknown:
+                raise ValueError(
+                    f"unknown optimizer group {name!r} keys: "
+                    + ", ".join(sorted(unknown))
+                )
+            parameters = spec.get("parameters", ())
+            learning_rate = spec.get("learning_rate")
+        else:
+            parameters = spec
+            learning_rate = None
+        optimizers[name] = clone_optimizer(
+            optimizer,
+            parameters,
+            learning_rate=learning_rate,
+        )
+    return OptimizerTrainerAdapter(optimizer=optimizers)
+
+
 def _build_model_ema_post_step(policy_components):
     if not isinstance(policy_components, Mapping):
         return None
@@ -276,7 +342,7 @@ def _build_model_ema_post_step(policy_components):
     return update_ema
 
 
-def _build_basic_trainer_adapter(
+def _build_optimizer_trainer_adapter(
     *,
     policy_components=None,
     native_trainer_class=None,
@@ -287,10 +353,10 @@ def _build_basic_trainer_adapter(
         post_step_fn = _build_model_ema_post_step(policy_components)
         if post_step_fn is not None:
             kwargs["post_step_fn"] = post_step_fn
-    return BasicTrainerAdapter(**kwargs)
+    return OptimizerTrainerAdapter(**kwargs)
 
 
-_TRAINER_ADAPTER_FACTORIES = {"basic": _build_basic_trainer_adapter}
+_TRAINER_ADAPTER_FACTORIES = {"optimizer": _build_optimizer_trainer_adapter}
 
 
 def register_trainer_adapter(name: str, factory: Callable, *, replace=False):
@@ -312,8 +378,10 @@ def build_trainer_adapter(
     native_trainer_class=None,
     policy_adapter=None,
     **kwargs,
-) -> BaseTrainerAdapter:
+) -> TrainerAdapter:
     """Resolve a policy-local, native-Trainer, or generic update adapter."""
+
+    from ..registry import _load_policy_local_adapter
 
     if not isinstance(policy_components, Mapping):
         raise TypeError("policy_components must be a mapping")
@@ -359,7 +427,7 @@ def build_trainer_adapter(
             )
 
     if result is None:
-        generic_name = "basic" if adapter == "auto" else adapter
+        generic_name = "optimizer" if adapter == "auto" else adapter
         try:
             factory = _TRAINER_ADAPTER_FACTORIES[generic_name]
         except KeyError as exc:
@@ -373,6 +441,6 @@ def build_trainer_adapter(
             **kwargs,
         )
 
-    if not isinstance(result, BaseTrainerAdapter):
-        raise TypeError("trainer adapter factory must return BaseTrainerAdapter")
+    if not isinstance(result, TrainerAdapter):
+        raise TypeError("trainer adapter factory must return TrainerAdapter")
     return result

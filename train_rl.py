@@ -1,4 +1,4 @@
-"""Train an ILStudio checkpoint with composable reinforcement learning."""
+"""Train an ILStudio checkpoint with the modular RL pipeline."""
 
 import argparse
 import json
@@ -10,8 +10,7 @@ from loguru import logger
 
 from configs.loader import ConfigLoader
 from data_utils.utils import set_seed
-from rl.composition import compose_rl_config
-from rl.pipeline import build_rl_pipeline, validate_rl_config
+from rl.pipeline import build_rl_pipeline, compose_rl_config, validate_rl_config
 from utils.torch_backend import configure_torch_backends_from_env
 
 def summarize_rl_iteration(result, runner):
@@ -119,6 +118,42 @@ def parse_param(argv=None):
         help="Local ILStudio checkpoint used as the starting policy",
     )
     parser.add_argument(
+        "--mode",
+        choices=("online", "offline", "hybrid"),
+        default="online",
+        help="Experience mode: environment, fixed task dataset, or both",
+    )
+    parser.add_argument(
+        "-t",
+        "--task",
+        default=None,
+        help="Task dataset config required by offline and hybrid modes",
+    )
+    parser.add_argument(
+        "--offline-ratio",
+        type=float,
+        default=0.5,
+        help="Offline fraction of each hybrid replay batch",
+    )
+    parser.add_argument(
+        "--offline-pretrain-iterations",
+        type=int,
+        default=0,
+        help="Hybrid update-only iterations before environment collection starts",
+    )
+    parser.add_argument(
+        "--offline-item-type",
+        choices=("auto", "transition", "decision"),
+        default="auto",
+        help="Replay item granularity; auto follows the algorithm buffer",
+    )
+    parser.add_argument(
+        "--offline-missing-success",
+        choices=("success", "failure"),
+        default="success",
+        help="Episode label used when an offline dataset omits success",
+    )
+    parser.add_argument(
         "-e",
         "--env",
         default="metaworld.easy00",
@@ -191,6 +226,16 @@ def parse_param(argv=None):
         help="Select one env from a multi-env config",
     )
     parser.add_argument(
+        "--env_indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help=(
+            "Select an explicit environment suite for grouped multi-task "
+            "collection; mutually exclusive with --env_index"
+        ),
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate configs and imports without loading model or environment",
@@ -198,6 +243,16 @@ def parse_param(argv=None):
     args, unknown = parser.parse_known_args(argv)
     args.unknown_args = unknown
     args.reward = args.reward or ["raw"]
+    if args.mode in {"offline", "hybrid"} and not args.task:
+        parser.error("--task is required in offline and hybrid modes")
+    if not 0.0 <= args.offline_ratio <= 1.0:
+        parser.error("--offline-ratio must be in [0, 1]")
+    if args.offline_pretrain_iterations < 0:
+        parser.error("--offline-pretrain-iterations cannot be negative")
+    if args.mode != "hybrid" and args.offline_pretrain_iterations:
+        parser.error("--offline-pretrain-iterations requires --mode hybrid")
+    if args.env_index is not None and args.env_indices is not None:
+        parser.error("--env_index and --env_indices are mutually exclusive")
     return args
 
 
@@ -219,7 +274,16 @@ def load_all_configs(args):
         args=args,
         unknown_args=getattr(args, "unknown_args", []),
     )
-    env_config, env_path = loader.load_env(args.env)
+    uses_online = args.mode in {"online", "hybrid"}
+    uses_offline = args.mode in {"offline", "hybrid"}
+    env_config = None
+    env_path = None
+    if uses_online:
+        env_config, env_path = loader.load_env(args.env)
+    task_config = None
+    task_path = None
+    if uses_offline:
+        task_config, task_path = loader.load_task(args.task)
     algorithm_config, algorithm_path = loader.load_rl_component(
         "algorithm",
         args.algorithm,
@@ -242,17 +306,21 @@ def load_all_configs(args):
         )
     reward_configs = []
     reward_paths = []
-    for reward_name in args.reward:
-        reward_config, reward_path = loader.load_rl_component(
-            "reward",
-            reward_name,
+    if uses_online:
+        for reward_name in args.reward:
+            reward_config, reward_path = loader.load_rl_component(
+                "reward",
+                reward_name,
+            )
+            reward_configs.append(reward_config)
+            reward_paths.append(reward_path)
+    env_runner_config = None
+    env_runner_path = None
+    if uses_online:
+        env_runner_config, env_runner_path = loader.load_rl_component(
+            "env_runner",
+            args.env_runner,
         )
-        reward_configs.append(reward_config)
-        reward_paths.append(reward_path)
-    env_runner_config, env_runner_path = loader.load_rl_component(
-        "env_runner",
-        args.env_runner,
-    )
     runner_config, runner_path = loader.load_rl_component(
         "runner",
         args.runner,
@@ -273,10 +341,24 @@ def load_all_configs(args):
         env_runner_config=env_runner_config,
         runner_config=runner_config,
         env_index=args.env_index,
+        env_indices=args.env_indices,
         runtime_args={"device": args.device},
+        mode=args.mode,
+        offline_config=(
+            {
+                "task_config": task_config,
+                "default_success": args.offline_missing_success == "success",
+                "offline_ratio": args.offline_ratio,
+                "offline_pretrain_iterations": args.offline_pretrain_iterations,
+                "item_type": args.offline_item_type,
+            }
+            if uses_offline
+            else None
+        ),
     )
     paths = {
         "env": env_path,
+        "task": task_path,
         "algorithm": algorithm_path,
         "objective": objective_path,
         "critic": critic_path,
