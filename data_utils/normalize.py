@@ -1013,7 +1013,7 @@ class ZScoreNormalizer(BaseNormalizer):
         dataset_name=None,
         ctrl_type='delta',
         ctrl_space='ee',
-        min_std=1e-6,
+        min_std=1e-2,
         mask=None,
         *args,
         **kwargs,
