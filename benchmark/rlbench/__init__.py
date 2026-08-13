@@ -111,6 +111,7 @@ class RLBenchEnv(MetaEnv):
         self.task_name = config.task
         self.ctrl_space = getattr(config, 'ctrl_space', 'joint')
         self.ctrl_type = getattr(config, 'ctrl_type', 'abs')
+        self.ee_exec = getattr(config, 'ee_exec', 'planning')
         self.camera_names = getattr(config, 'camera_names', ['front', 'wrist'])
         self.image_size = getattr(config, 'image_size', [128, 128])
         self.headless = getattr(config, 'headless', True)
@@ -133,13 +134,29 @@ class RLBenchEnv(MetaEnv):
         # Configure observation
         obs_config = ObservationConfig()
         obs_config.set_all(True)  # Enable all observations
+        image_size = tuple(int(value) for value in self.image_size)
+        for camera_name in self.camera_names:
+            camera_config = getattr(obs_config, f"{camera_name}_camera", None)
+            if camera_config is None:
+                raise ValueError(
+                    f"Unsupported RLBench camera: {camera_name}. "
+                    "Expected a camera exposed by ObservationConfig."
+                )
+            camera_config.image_size = image_size
         
         # Configure action mode based on ctrl_space
         if self.ctrl_space == 'joint':
             # arm_action_mode = JointVelocity()
             arm_action_mode = JointPosition()
         elif self.ctrl_space == 'ee':
-            arm_action_mode = EndEffectorPoseViaPlanning()
+            if self.ee_exec == 'planning':
+                arm_action_mode = EndEffectorPoseViaPlanning()
+            elif self.ee_exec == 'ik':
+                arm_action_mode = EndEffectorPoseViaIK()
+            else:
+                raise ValueError(
+                    f"Unsupported ee_exec: {self.ee_exec}; expected 'planning' or 'ik'"
+                )
         elif self.ctrl_space == 'ee_ik':
             arm_action_mode = EndEffectorPoseViaIK()
         elif self.ctrl_space == 'joint_vel':
@@ -305,7 +322,8 @@ class RLBenchEnv(MetaEnv):
             obs, reward, terminate = self.task.step(rlbench_action)
         except Exception as e:
             logger.info(f"Error in RLBench step: {e}")
-            return self.prev_obs, 0.0, False, {'success': False, 'terminated': True, 'truncated': False}
+            info = {'success': False, 'terminated': True, 'truncated': False}
+            return self.prev_obs, 0.0, True, False, info
         
         # Convert observation
         meta_obs = self.obs2meta(obs)
@@ -319,7 +337,7 @@ class RLBenchEnv(MetaEnv):
             'truncated': False
         }
         
-        return meta_obs, reward, terminate, info
+        return meta_obs, reward, bool(terminate), False, info
     
     def reset(self):
         """Reset the environment and return initial observation."""

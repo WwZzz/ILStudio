@@ -1,0 +1,21 @@
+version: 1
+name: process8
+metadata:
+  description: Eight spawned LIBERO environments with batched policy inference
+runner:
+  type: benchmark.env_runner.ProcessEnvRunner
+  args:
+    num_envs: 8
+    start_method: spawn
+    seed: 0
+    # GRPO replicas deliberately share a seed so each group starts from the
+    # same LIBERO trial, matching SimpleVLA-RL's repeat_interleave(n_samples).
+    seed_stride: 0
+executor:
+  type: rl.executor.BatchedRLPolicyExecutor
+  args:
+    num_envs: 8
+    execution_horizon: 1
+collector:
+  type: rl.collector.ParallelCollector
+  args: {}

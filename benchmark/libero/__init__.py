@@ -38,6 +38,13 @@ class LiberoEnv(MetaEnv):
         self.use_openvla_gripper = getattr(self.config, 'use_openvla_gripper', False)
         self.use_wrist = getattr(self.config, 'use_wrist', False)
         self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
+        self.seed = getattr(self.config, 'seed', None)
+        self.env_seed = getattr(self.config, 'env_seed', 0)
+        self._rng = np.random.default_rng(self.seed)
+        self._configured_init_state_index = getattr(
+            self.config, 'init_state_index', None
+        )
+        self.init_state_index = None
         env = self.create_env()
         super().__init__(env)
         
@@ -47,7 +54,9 @@ class LiberoEnv(MetaEnv):
         task_id = int(task_info[-1])
         ctrl_space = "OSC_POSE" if self.ctrl_space=='ee' else "JOINT_POSITION"  # ee or joint
         task_suite = benchmark_dict[task_name]()
-        init_states = task_suite.get_task_init_states(task_id)
+        self.task_suite_name = task_name
+        self.task_id = task_id
+        self.init_states = task_suite.get_task_init_states(task_id)
         task = task_suite.get_task(task_id)
         self.raw_lang =  task.language
         self.task_name = task.name
@@ -70,11 +79,10 @@ class LiberoEnv(MetaEnv):
             "camera_widths": 256,
         }
         env = OffScreenRenderEnv(**env_args)
-        np.random.seed(None)
-        state_index = np.random.choice(len(init_states))
-        state = init_states[state_index]
-        logger.info(f"Setting initial state {state_index} for task {self.task_name}")
-        env.set_init_state(state)
+        # LIBERO object placements remain sensitive to the simulator seed even
+        # after ``set_init_state``.  Match the official OpenVLA/SimpleVLA
+        # rollout protocol so a fixed task init state denotes the same scene.
+        env.seed(self.env_seed)
         
         # Get action bounds from action_space
         # LIBERO uses robosuite environments with Box action space
@@ -96,10 +104,15 @@ class LiberoEnv(MetaEnv):
     def meta2act(self, maction: MetaAction):
         assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
         assert maction['ctrl_type']==self.ctrl_type, "Action must be delta action for LIBERO"
-        actions = maction['action'] # (action_dim, )
+        actions = np.asarray(maction['action']).copy() # (action_dim, )
         # actions[:6] = actions[:6]*np.array([0.5, 0.5, 0.5, 0.05, 0.05, 0.05, ])
         if self.use_openvla_gripper:
-            actions[6] = 1.-2.*actions[6]
+            # OpenVLA represents the absolute gripper as 0=closed, 1=open,
+            # while LIBERO expects +1=closed, -1=open.  Match the official
+            # OpenVLA/SimpleVLA-RL evaluation path by binarizing after the
+            # range conversion; stochastic token sampling can otherwise send
+            # invalid intermediate gripper commands to the simulator.
+            actions[6] = np.sign(1.-2.*actions[6])
         return actions
     
     def get_libero_dummy_action(self):
@@ -126,9 +139,33 @@ class LiberoEnv(MetaEnv):
         # depth_second = obs['robot0_eye_in_hand_depth']
         # depth = np.stack([depth_primary, depth_second])
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
+
+    def step(self, *args, **kwargs):
+        obs, reward, terminated, truncated, info = super().step(*args, **kwargs)
+        # LIBERO's legacy ``done`` happens to mean task success, but keeping an
+        # explicit metric prevents that benchmark-specific fact leaking into
+        # the common episode-end contract.
+        info['success'] = bool(self.env.check_success())
+        info['task_suite_name'] = self.task_suite_name
+        info['task_id'] = self.task_id
+        info['init_state_index'] = self.init_state_index
+        return obs, reward, terminated, truncated, info
     
     def reset(self):
         self.env.reset()
+        if self._configured_init_state_index is None:
+            state_index = int(self._rng.integers(len(self.init_states)))
+        else:
+            state_index = int(self._configured_init_state_index)
+            if not 0 <= state_index < len(self.init_states):
+                raise IndexError(
+                    "init_state_index is outside the available LIBERO states"
+                )
+        self.init_state_index = state_index
+        logger.info(
+            f"Setting initial state {state_index} for task {self.task_name}"
+        )
+        obs = self.env.set_init_state(self.init_states[state_index])
         for _ in range(self.num_steps_wait):
             obs, _, _, _ = self.env.step(self.get_libero_dummy_action())
         self.prev_obs = self.obs2meta(obs)

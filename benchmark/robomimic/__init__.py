@@ -129,9 +129,9 @@ class RobomimicEnv(MetaEnv):
         return MetaObs(state=state_ee, image=image, raw_lang=self.raw_lang)
 
     def step(self, *args, **kwargs):
-        obs, r, done, info = super().step(*args, **kwargs)
-        done = self.env.is_success().get('task', False)
-        return obs, r, done, info
+        obs, reward, terminated, truncated, info = super().step(*args, **kwargs)
+        info['success'] = bool(self.env.is_success().get('task', False))
+        return obs, reward, terminated, truncated, info
     
     def reset(self):
         pid = current_process().pid  # 获取当前进程 ID

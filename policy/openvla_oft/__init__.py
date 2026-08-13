@@ -24,8 +24,11 @@ Usage:
     action = model_components['model'].select_action(batch_obs)
 """
 
+import json
 import os
 import sys
+from pathlib import Path
+from collections.abc import Mapping
 from loguru import logger
 
 # Add openvla-oft to path for imports
@@ -38,6 +41,37 @@ from .data_utils import OpenVLAOFTProcessor, OpenVLAOFTCollator, OpenVLAOFTInfer
 from .trainer import Trainer
 
 from peft import LoraConfig, get_peft_model, PeftModel
+
+
+def _load_checkpoint_norm_stats(model, checkpoint_path):
+    """Apply the action statistics shipped beside an OpenVLA-OFT checkpoint.
+
+    OpenVLA-OFT fine-tuning keeps task-specific statistics in
+    ``dataset_statistics.json`` rather than rewriting the base model's
+    ``config.json``. This mirrors the official OpenVLA-OFT and SimpleVLA-RL
+    loaders and is required when a LIBERO adapter sits on an OXE base model.
+    """
+
+    stats_path = Path(checkpoint_path) / "dataset_statistics.json"
+    if not stats_path.is_file():
+        logger.warning(
+            f"No dataset_statistics.json found beside OpenVLA-OFT checkpoint: "
+            f"{checkpoint_path}"
+        )
+        return
+    with stats_path.open("r", encoding="utf-8") as stream:
+        norm_stats = json.load(stream)
+    if not isinstance(norm_stats, Mapping) or not norm_stats:
+        raise ValueError(
+            f"OpenVLA-OFT dataset statistics must be a non-empty mapping: "
+            f"{stats_path}"
+        )
+    model.vla.norm_stats = dict(norm_stats)
+    get_base_model = getattr(model.vla, "get_base_model", None)
+    if callable(get_base_model):
+        base_model = get_base_model()
+        if base_model is not model.vla:
+            base_model.norm_stats = dict(norm_stats)
 
 
 def load_model(args):
@@ -77,10 +111,15 @@ def load_model(args):
             # Load base policy first
             model = OpenVLAOFTPolicy(config)
             # Load LoRA adapter into the VLA backbone
-            model.vla = PeftModel.from_pretrained(model.vla, args.model_name_or_path)
+            model.vla = PeftModel.from_pretrained(
+                model.vla,
+                args.model_name_or_path,
+                is_trainable=bool(getattr(args, "rl_training", False)),
+            )
         else:
             # Load full model
             model = OpenVLAOFTPolicy.from_pretrained(args.model_name_or_path, config=config)
+        _load_checkpoint_norm_stats(model, args.model_name_or_path)
         
         # Load extra weights (action_head, projectors) if they exist
         extra_weights_path = os.path.join(args.model_name_or_path, 'extra_weights.bin')
@@ -109,6 +148,7 @@ def load_model(args):
             num_images_in_input=getattr(args, 'num_images_in_input', 2),
             use_proprio=getattr(args, 'use_proprio', True),
             center_crop=getattr(args, 'center_crop', True),
+            rlds_resize=getattr(args, 'rlds_resize', False),
             action_dim=getattr(args, 'action_dim', 7),
             state_dim=getattr(args, 'state_dim', 8),
             chunk_size=getattr(args, 'chunk_size', 8),
@@ -119,6 +159,8 @@ def load_model(args):
             use_quantization=getattr(args, 'use_quantization', False),
             load_in_8bit=getattr(args, 'load_in_8bit', False),
             load_in_4bit=getattr(args, 'load_in_4bit', False),
+            vla_attn_implementation=getattr(args, 'vla_attn_implementation', 'eager'),
+            unnorm_key=getattr(args, 'unnorm_key', None),
             camera_names=getattr(args, 'camera_names', ['primary']),
             num_open_loop_steps=getattr(args, 'num_open_loop_steps', 8),
         )
@@ -138,6 +180,7 @@ def load_model(args):
             # Apply LoRA only to the VLA backbone (not action_head, proprio_projector, etc.)
             model.vla = get_peft_model(model.vla, lora_config)
             model.vla.print_trainable_parameters()
+        _load_checkpoint_norm_stats(model, config.pretrained_checkpoint)
     
     # Initialize data_processor and data_collator for inference
     if not args.is_training:
@@ -148,6 +191,8 @@ def load_model(args):
             use_proprio=config.use_proprio,
             num_images_in_input=config.num_images_in_input,
             camera_names=config.camera_names,
+            center_crop=config.center_crop,
+            rlds_resize=getattr(config, 'rlds_resize', False),
         )
         model.data_collator = OpenVLAOFTCollator(
             model.tokenizer,

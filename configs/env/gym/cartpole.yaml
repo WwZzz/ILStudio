@@ -1,0 +1,9 @@
+type: benchmark.gym.GymEnv
+name: gym_cartpole
+args:
+  task: CartPole-v1
+  max_timesteps: 200
+  ctrl_space: gym
+  raw_lang: balance the pole
+  seed: 0
+  success_on_time_limit: true

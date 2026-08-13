@@ -1,0 +1,32 @@
+version: 1
+type: rl.algorithm.PPOAlgorithm
+objective: chunk
+critic: dino_state
+args:
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  reward_key: train/total
+  value_coef: 0.5
+  entropy_coef: 0.0
+  normalize_advantage: true
+  # env_step treats a chunk as a variable-duration SMDP decision. Set to
+  # decision only when gamma and lambda are intentionally defined per chunk.
+  decision_discount_mode: env_step
+policy_adapter:
+  fallback_adapter: base
+  required_capabilities: [action, recompute_traces]
+  args:
+    action_adapter:
+      type: rl.policy_adapter.action.GaussianChunkActionAdapter
+      args:
+        policy_std: 0.02
+        learn_fixed_std: true
+        inference_seed: 0
+        seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 4

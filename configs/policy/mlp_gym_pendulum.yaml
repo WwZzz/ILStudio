@@ -1,0 +1,19 @@
+type: policy.mlp
+name: mlp_gym_pendulum
+args:
+  state_dim: 3
+  action_dim: 1
+  num_layers: 3
+  hidden_dim: 64
+  activation: relu
+  dropout: 0.0
+  use_camera: false
+  chunk_size: 1
+  rl_action_space: continuous
+  action_low: [-2.0]
+  action_high: [2.0]
+config_class: MLPPolicyConfig
+model_class: MLPPolicy
+data_processor: get_data_processor
+data_collator: get_data_collator
+trainer_class: null

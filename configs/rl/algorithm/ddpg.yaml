@@ -1,0 +1,30 @@
+version: 1
+type: rl.algorithm.DDPGAlgorithm
+critic: policy_feature_chunk_target
+args:
+  gamma: 0.99
+  reward_key: train/total
+  target_tau: 0.005
+  actor_bc_coef: 1.0
+  actor_learning_rate: 0.0000001
+  critic_learning_rate: 0.001
+policy_adapter:
+  required_capabilities: [action, sample_actions, batch_actions]
+  args:
+    action_adapter:
+      type: policy.act.rl_adapter.ACTActionAdapter
+      args:
+        exploration_std: 0.02
+        exploration_clip: [-1.0, 1.0]
+        feature_spatial_grid: [4, 4]
+        feature_timestep_scale: 128.0
+        seed: 0
+buffer:
+  type: rl.buffer.DecisionReplayBuffer
+  args:
+    capacity: 100000
+    seed: 0
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 10
+  warmup_steps: 8192

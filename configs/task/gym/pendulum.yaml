@@ -1,0 +1,11 @@
+name: gym_pendulum
+datasets: []
+meta:
+  state_only: true
+  state_dim: 3
+  action_dim: 1
+  action_space: continuous
+  action_low: [-2.0]
+  action_high: [2.0]
+  action_normalize: none
+  state_normalize: none

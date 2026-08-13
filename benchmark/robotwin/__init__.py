@@ -745,7 +745,7 @@ class RoboTwinEnv(MetaEnv):
             maction: MetaAction or dict with 'action' key
             
         Returns:
-            tuple: (obs, reward, done, info)
+            tuple: (obs, reward, terminated, truncated, info)
         """
         # Extract action
         if isinstance(args[0], MetaAction):
@@ -778,13 +778,11 @@ class RoboTwinEnv(MetaEnv):
         # Check success
         success = self.task_env.eval_success
         
-        # In ILStudio, done indicates task success, not episode termination
-        # This matches the convention used in other environments (simplerenv, gymnasium_robotics, etc.)
-        done = success
-        
         # Check termination conditions
-        terminated = (self.task_env.take_action_cnt >= self.max_timesteps) or success
-        truncated = self.task_env.take_action_cnt >= self.max_timesteps and not success
+        terminated = bool(success)
+        truncated = bool(
+            self.task_env.take_action_cnt >= self.max_timesteps and not success
+        )
         
         # Reward (0 or 1 based on success)
         reward = float(success)
@@ -797,7 +795,7 @@ class RoboTwinEnv(MetaEnv):
             'step_count': self.task_env.take_action_cnt
         }
         
-        return meta_obs, reward, done, info
+        return meta_obs, reward, terminated, truncated, info
     
     def close(self):
         """Close the environment and cleanup."""

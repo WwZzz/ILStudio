@@ -15,6 +15,20 @@ from prismatic.util.data_utils import PaddedCollatorForActionPrediction
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder, VicunaV15ChatPromptBuilder
 
 IGNORE_INDEX = -100
+
+
+def _chw_to_pil(image):
+    """Convert an ILStudio CHW NumPy array or tensor to a PIL image."""
+
+    image_tensor = torch.as_tensor(image).detach().cpu()
+    if image_tensor.ndim != 3 or image_tensor.shape[0] not in {1, 3, 4}:
+        raise ValueError(
+            "OpenVLA primary image must have CHW shape with 1, 3, or 4 channels"
+        )
+    image_array = image_tensor.permute(1, 2, 0).numpy().astype(np.uint8)
+    if image_array.shape[-1] == 1:
+        image_array = image_array[..., 0]
+    return Image.fromarray(image_array)
     
 class OpenVLACollator:
     def __init__(self, tokenizer, dtype=torch.bfloat16):
@@ -44,9 +58,7 @@ class OpenVLAProcessor:
             action = action[0]
         # Handle image format: (num_cameras, C, H, W) -> take first camera
         image_tensor = sample['image'][0]  # Take first camera (primary)
-        # Convert from tensor to PIL Image
-        image_array = image_tensor.permute(1, 2, 0).numpy().astype(np.uint8)
-        img = Image.fromarray(image_array)
+        img = _chw_to_pil(image_tensor)
         lang = sample['raw_lang']
         
         # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
@@ -80,4 +92,3 @@ class OpenVLAProcessor:
                 labels[-1] = IGNORE_INDEX
         # Note: Removed dataset_name field to avoid None values causing concatenation errors in accelerate
         return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels)
-        

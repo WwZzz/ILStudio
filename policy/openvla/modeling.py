@@ -110,6 +110,7 @@ class OpenPolicy(PreTrainedModel):
             input_ids=input_ids,
             labels=labels,
             attention_mask=attention_mask,
+            **kwargs,
         )
         # action_logits = output.logits[:, self.model.vision_backbone.featurizer.patch_embed.num_patches : -1]
         # action_preds = action_logits.argmax(dim=2)
@@ -120,7 +121,10 @@ class OpenPolicy(PreTrainedModel):
         # continuous_actions_pred = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_preds[mask].cpu().numpy()))
         # continuous_actions_gt = torch.tensor(self.action_tokenizer.decode_token_ids_to_actions(action_gt[mask].cpu().numpy()))
         # action_l1_loss = torch.nn.functional.l1_loss(continuous_actions_pred, continuous_actions_gt)
-        return {'loss': output.loss,}
+        # Preserve the standard Hugging Face output.  SFT only consumes
+        # ``loss`` while RL adapters also need token logits (and optionally
+        # hidden states) to recompute action likelihoods.
+        return output
         
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()

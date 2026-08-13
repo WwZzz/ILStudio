@@ -1,0 +1,23 @@
+version: 1
+name: process8_chunk8_grouped
+metadata:
+  description: Eight spawned replicas scheduled over an explicit environment suite
+runner:
+  type: benchmark.env_runner.GroupedProcessEnvRunner
+  args:
+    num_envs: 8
+    start_method: spawn
+    seed: 0
+    seed_stride: 0
+    episodes_per_env: 50
+    episode_index_key: init_state_index
+    shuffle: true
+    schedule_seed: 0
+executor:
+  type: rl.executor.BatchedRLPolicyExecutor
+  args:
+    num_envs: 8
+    execution_horizon: 8
+collector:
+  type: rl.collector.ParallelCollector
+  args: {}

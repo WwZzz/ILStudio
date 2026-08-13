@@ -1,0 +1,9 @@
+version: 1
+type: rl.runtime.RLRunner
+config_type: rl.runtime.RLRunnerConfig
+args:
+  iterations: 50
+  batch_size: 64
+  deterministic_collection: false
+  clear_rollout_after_update: true
+  seed: 0

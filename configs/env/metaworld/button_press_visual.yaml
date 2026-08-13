@@ -1,0 +1,16 @@
+type: benchmark.metaworld.MetaWorldEnv
+name: button-press-v3-visual
+args:
+  task: button-press-v3
+  max_timesteps: 128
+  ctrl_space: ee
+  ctrl_type: abs
+  use_camera: true
+  robot_state_only: true
+  num_steps_wait: 10
+  seed: 0
+  render_mode: rgb_array
+  camera_name: corner4
+  image_size:
+    - 480
+    - 480

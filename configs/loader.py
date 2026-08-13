@@ -161,7 +161,20 @@ class ConfigLoader:
         except FileNotFoundError:
             return name_or_path
 
-    def load_yaml_config(self, category: str, name_or_path: str) -> Tuple[Dict[str, Any], str]:
+    def load_yaml_config(
+        self,
+        category: str,
+        name_or_path: str,
+        *,
+        override_category: Optional[str] = None,
+    ) -> Tuple[Dict[str, Any], str]:
+        """Load one YAML config through ILStudio's shared resolution rules.
+
+        ``category`` may include subdirectories such as ``rl/algorithm``.
+        ``override_category`` keeps the corresponding CLI namespace concise,
+        for example ``--algorithm.gamma`` rather than exposing filesystem
+        layout in command-line options.
+        """
         path = self._resolve(category, name_or_path)
         with open(path, 'r', encoding='utf-8') as f:
             cfg = yaml.safe_load(f) or {}
@@ -170,9 +183,29 @@ class ConfigLoader:
         convert_yaml_string_types(cfg)
         
         # Apply command-line overrides
-        apply_overrides_to_mapping(cfg, self.get_overrides(category), _convert_to_type)
+        override_category = override_category or category
+        apply_overrides_to_mapping(
+            cfg,
+            self.get_overrides(override_category),
+            _convert_to_type,
+        )
         
         return cfg, path
+
+    def load_rl_component(self, component: str, name_or_path: str):
+        """Load ``configs/rl/<component>`` with the native config loader."""
+        if not isinstance(component, str) or not component:
+            raise TypeError("RL config component must be a non-empty string")
+        if (
+            any(separator in component for separator in ("/", "\\"))
+            or component in {".", ".."}
+        ):
+            raise ValueError("RL config component must be one directory name")
+        return self.load_yaml_config(
+            f"rl/{component}",
+            name_or_path,
+            override_category=component,
+        )
 
     def load_task(self, name_or_path: str) -> Tuple[Dict[str, Any], str]:
         cfg, path = self.load_yaml_config('task', name_or_path)
@@ -285,7 +318,13 @@ class ConfigLoader:
         """Load env config and return a namespace for attribute-style access.
         Supports both single environment and multiple environments (envs list).
         """
-        cfg, path = self.load_yaml_config('env', name_or_path)
+        # Environment configs may be top-level lists.  Defer overrides until
+        # after that shape is known; the generic mapping override helper cannot
+        # traverse a list root.
+        cfg, path = self.load_yaml_config(
+            'env', name_or_path, override_category='__env_deferred__'
+        )
+        env_overrides = self.get_overrides('env')
         
         # Check if it's a multi-env config
         if isinstance(cfg, list):
@@ -298,6 +337,30 @@ class ConfigLoader:
             # Single env - normalize and wrap in list for consistency
             normalized_cfg = self.normalize_config(cfg)
             normalized_envs = [normalized_cfg]
+
+        # Apply overrides after normalization so top-level convenience fields
+        # are not discarded when a config already has an ``args`` mapping.
+        for dotted, raw in env_overrides.items():
+            parts = dotted.split('.')
+            if parts[0].isdigit():
+                index = int(parts.pop(0))
+                if not 0 <= index < len(normalized_envs):
+                    raise IndexError(
+                        f"environment override index {index} is out of range"
+                    )
+                if not parts:
+                    raise ValueError(
+                        "indexed environment overrides require a field path"
+                    )
+                targets = (normalized_envs[index],)
+            else:
+                # An unindexed override applies to every entry, which is useful
+                # for shared runner concerns such as seeds or action conventions.
+                targets = tuple(normalized_envs)
+            for target in targets:
+                apply_overrides_to_mapping(
+                    target, {'.'.join(parts): raw}, _convert_to_type
+                )
         
         # Flatten args for each env to make them accessible at top level
         flattened_envs = []

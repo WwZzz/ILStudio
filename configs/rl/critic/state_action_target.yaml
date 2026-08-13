@@ -1,0 +1,7 @@
+version: 1
+type: rl.critic.TargetQCritic
+args:
+  q_type: rl.critic.StateActionQCritic
+  q_args:
+    hidden_dim: 256
+    activation: relu

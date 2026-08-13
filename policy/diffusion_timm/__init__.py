@@ -148,8 +148,14 @@ def load_model(args):
         
         model.to('cuda')
         
-        # Attach data collator for inference
+        # Attach inference preprocessing from the checkpoint configuration.
         model.data_collator = data_collator
+        image_size = getattr(model.config, 'image_size', None)
+        if image_size is not None:
+            image_size = tuple(image_size)
+        model.data_processor = DataProcessor(
+            image_size=image_size, normalize_image=False
+        )
     
     return {'model': model}
 

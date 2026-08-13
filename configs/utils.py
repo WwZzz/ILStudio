@@ -80,7 +80,20 @@ def parse_overrides(unknown_args):
         Dict with structure: {category: {nested_path: value, ...}, ...}
         where nested_path can be arbitrarily deep (e.g., "model_args.backbone.layers")
     """
-    overrides = { 'task': {}, 'training': {}, 'policy': {}, 'teleop': {}, 'robot': {}, 'env': {} }
+    overrides = {
+        'task': {},
+        'training': {},
+        'policy': {},
+        'teleop': {},
+        'robot': {},
+        'env': {},
+        'algorithm': {},
+        'reward': {},
+        'env_runner': {},
+        'runner': {},
+        'policy_adapter': {},
+        'buffer': {},
+    }
     supported_roots = tuple(overrides.keys())
     
     i = 0

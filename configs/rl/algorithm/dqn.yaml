@@ -1,0 +1,27 @@
+version: 1
+type: rl.algorithm.DQNAlgorithm
+args:
+  gamma: 0.98
+  reward_key: train/total
+  double_q: true
+  huber_loss: true
+  target_update_interval: 200
+  target_tau: 1.0
+  epsilon_start: 0.08
+  epsilon_end: 0.01
+  epsilon_decay_steps: 30000
+policy_adapter:
+  fallback_adapter: base
+  required_capabilities: [action, action_scores]
+  args:
+    action_adapter:
+      type: rl.policy_adapter.action.CategoricalActionAdapter
+buffer:
+  type: rl.buffer.ReplayBuffer
+  args:
+    capacity: 100000
+    seed: 0
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 10
+  warmup_steps: 2000

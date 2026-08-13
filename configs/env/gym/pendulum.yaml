@@ -1,0 +1,10 @@
+type: benchmark.gym.GymEnv
+name: gym_pendulum
+args:
+  task: Pendulum-v1
+  max_timesteps: 200
+  ctrl_space: gym
+  raw_lang: swing the pendulum upright
+  seed: 0
+  clip_action: true
+  success_return_threshold: -200.0

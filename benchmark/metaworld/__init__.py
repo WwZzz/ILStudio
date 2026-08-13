@@ -24,6 +24,8 @@ class MetaWorldEnv(MetaEnv):
         self.use_camera = getattr(self.config, 'use_camera', True)
         self.robot_state_only = getattr(self.config, 'robot_state_only', True)
         self.num_steps_wait = getattr(self.config, 'num_steps_wait', 10)
+        self.seed = getattr(self.config, 'seed', None)
+        self._reset_count = 0
         assert self.camera_name is None or self.camera_name in ALL_CAMERA_NAMES
         self.raw_lang = TASK_DESC[self.config.task][1]
         env = self.create_env()
@@ -33,10 +35,15 @@ class MetaWorldEnv(MetaEnv):
         task = self.config.task
         # 过滤 gymnasium 的 passive_env_checker 警告
         warnings.filterwarnings('ignore', category=UserWarning, module='gymnasium.utils.passive_env_checker')
+        make_kwargs = {
+            'env_name': task,
+            'render_mode': self.render_mode,
+            # MT1 samples a task before forwarding reset(seed=...) inward.
+            'seed': self.seed,
+        }
         if self.camera_name is not None:
-            env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode, camera_name=self.camera_name)
-        else:
-            env = gym.make('Meta-World/MT1', env_name=task, render_mode=self.render_mode)
+            make_kwargs['camera_name'] = self.camera_name
+        env = gym.make('Meta-World/MT1', **make_kwargs)
         
         # Get action bounds from action_space
         if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
@@ -50,10 +57,14 @@ class MetaWorldEnv(MetaEnv):
         return env
         
     def meta2act(self, maction: MetaAction):
-        # MetaAct to action of libero
-        # assert maction['ctrl_space']==self.ctrl_space, f"The ctrl_space of MetaAction {maction['ctrl_space']} doesn't match the action space of environment {self.ctrl_space}"
-        # assert maction['ctrl_type']==self.ctrl_type, "Action must be abs action for PandaGym"
-        actions = maction['action'] # (action_dim, )
+        actions = np.asarray(maction['action'], dtype=np.float32)
+        if actions.ndim == 2 and actions.shape[0] == 1:
+            actions = actions[0]
+        if actions.ndim != 1:
+            raise ValueError(
+                "MetaWorld expects one step action shaped (action_dim,), "
+                f"got {actions.shape}"
+            )
         return actions
         
     def obs2meta(self, obs):
@@ -62,28 +73,46 @@ class MetaWorldEnv(MetaEnv):
         if self.use_camera:
             # PandaGym only has one camera view from env.render()
             image = self.env.render()
-            image = image[::-1, ::-1]
             if image is not None:
+                image = np.ascontiguousarray(image[::-1, ::-1])
                 # Convert to (N, C, H, W) format for consistency with other environments
                 if len(image.shape) == 3:  # (H, W, C)
                     image = image[np.newaxis, ...]  # Add batch dimension -> (1, H, W, C)
                 if image.shape[-1] == 3:  # (N, H, W, C) -> (N, C, H, W)
-                    image = image.transpose(0, 3, 1, 2)
+                    image = np.ascontiguousarray(
+                        image.transpose(0, 3, 1, 2)
+                    )
         else:
             image = None
         return MetaObs(state=state, image=image, raw_lang=self.raw_lang)
 
     def step(self, *args, **kwargs):
-        action = args[0]['action']
+        if not args:
+            raise TypeError("MetaWorldEnv.step requires one MetaAction")
+        action = self.meta2act(args[0])
         observation, reward, terminated, truncated, info = self.env.step(action)
         obs = self.obs2meta(observation)
-        done = info['success']>0.
-        info['terminated'] = terminated
-        info['truncated'] = truncated
-        return obs, reward, done, info
+        self.prev_obs = obs
+        info = dict(info)
+        info['success'] = bool(info.get('success', 0.0) > 0.0)
+        info['terminated'] = bool(terminated)
+        info['truncated'] = bool(truncated)
+        return obs, reward, bool(terminated), bool(truncated), info
     
     def reset(self):
-        obs = self.env.reset()
+        seed = None if self.seed is None else int(self.seed) + self._reset_count
+        self._reset_count += 1
+        observation, _ = self.env.reset(seed=seed)
+        zero_action = (
+            np.zeros_like(self.min_action, dtype=np.float32)
+            if self.min_action is not None
+            else np.zeros(4, dtype=np.float32)
+        )
         for _ in range(self.num_steps_wait):
-            obs = self.env.step([0,0,0,0])
-        return self.obs2meta(obs[0])
+            observation, _, terminated, truncated, _ = self.env.step(zero_action)
+            if terminated or truncated:
+                seed = None if self.seed is None else int(self.seed) + self._reset_count
+                self._reset_count += 1
+                observation, _ = self.env.reset(seed=seed)
+        self.prev_obs = self.obs2meta(observation)
+        return self.prev_obs

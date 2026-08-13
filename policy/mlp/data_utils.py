@@ -93,7 +93,7 @@ class MLPDataProcessor:
         
         # Convert to numpy if needed
         if isinstance(state, torch.Tensor):
-            state = state.numpy()
+            state = state.detach().cpu().numpy()
         elif isinstance(state, list):
             state = np.array(state)
         
@@ -113,7 +113,7 @@ class MLPDataProcessor:
             
             # Convert to numpy if needed
             if isinstance(action, torch.Tensor):
-                action = action.numpy()
+                action = action.detach().cpu().numpy()
             elif isinstance(action, list):
                 action = np.array(action)
             
@@ -129,7 +129,7 @@ class MLPDataProcessor:
             
             # Convert to numpy if needed
             if isinstance(image, torch.Tensor):
-                image = image.numpy()
+                image = image.detach().cpu().numpy()
             elif isinstance(image, list):
                 image = np.array(image)
             
@@ -141,5 +141,6 @@ class MLPDataProcessor:
         
         # Explicitly ignore text modalities - they are not added to processed_sample
         # This ensures MLP only gets the data it needs
-        processed_sample['is_pad'] = sample['is_pad']
+        if 'is_pad' in sample:
+            processed_sample['is_pad'] = sample['is_pad']
         return processed_sample

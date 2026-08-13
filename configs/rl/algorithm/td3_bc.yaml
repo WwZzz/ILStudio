@@ -1,0 +1,33 @@
+version: 1
+type: rl.algorithm.TD3BCAlgorithm
+critic: policy_feature_chunk_twin
+args:
+  gamma: 0.99
+  reward_key: train/total
+  target_tau: 0.005
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  target_policy_noise_rho: 0.9
+  policy_delay: 2
+  bc_alpha: 2.5
+  actor_learning_rate: 0.000001
+  critic_learning_rate: 0.001
+policy_adapter:
+  required_capabilities: [action, sample_actions, batch_actions]
+  args:
+    action_adapter:
+      type: policy.act.rl_adapter.ACTActionAdapter
+      args:
+        exploration_std: 0.0
+        action_clip: [-1.0, 1.0]
+        feature_spatial_grid: [4, 4]
+        feature_timestep_scale: 128.0
+        seed: 0
+buffer:
+  type: rl.buffer.DecisionReplayBuffer
+  args:
+    capacity: 100000
+    seed: 0
+runner:
+  updates_per_iteration: 10
+  warmup_steps: 1

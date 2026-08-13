@@ -1,0 +1,8 @@
+version: 1
+type: rl.critic.DinoStateCritic
+args:
+  model_name: vit_small_patch14_dinov2.lvd142m
+  pretrained: true
+  freeze_visual: true
+  image_size: 224
+  hidden_dim: 256

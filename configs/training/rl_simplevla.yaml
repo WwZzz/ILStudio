@@ -1,0 +1,8 @@
+# Optimizer settings from the public SimpleVLA-RL OpenVLA-OFT recipe.
+learning_rate: 0.000005
+weight_decay: 0.0
+optim: adamw_torch
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+seed: 0

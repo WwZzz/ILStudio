@@ -1,0 +1,25 @@
+version: 1
+type: rl.algorithm.RewardWeightedRegressionAlgorithm
+args:
+  reward_key: train/total
+  elite_fraction: 1.0
+  success_only: true
+  fallback_to_best: false
+policy_adapter:
+  fallback_adapter: base
+  required_capabilities: [action, training_forward]
+  args:
+    action_adapter:
+      type: rl.policy_adapter.action.NativeActionAdapter
+      args:
+        exploration_std: 0.02
+        exploration_clip: [-1.0, 1.0]
+        seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  iterations: 3
+  collect_episodes: 20
+  batch_size: 8
+  updates_per_iteration: 20

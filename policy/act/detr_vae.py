@@ -18,6 +18,20 @@ def reparametrize(mu, logvar):
     return mu + std * eps
 
 
+def inference_latent(qpos, latent_dim, latent_sample=None):
+    """Return the deterministic zero latent or a caller-provided prior sample."""
+
+    if latent_sample is None:
+        return qpos.new_zeros((qpos.shape[0], latent_dim))
+    latent_sample = torch.as_tensor(
+        latent_sample, dtype=qpos.dtype, device=qpos.device
+    )
+    expected = (qpos.shape[0], latent_dim)
+    if tuple(latent_sample.shape) != expected:
+        raise ValueError(f"latent_sample must have shape {expected}")
+    return latent_sample
+
+
 def get_sinusoid_encoding_table(n_position, d_hid):
     def get_position_angle_vec(position):
         return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
@@ -73,7 +87,7 @@ class DETRVAE(nn.Module):
         self.latent_out_proj = nn.Linear(self.latent_dim, hidden_dim) # project latent sample to embedding
         self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
 
-    def forward(self, qpos, image, env_state, actions=None, is_pad=None):
+    def forward(self, qpos, image, env_state, actions=None, is_pad=None, latent_sample=None):
         """
         qpos: batch, qpos_dim
         image: batch, num_cam, channel, height, width
@@ -84,6 +98,8 @@ class DETRVAE(nn.Module):
         bs, _ = qpos.shape
         ### Obtain latent z from action sequence
         if is_training:
+            if latent_sample is not None:
+                raise ValueError("training posterior does not accept latent_sample")
             # project action sequence to embedding dim, and concat with a CLS token
             action_embed = self.encoder_action_proj(actions) # (bs, seq, hidden_dim)
             qpos_embed = self.encoder_joint_proj(qpos)  # (bs, hidden_dim)
@@ -108,7 +124,7 @@ class DETRVAE(nn.Module):
             latent_input = self.latent_out_proj(latent_sample)
         else:
             mu = logvar = None
-            latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+            latent_sample = inference_latent(qpos, self.latent_dim, latent_sample)
             latent_input = self.latent_out_proj(latent_sample)
 
         if self.backbones is not None:

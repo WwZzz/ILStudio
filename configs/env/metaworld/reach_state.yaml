@@ -1,0 +1,14 @@
+type: benchmark.metaworld.MetaWorldEnv
+name: reach-v3-state
+args:
+  task: reach-v3
+  max_timesteps: 128
+  ctrl_space: ee
+  ctrl_type: abs
+  use_camera: false
+  robot_state_only: false
+  num_steps_wait: 0
+  seed: 0
+  render_mode: rgb_array
+  camera_name: null
+  image_size: [480, 480]

@@ -1,0 +1,24 @@
+version: 1
+type: rl.algorithm.ReinforceAlgorithm
+args:
+  gamma: 0.99
+  reward_key: train/total
+  normalize_returns: true
+  entropy_coef: 0.0
+policy_adapter:
+  fallback_adapter: base
+  required_capabilities: [action, evaluate_actions]
+  args:
+    action_adapter:
+      type: rl.policy_adapter.action.GaussianChunkActionAdapter
+      args:
+        policy_std: 0.02
+        learn_fixed_std: true
+        inference_seed: 0
+        seed: 0
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 1
+  updates_per_iteration: 1

@@ -1,0 +1,26 @@
+version: 1
+name: grpo
+metadata:
+  description: Critic-free grouped outcome optimization for token VLAs
+type: rl.algorithm.GRPOAlgorithm
+objective: token
+args:
+  reward_key: train/total
+  clip_ratio_low: 0.2
+  clip_ratio_high: 0.28
+  entropy_coef: 0.0
+  advantage_epsilon: 0.000001
+  update_micro_batch_size: 16
+policy_adapter:
+  required_capabilities: [action, recompute_traces]
+  args:
+    action_adapter:
+      type: policy.openvla.rl_adapter.OpenVLAActionAdapter
+      args:
+        temperature: 1.6
+buffer:
+  type: rl.buffer.RolloutBuffer
+  args: {}
+runner:
+  collect_episodes: 8
+  updates_per_iteration: 4

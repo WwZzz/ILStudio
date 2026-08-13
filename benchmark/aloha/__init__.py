@@ -111,10 +111,23 @@ class AlohaSimEnv(MetaEnv):
     def step(self, *args, **kwargs):
         act = self.meta2act(*args, **kwargs)
         ts = self.env.step(act)
-        results = [ts.observation, ts.reward, self.env.task.max_reward==ts.reward, ts]
-        self.prev_obs = results[0] = self.obs2meta(results[0])
-        if isinstance(results[0], MetaObs): results[0] = asdict(results[0])
-        return tuple(results)
+        reward = float(ts.reward) if ts.reward is not None else 0.0
+        success = bool(self.env.task.max_reward == reward)
+        is_last = bool(ts.last())
+        # dm_env uses LAST + discount=0 for MDP termination and LAST +
+        # discount=1 for a time-limit/interruption truncation.
+        terminated = is_last and (ts.discount is None or float(ts.discount) == 0.0)
+        truncated = is_last and not terminated
+        info = {
+            'success': success,
+            'terminated': terminated,
+            'truncated': truncated,
+            'discount': ts.discount,
+            'step_type': ts.step_type,
+        }
+        self.prev_obs = self.obs2meta(ts.observation)
+        obs = asdict(self.prev_obs) if isinstance(self.prev_obs, MetaObs) else self.prev_obs
+        return obs, reward, terminated, truncated, info
 
     def reset(self):
         pid = current_process().pid  # 获取当前进程 ID
@@ -128,7 +141,6 @@ class AlohaSimEnv(MetaEnv):
         ts = self.env.reset()
         self.prev_obs = self.obs2meta(ts.observation)
         return self.prev_obs
-    
+
     def close(self):
         self.env.close()
-    

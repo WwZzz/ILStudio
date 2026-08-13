@@ -31,7 +31,7 @@ def count_success(results):
     return [c / len(results) for c in count]
 
 
-def evaluate(args, action_manager, env, inference_ctx=None, video_writer=None, save_example_dir=None):
+def evaluate(args, env, action_manager, inference_ctx=None, video_writer=None, save_example_dir=None):
     """
     CALVIN-specific evaluate function.
     
@@ -49,7 +49,7 @@ def evaluate(args, action_manager, env, inference_ctx=None, video_writer=None, s
     Returns:
         Dict with CALVIN-specific metrics including subtask completion rates
     """
-    from benchmark.utils import organize_obs
+    from benchmark.utils import normalize_vector_step_result, organize_obs
     import imageio
     
     num_envs = len(env)
@@ -93,8 +93,11 @@ def evaluate(args, action_manager, env, inference_ctx=None, video_writer=None, s
                 first_obs_saved = True
             
             # Step environment
-            obs, reward, done, info = env.step(act, id=None)
+            obs, reward, terminated, truncated, info = normalize_vector_step_result(
+                env.step(act, id=None)
+            )
             obs = organize_obs(obs)
+            done = np.logical_or(terminated, truncated)
             
             # Update completion tracking for each environment
             for env_i in range(num_envs):

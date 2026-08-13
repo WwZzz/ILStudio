@@ -1,0 +1,20 @@
+version: 1
+type: rl.critic.QVCompositeCritic
+args:
+  q_type: rl.critic.TwinQCritic
+  q_args:
+    q_type: rl.critic.PolicyFeatureChunkQCritic
+    q_args:
+      policy_adapter:
+        $ref: policy_adapter
+      hidden_dim: 256
+      activation: relu
+      detach_features: true
+      use_language: false
+  value_type: rl.critic.PolicyFeatureCritic
+  value_args:
+    policy_adapter:
+      $ref: policy_adapter
+    hidden_dim: 256
+    detach_features: true
+    use_language: false

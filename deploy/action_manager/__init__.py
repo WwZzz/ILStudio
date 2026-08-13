@@ -1,4 +1,5 @@
 from .base import AbstractActionManager, BasicActionManager
+from .chunk import AbstractActionChunkManager, BasicActionChunkManager
 from .older_first import OlderFirstManager
 from .temporal_agg import TemporalAggManager
 from .temporal_older import TemporalOlderManager
@@ -9,6 +10,8 @@ from .loader import load_action_manager
 
 __all__ = [
     'AbstractActionManager',
+    'AbstractActionChunkManager',
+    'BasicActionChunkManager',
     'BasicActionManager',
     'OlderFirstManager',
     'TemporalAggManager',

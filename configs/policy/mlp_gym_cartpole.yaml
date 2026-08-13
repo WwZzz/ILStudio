@@ -1,0 +1,18 @@
+type: policy.mlp
+name: mlp_gym_cartpole
+args:
+  state_dim: 4
+  # A discrete MLP emits one Q/logit per action, not a scalar env action.
+  action_dim: 2
+  num_layers: 3
+  hidden_dim: 64
+  activation: tanh
+  dropout: 0.0
+  use_camera: false
+  chunk_size: 1
+  rl_action_space: discrete
+config_class: MLPPolicyConfig
+model_class: MLPPolicy
+data_processor: get_data_processor
+data_collator: get_data_collator
+trainer_class: null

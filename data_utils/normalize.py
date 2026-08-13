@@ -1033,7 +1033,10 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform normalization
-        std = self._safe_scale(stats['std'], self.min_std)
+        std = stats['std']
+        std = (torch.clamp(std, min=self.min_std)
+               if isinstance(std, torch.Tensor)
+               else np.clip(std, self.min_std, np.inf))
         normalized = (data - stats['mean']) / std
         
         # Apply mask to selectively normalize
@@ -1050,7 +1053,10 @@ class ZScoreNormalizer(BaseNormalizer):
             self.mask = self._build_mask(data.shape)
         
         # Perform denormalization
-        std = self._safe_scale(stats['std'], self.min_std)
+        std = stats['std']
+        std = (torch.clamp(std, min=self.min_std)
+               if isinstance(std, torch.Tensor)
+               else np.clip(std, self.min_std, np.inf))
         denormalized = data * std + stats['mean']
         
         # Apply mask to selectively denormalize
@@ -1059,7 +1065,19 @@ class ZScoreNormalizer(BaseNormalizer):
         return result.to(dtype) if isinstance(result, torch.Tensor) else result.astype(dtype)
     
 class Identity(BaseNormalizer):
-    def __init__(self, ctrl_type:str='delta', ctrl_space:str='ee', *args, **kwargs):
+    def __init__(
+        self,
+        dataset=None,
+        dataset_name=None,
+        ctrl_type: str = 'delta',
+        ctrl_space: str = 'ee',
+        *args,
+        **kwargs,
+    ):
+        # Keep the same constructor protocol as every other normalizer so
+        # load_normalizer_from_meta can pass load_dir and dataset_name without
+        # accidentally binding load_dir to ctrl_type.
+        del dataset, dataset_name, args, kwargs
         logger.info("Perform no normalization on actions and state")
         self.ctrl_type = ctrl_type
         self.ctrl_space = ctrl_space
