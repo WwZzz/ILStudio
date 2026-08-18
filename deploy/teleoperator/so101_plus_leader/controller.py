@@ -2,6 +2,7 @@
 SO101 Plus Leader teleoperator wrapper for ILStudio.
 """
 
+import os
 from typing import Optional
 from pathlib import Path
 
@@ -10,6 +11,17 @@ import numpy as np
 from deploy.teleoperator.base import BaseTeleopDevice
 from .config import SO101PlusLeaderConfig
 from .so101_plus_leader import SO101PlusLeader
+
+
+def _default_robots_calib_dir() -> Path:
+    """Same directory used by `python -m deploy.robot.so101_plus --calibrate`."""
+    hf = os.environ.get("HF_LEROBOT_HOME")
+    if hf:
+        base = Path(hf).expanduser()
+    else:
+        hf_home = os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface"))
+        base = Path(hf_home).expanduser() / "lerobot"
+    return base / "calibration" / "robots" / "so101_plus"
 
 
 class So101PlusLeader(BaseTeleopDevice):
@@ -31,8 +43,9 @@ class So101PlusLeader(BaseTeleopDevice):
         self.robot_id = robot_id
 
         robot_config = SO101PlusLeaderConfig(port=com, id=robot_id)
-        if calibration_dir:
-            robot_config.calibration_dir = Path(calibration_dir).expanduser()
+        # Leader JSON is saved under robots/so101_plus/ (CLI), not teleoperators/.
+        calib_dir = Path(calibration_dir).expanduser() if calibration_dir else _default_robots_calib_dir()
+        robot_config.calibration_dir = calib_dir
         self._teleop_device = SO101PlusLeader(robot_config)
         self._teleop_device.connect()
         self._motors = list(self._teleop_device.bus.motors)

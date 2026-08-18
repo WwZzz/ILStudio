@@ -1,3 +1,31 @@
+
+案 A：修好挂载（治本）
+1. 先卸盘（关掉所有占用 W. 的终端/程序）
+
+cd ~
+sudo umount /media/zzz/W.
+2. 修复 dirty 标记
+
+sudo ntfsfix /dev/sdb1
+3. 改 /etc/fstab，加 force（dirty 时 ntfs3 需要）
+
+把这一行：
+
+UUID=FCFCFE84FCFE390A  /media/zzz/W.  ntfs3  defaults,nofail,uid=1000,gid=1000  0  0
+改成：
+
+UUID=FCFCFE84FCFE390A  /media/zzz/W.  ntfs3  defaults,nofail,force,uid=1000,gid=1000  0  0
+4. 重新挂载并确认
+
+sudo mount /media/zzz/W.
+mount | grep W.
+# 必须是: type ntfs3, uid=1000,gid=1000
+# 不能是 fuseblk
+5. Windows 侧（强烈建议）
+
+控制面板 → 电源 → 关掉「快速启动」
+在 Windows 里对这块盘跑一次 chkdsk /f
+以后先安全弹出，不要直接拔 USB
 <div align="center">
   <img src='https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_ilstd_logo.png'  width="200"/>
 <h1> ILStudio: A Modular Imitation Learning Playground for Robotics

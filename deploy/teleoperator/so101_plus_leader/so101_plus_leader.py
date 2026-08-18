@@ -9,6 +9,7 @@ Motor map matches deploy.robot.so101_plus:
 """
 
 import logging
+import sys
 import time
 
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
@@ -92,11 +93,27 @@ class SO101PlusLeader(Teleoperator):
 
     def calibrate(self) -> None:
         if self.calibration:
-            user_input = input(
-                f"Press ENTER to use provided calibration file associated with the id {self.id}, "
-                f"or type 'c' and press ENTER to run calibration: "
-            )
-            if user_input.strip().lower() != "c":
+            # Subprocesses (collect_data) have no usable stdin — auto-apply the file.
+            use_file = True
+            try:
+                if sys.stdin is not None and sys.stdin.isatty():
+                    user_input = input(
+                        f"Press ENTER to use provided calibration file associated with the id {self.id}, "
+                        f"or type 'c' and press ENTER to run calibration: "
+                    )
+                    use_file = user_input.strip().lower() != "c"
+                else:
+                    logger.debug(
+                        "[so101_plus_leader] Non-interactive: applying calibration file id=%s",
+                        self.id,
+                    )
+            except EOFError:
+                logger.debug(
+                    "[so101_plus_leader] No stdin: applying calibration file id=%s",
+                    self.id,
+                )
+                use_file = True
+            if use_file:
                 logger.info(f"Writing calibration file associated with the id {self.id} to the motors")
                 self.bus.write_calibration(self.calibration)
                 return

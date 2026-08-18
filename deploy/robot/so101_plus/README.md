@@ -55,7 +55,37 @@ python eval_real.py -r configs/robot/so101_plus.yaml -m __dummy-random_7x16
 Config: `configs/robot/so101_plus.yaml`  
 Class: `deploy.robot.so101_plus.So101Plus`
 
+## VR teleop (Quest3, relative EE)
+
+Teleop stack: `Quest3Teleop` (`rel_ee`) → SHM → `So101Plus` (`rel_ee`) → local Piper-style
+global IK on the bundled URDF (`piper_global_ik.py`).
+
+**EE frame is the wrist flange** `gripper_body`, not the gripper tip `gripper_finger`.
+
+```bash
+# or: bash scripts/so101_plus_vr_tele.sh
+python collect_data.py \
+  -r configs/robot/so101_plus_rel_ee.yaml \
+  -t configs/teleop/quest3_so101_plus_rel_ee.yaml \
+  -o data/so101_plus_vr_teleop \
+  --no-record-teleop
+```
+
+| Config | Role |
+|--------|------|
+| `configs/robot/so101_plus_rel_ee.yaml` | follower `rel_ee`, `ik_end_frame: gripper_body`, `ik_position_only: false` |
+| `configs/teleop/quest3_so101_plus_rel_ee.yaml` | Quest right hand, trigger → absolute gripper |
+
+URDF: `so101_plus_model/so101_plus.urdf`  
+IK helper: `deploy/robot/so101_plus/ik.py` (locks `joint7` gripper; remaps HW `wrist_roll`/`wrist_yaw` ↔ URDF order).
+
+Controls: squeeze = move, release = freeze, trigger = gripper, B (frozen) = go_home.
+
+Keep `ik_position_only: false` (6D pose). When true, orientation is ignored so
+`wrist_roll` / `wrist_yaw` never move. Teleop uses local `piper_global_ik.py`
+(not Alicia-D) with per-joint regularization so distal wrist DOFs are preferred.
+
 ## Notes
 
-- Control mode is **qpos only** for now (no delta_ee / IK until wrist_yaw kinematics are modeled).
+- Control modes: `qpos`, `delta_ee`, `rel_ee` (VR uses `rel_ee`).
 - Does not modify the stock `so101` module or lerobot `SO101Follower`.
