@@ -10,7 +10,7 @@ import asyncio
 import threading
 import time
 import numpy as np
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal, Dict, Any, Union, Sequence
 from scipy.spatial.transform import Rotation as R
 
 from loguru import logger
@@ -68,7 +68,7 @@ class Quest3Teleop(BaseTeleopDevice):
         fps: float = 50.0,
         mode: str = 'delta_ee',
         arm_mode: Literal["left", "right", "dual"] = "dual",
-        position_scale: float = 1.0,
+        position_scale: Union[float, Sequence[float]] = 1.0,
         rotation_scale: float = 1.0,
         connect_timeout: float = 60.0,
         calibration_transform: Optional[list] = None,
@@ -106,7 +106,8 @@ class Quest3Teleop(BaseTeleopDevice):
                               pose at that moment becomes the anchor. All subsequent actions 
                               are relative poses from the anchor until re-freeze.
             arm_mode: "left", "right", or "dual" for which arm(s) to control
-            position_scale: Scale factor for position delta
+            position_scale: Position scale after calibration_transform (robot XYZ).
+                            float → all axes; [sx, sy, sz] → per-axis (Z usually up/down).
             rotation_scale: Scale factor for rotation delta
             connect_timeout: Timeout in seconds for VR connection
             calibration_transform: 3x3 matrix to transform VR coordinates to robot coordinates
@@ -139,7 +140,7 @@ class Quest3Teleop(BaseTeleopDevice):
         self.mode = mode
         
         self.arm_mode = arm_mode
-        self.position_scale = position_scale
+        self.position_scale = self._normalize_position_scale(position_scale)
         self.rotation_scale = rotation_scale
         self.connect_timeout = connect_timeout
         self.gripper_default_closed = gripper_default_closed
@@ -292,6 +293,18 @@ class Quest3Teleop(BaseTeleopDevice):
             "has_right": goals.get("has_right", False),
             "has_headset": goals.get("has_headset", False),
         }
+
+    @staticmethod
+    def _normalize_position_scale(scale: Union[float, Sequence[float]]) -> np.ndarray:
+        """Return (3,) robot-frame XYZ scales. Scalar broadcasts to all axes."""
+        if isinstance(scale, (list, tuple, np.ndarray)):
+            arr = np.asarray(scale, dtype=np.float64).reshape(-1)
+            if arr.size != 3:
+                raise ValueError(
+                    f"position_scale list must have 3 elements [sx, sy, sz], got {arr.size}"
+                )
+            return arr
+        return np.full(3, float(scale), dtype=np.float64)
 
     def _apply_gripper_invert(self, gripper_value: float) -> float:
         """Optionally swap open↔close on the gripper channel."""
@@ -533,11 +546,10 @@ class Quest3Teleop(BaseTeleopDevice):
                         
                         # Transform to previous frame's LOCAL frame
                         pos_delta_local = R_prev_world.T @ pos_diff_world
-                        pos_delta_local = pos_delta_local * self.position_scale
                         
-                        # Apply calibration transform
+                        # Apply calibration transform, then per-axis scale in robot XYZ
                         pos_delta_robot = self.calibration_transform @ pos_delta_local
-                        delta_pose[:3] = pos_delta_robot
+                        delta_pose[:3] = pos_delta_robot * self.position_scale
                         
                         # Rotation delta in local frame
                         if current_quaternion is not None and prev_quaternion is not None:
@@ -579,11 +591,11 @@ class Quest3Teleop(BaseTeleopDevice):
                         # Transform position difference to anchor's LOCAL frame
                         # R_anchor_world.T rotates from world to anchor-local
                         pos_rel_local = R_anchor_world.T @ pos_diff_world
-                        pos_rel_local = pos_rel_local * self.position_scale
                         
-                        # Apply calibration transform (anchor-local VR -> robot frame)
+                        # Apply calibration transform, then per-axis scale in robot XYZ
+                        # (Z is typically up/down after calibration_transform)
                         pos_rel_robot = self.calibration_transform @ pos_rel_local
-                        delta_pose[:3] = pos_rel_robot
+                        delta_pose[:3] = pos_rel_robot * self.position_scale
                         
                         # Rotation relative to anchor in anchor's local frame
                         if current_quaternion is not None and anchor_quaternion is not None:

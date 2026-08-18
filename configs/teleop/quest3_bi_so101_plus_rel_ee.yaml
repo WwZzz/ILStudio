@@ -16,7 +16,8 @@ args:
   fps: 30.0
   arm_mode: dual
   mode: rel_ee
-  position_scale: 1.0
+  # Robot XYZ after calibration_transform: [horiz, horiz, up/down]
+  position_scale: [0.8, 0.8, 1.0]
   rotation_scale: 1.0
   connect_timeout: 180.0
   gripper_default_closed: true
