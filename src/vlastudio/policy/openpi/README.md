@@ -1,17 +1,8 @@
 # Installation
 
-```shell
-cd /path/to/IL-Studio
-cd policy/openpi/openpi
-uv venv
-source .venv/bin/activate
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-uv pip install peft tensorflow tf-keras tensorflow_datasets tianshou==0.2.0 robosuite==1.4.0 rich timm>=0.9.10 draccus tensorflow_graphics dlimp@git+https://github.com/kvablack/dlimp.git@5edaa4691567873d495633f2708982b42edf1972 tyro==1.0.3 loguru
-cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/
-cd ../../..
-```
-
+Use the external Python 3.11 installation and Transformers patch commands in
+[Example 05](../../../../examples/05_finetune_vla_pi05/README.md).
+The library does not install packages or patch Transformers at runtime.
 
 # Concert JAX weights to PyTorch
 ### Download weights
@@ -63,6 +54,18 @@ trainer_class: Trainer
 ```
 
 # Training Example
-```shell
-vlastudio train --runtime current -p pi05 -t sim_transfer_cube_scripted -o ckpt/pi05_aloha -c openpi_lora
+
+Write your own `run.py`:
+
+```python
+import vlastudio as vla
+
+if __name__ == "__main__":
+    policy = vla.load_policy("pi05")
+    dataset = vla.load_dataset("sim_transfer_cube_scripted")
+    vla.train(policy, dataset, "openpi_lora", output_dir="ckpt/pi05_aloha")
+```
+
+```bash
+python run.py
 ```

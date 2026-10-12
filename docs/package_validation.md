@@ -1,24 +1,47 @@
-# Packaging and GPU validation
+# Packaging and runtime validation
 
-## Layered environment guidance (2026-10-12)
+## Default installation contract (2026-10-12)
 
-Branch: `codex/layered-environments`, based on example08 commit `fcbecbf`.
-26 targeted tests pass (`python -m pytest tests -q`), covering standard-library-only
-imports, actionable dependency errors, version/marker/platform checks, relative
-recipe inheritance, cycles, lockfile restrictions, custom runtimes, and automatic
-dataset/simulator composition. Example07/08 manifests resolve through the same loader.
+Installation instructions target main. A fresh Python 3.10.21 uv virtual
+environment was seeded, then installed with `python -m pip install -e .`.
+No model/simulator extras, package-installation API or environment-preparation
+script was used. Pytest was added afterward solely to execute the tests.
 
-A fresh Python 3.14 venv was installed with only the lightweight editable package.
-`import vlastudio` and `env catalog` work without NumPy or Torch. All three load
-functions produce their installation commands without importing ML libraries.
-Python 3.10 Linux dependency resolution passed for ACT/base and FastWAM; SmolVLA
-passed with the glibc 2.31 platform target required by its rerun-sdk wheels.
-The root uv lockfile is synchronized and passes an offline consistency check.
+The default environment installed Torch 2.7.1, torchvision 0.22.1, Transformers
+4.53.2, Accelerate 1.12.0, Diffusers 0.35.1, MuJoCo 3.3.6 and dm_control 1.0.34.
+The uv lock selects the same core model versions. `pip check` reports no broken
+requirements. All 49 tests pass in the installed Python 3.10 environment:
 
-Wheel and source distributions build. A wheel extracted outside the checkout
-passes the standard-library-only import and resolves packaged ACT recipes and
-installation plans. GPU training, simulator execution and native-library health
-have not been rerun for these new recipes. The results below are historical.
+- Standard-library-only package import and read-only dependency guidance.
+- ACT/DP/data/ALOHA handle creation and training/evaluation/server module imports.
+- ACT and DP CPU forward, loss/backward and inference, with random ResNet weights
+  to avoid downloading weights during tests.
+- DP spatial keypoint coordinates/gradients and checkpoint parameter names.
+- ALOHA transfer and insertion assets compile and physics steps run, including a
+  checkout in a Unicode Windows directory.
+- No library/environment-manager installation entrypoint; workers use the
+  caller's interpreter.
+- Dependency inheritance, platform/version checks and committed requirements
+  matching their profile metadata.
+
+DP now uses its two required vision components locally instead of installing
+RoboMimic and its unrelated native EGL-probe build. The replacement ResNet and
+spatial pooling accepted v0.3.0 component state dictionaries with strict loading
+and matched their outputs exactly (rtol=0, atol=0). DP construction also works on
+CPU, with EMA moved to the model device during training.
+
+Linux dependency resolution passed for the project together with Example 07
+(SmolVLA, glibc 2.31), Example 08 (FastWAM), OpenPI/Pi0.5 (Python 3.11, external
+uv overrides), and Tabletop-Sim (Python 3.10). These are resolver checks, not new
+GPU training runs. OpenPI's Transformers patch is an explicit shell copy step.
+
+Wheel/sdist builds and offline uv lock consistency checks pass. The homepage and
+all eight example READMEs use external installation commands and Python workflow
+files. Asset preparation scripts do not install packages.
+
+GPU training, full simulation rendering and benchmark scores have not been
+rerun for this installation change. The records below are historical and refer
+to the previous runtime manager, which has since been removed.
 
 ## Historical runtime validation
 

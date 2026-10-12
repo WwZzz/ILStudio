@@ -10,7 +10,6 @@ Activate a Python 3.10 model environment. From the repository root:
 
 ```bash
 python -m pip install -e .
-python examples/install_dependencies.py --policy act
 python examples/02_remote_inference/serve.py
 ```
 
@@ -22,12 +21,12 @@ Activate a separate Python 3.10 environment in another terminal:
 
 ```bash
 python -m pip install -e .
-python examples/install_dependencies.py --remote --env aloha_sim
 python examples/02_remote_inference/evaluate.py
 ```
 
 Change the server address inside `evaluate.py` to connect across machines.
-Only the server needs the model dependencies. The two processes can use
+Only the server needs any optional policy-specific model packages. The default
+ACT/DP base is installed in both environments. The two processes can use
 different versions of Torch or other libraries.
 
 ## Supported transports

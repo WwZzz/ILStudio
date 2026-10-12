@@ -141,10 +141,10 @@ def load_policy(config="act", *, checkpoint=None, check_dependencies=True, **run
     checkpoint is for evaluation. To initialize training weights use the policy
     config's pretrained_weight_path; to resume use training overrides.
     Current-runtime calls check declared package metadata without importing the
-    model. Managed calls defer dependencies to the worker environment.
+    model. Installation is always performed externally with pip or uv.
     """
     options = _normalize_options(runtime_options)
-    options.setdefault("runtime", "managed" if options.get("runtime_manifest") else "current")
+    options.setdefault("runtime", "current")
     path = _config(config, "policy")
     if check_dependencies and options['runtime'] == 'current':
         from .dependencies import require_dependencies
@@ -166,7 +166,7 @@ def connect_policy(address):
 def load_env(config, *, check_dependencies=True, **runtime_options):
     """Describe a benchmark and explain missing dependencies in the current runtime."""
     options = _normalize_options(runtime_options)
-    options.setdefault("runtime", "managed" if options.get("runtime_manifest") else "current")
+    options.setdefault("runtime", "current")
     path = _config(config, "env")
     if check_dependencies and options['runtime'] == 'current':
         from .dependencies import require_dependencies
@@ -270,6 +270,8 @@ def serve(policy, *, address="0.0.0.0", port=None, device="cuda",
 
 
 def _normalize_options(options):
+    if options.get("runtime", "current") != "current":
+        raise ValueError("Only the current Python environment is supported. Install dependencies externally with pip or uv.")
     allowed = {"runtime", "runtime_manifest", "cache_dir", "model_cache_dir",
                "plugin_path", "config_path", "offline", "data_cache_dir"}
     unknown = options.keys() - allowed
@@ -343,11 +345,11 @@ def train(policy, dataset, training_config_path="default", *, output_dir,
     """Train synchronously, update policy.checkpoint on success and return artifacts.
 
     Uses the original policy-specific processors, collators, cache and trainer.
-    Python API calls use the current environment by default. Pass runtime="managed"
-    explicitly to opt into the CLI-style environment manager.
+    Workers use the calling Python environment. Install dependencies with pip/uv
+    before running your script; this API never prepares environments.
     """
     if not isinstance(policy, Policy) or not isinstance(dataset, Dataset):
-        raise TypeError("Use load_policy() and load_dataset() handles with managed train()")
+        raise TypeError("Use load_policy() and load_dataset() handles with train()")
     output = _path(output_dir)
     reserved = {"policy", "task", "training_config", "output_dir", "p", "t", "c", "o"}
     if reserved.intersection(overrides or {}):

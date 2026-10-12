@@ -46,84 +46,75 @@ VLAStudio is a Python library for robot learning. Write your own `run.py` to loa
 - **Combine data sources** through HDF5, LeRobot, and RLDS loaders and shared data processing.
 - **Evaluate and deploy** locally or through a policy server, with simulation benchmarks and real robot integrations.
 - **Extend the library** with your own policy, dataset, simulator, or robot without rewriting the pipeline.
-- **Choose your own Python environment.** Install the lightweight library with pip; use uv and shared dependency recipes to prepare each model's environment separately.
+- **Choose your own Python environment.** Install ACT, Diffusion Policy and ALOHA-Sim with pip; use uv virtual environments and requirements files for other models.
 
 ## 🛠️ Installation
 
-### Install with pip
+### Install the default environment
 
-Start with Python 3.10 for ACT and the shared Torch base:
+Clone the main branch, then install with pip in a uv virtual environment:
 
 ```bash
-git clone --branch codex/layered-environments https://github.com/WwZzz/VLAStudio.git
+git clone https://github.com/WwZzz/VLAStudio.git
 cd VLAStudio
-python3.10 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-```
-
-On Windows, create the environment with `py -3.10 -m venv .venv` and activate it with `.venv\Scripts\Activate.ps1`. Use `python -m pip install .` for a non-editable installation. The package has not been published to PyPI; without a checkout, install from Git:
-
-```bash
-python -m pip install "git+https://github.com/WwZzz/VLAStudio.git@codex/layered-environments"
-```
-
-The library and uv are installed without Torch, model weights, or simulators. `import vlastudio` works without the model dependencies.
-
-### Manage environments with uv
-
-You can use uv instead of the standard-library `venv`:
-
-```bash
 python -m pip install uv
 python -m uv venv --python 3.10 --seed .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
 
-The checkout also supports `python -m uv sync --python 3.10` for its lightweight dependencies. After adding model dependencies, run your script with the activated interpreter or use `python -m uv run --no-sync python run.py` to retain those additional packages.
+That is the complete Python dependency installation for **ACT, Diffusion Policy,
+shared HDF5/LeRobot parquet and video processing, and ALOHA-Sim**. No additional
+model or simulator package installation is needed for the ACT/DP ALOHA examples.
+Provide demonstrations before training; the policies may download pretrained
+ResNet weights on first use. GPU execution needs a compatible NVIDIA driver,
+and headless rendering needs the host's OpenGL/EGL libraries.
 
-### Prepare the dependencies you need
-
-Create a separate `setup_environment.py`:
-
-```python
-import vlastudio as vla
-
-# Shared Torch base + ACT + ALOHA simulator dependencies
-vla.install_dependencies(policy="act", environment="aloha_sim")
-```
-
-Run installation once, then run your workload:
+On Windows, activate with `.venv\Scripts\Activate.ps1`. Use `python -m pip install .`
+for a non-editable installation. Without a checkout, install the main branch:
 
 ```bash
-python setup_environment.py
-python run.py
+python -m pip install "git+https://github.com/WwZzz/VLAStudio.git@main"
 ```
 
-`install_dependencies` explicitly installs into the Python interpreter running the setup file, using uv and the shared recipes. Calling it without selectors installs the Torch 2.4 base. A model recipe inherits shared data dependencies and overrides the versions it needs. For a different model, create a separate virtual environment and select that model in your setup file:
+`import vlastudio` itself loads only Python's standard library. It never imports
+Torch, starts a simulator, creates an environment, or installs packages.
 
-```python
-import vlastudio as vla
+### Other models: a separate environment and a requirements file
 
-# In a separate SmolVLA environment
-vla.install_dependencies(policy="smolvla", environment="libero.object")
+For example, install SmolVLA and LIBERO in a separate environment:
 
-# Or, in a data-processing environment
-# vla.install_dependencies(dataset="sim_transfer_cube_scripted")
+```bash
+deactivate
+python -m uv venv --python 3.10 --seed .venv-smolvla
+source .venv-smolvla/bin/activate
+python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.txt
 ```
 
-To inspect requirements without installing:
+Install the project and selected requirements in the **same pip invocation** so
+the resolver considers their versions together. The model files share a base
+and select model-specific versions. Simulator assets are prepared separately;
+follow the corresponding example before evaluation.
+
+The checkout also supports `python -m uv sync --python 3.10` after installing uv
+in the environment; its lock includes the default ACT/DP/ALOHA packages. Use
+ordinary `python run.py` after activation. For optional models, follow their
+requirements-file instructions instead of syncing the default lock.
+
+`load_policy`, `load_dataset`, and `load_env` report missing or incompatible
+dependencies and print an external pip installation command. For a read-only check:
 
 ```python
 import vlastudio as vla
 
 plan = vla.environment_plan(policy="act", environment="aloha_sim")
-print(plan["profile"]["requirements"])
 print(plan["issues"])
+print(plan["commands"]["install_current"])
 ```
 
-`load_policy`, `load_dataset`, and `load_env` explain missing or incompatible dependencies and show the setup code. They do not install packages automatically. See the [environment guide](docs/environments.md) for model-specific Python versions, CUDA options, and custom recipes.
+See the [environment guide](docs/environments.md) for other models, Python versions,
+CUDA wheels, and custom dependency metadata. Installation is performed only by
+your terminal's pip/uv commands; workflow code uses the installed environment.
 
 ## 🚀 Write Your Own run.py
 
@@ -166,7 +157,7 @@ python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
 
 ### Diffusion Policy
 
-In a Diffusion Policy environment prepared with `vla.install_dependencies(policy="diffusion_policy", environment="aloha_sim")`, write `run_dp.py`:
+The default installation above already includes Diffusion Policy and ALOHA-Sim. Write `run_dp.py`:
 
 ```python
 import vlastudio as vla
@@ -192,7 +183,7 @@ python run_dp.py
 
 ### SmolVLA on MetaWorld
 
-Prepare a separate SmolVLA environment with `vla.install_dependencies(policy="smolvla", dataset="metaworld")`. The built-in task uses the LeRobot MetaWorld dataset. Provide access to that dataset and the pretrained policy weights.
+In a separate Python 3.10 environment, run `python -m pip install -e . -r requirements/smolvla.txt`. The built-in task uses the LeRobot MetaWorld dataset. Provide access to that dataset and the pretrained policy weights.
 
 Write `train_smolvla.py`:
 
@@ -252,7 +243,7 @@ if __name__ == "__main__":
     vla.serve(policy, address="127.0.0.1:5000")
 ```
 
-Prepare a separate simulation environment with `vla.install_dependencies(remote=True, environment="metaworld.easy")`, and write `evaluate.py`:
+In a separate simulation environment, run `python -m pip install -e . -r requirements/metaworld.txt`, then write `evaluate.py`:
 
 ```python
 import vlastudio as vla
@@ -271,10 +262,10 @@ Start `python serve.py` in the model environment, wait for the server to listen,
 
 ## 🤖 Real Robots and Data Collection
 
-For SO101, prepare a dedicated device environment with `vla.install_dependencies(policy="smolvla")`, then install the motor SDK:
+For SO101, create a dedicated Python 3.10 environment and install the model and motor SDK together:
 
 ```bash
-python -m pip install "lerobot[feetech]==0.3.3"
+python -m pip install -e . -r requirements/smolvla.txt "lerobot[feetech]==0.3.3"
 ```
 
 Customize serial ports, camera devices, IDs, and calibration paths in your robot and teleoperator YAMLs. Starting points: [so101.yaml](src/vlastudio/configs/robot/so101.yaml), [so101_leader.yaml](src/vlastudio/configs/teleop/so101_leader.yaml).
@@ -367,9 +358,9 @@ Start from the examples above to write your own components. A policy supplies `l
 
 ## 🩹 Troubleshooting
 
-- **Missing or conflicting dependencies:** inspect `vla.environment_plan(...)` or run your setup script with `vla.install_dependencies(...)` in the intended environment.
+- **Missing or conflicting dependencies:** inspect `vla.environment_plan(...)` and use its pip command in the intended environment, or install the corresponding requirements file.
 - **Headless MuJoCo on Linux:** set `os.environ["MUJOCO_GL"] = "egl"` near the start of your Python file. CPU rendering needs system OSMesa libraries and the `osmesa` backend; a desktop display can use `glfw`.
-- **Old CMake projects fail with “Compatibility with CMake < 3.5 has been removed”:** set `os.environ["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"` in the setup file before installing the affected simulator.
+- **Old CMake projects fail with “Compatibility with CMake < 3.5 has been removed”:** set `CMAKE_POLICY_VERSION_MINIMUM=3.5` in the terminal before running pip for that optional simulator.
 - **Model or simulator resources are missing:** Python dependencies, pretrained weights, datasets, and native simulator assets are separate setup steps. Follow the relevant example's README.
 
 ## 📫 Contact

@@ -90,7 +90,6 @@ and simulator dependencies, then run the Python file directly:
 
 ```bash
 python -m pip install -e .
-python examples/install_dependencies.py --policy act --env aloha_sim
 python examples/06_custom_robot/run.py
 ```
 

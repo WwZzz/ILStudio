@@ -1,12 +1,12 @@
 extends: data.yaml
-description: Torch 2.4 base for ACT/MLP. Add model and simulator recipes as needed.
+description: Shared Torch base for ACT/MLP and model-specific requirements.
 requirements:
-- torch==2.4.0
-- torchvision==0.19.0
-- transformers==4.45.2
-- accelerate==1.0.1
+- torch>=2.4,<2.8
+- torchvision>=0.19,<0.23
+- transformers>=4.40.1,<=4.53.2
+- accelerate>=1.0.1,<=1.12.0
 - einops==0.8.1
-- timm==1.0.15
+- timm>=0.9.16,<=1.0.15
 - torchdata==0.9.0
 - tensorboardX==2.6.4
 - matplotlib==3.9.4
@@ -15,8 +15,8 @@ requirements:
 - protobuf==5.29.6
 - numpy==1.26.4
 - h5py==3.12.1
-- pillow==11.3.0
-- opencv-python==4.9.0.80
+- pillow>=11.3,<13
+- opencv-python>=4.9,<=4.10.0.84
 - scipy==1.14.1
 - imageio==2.37.0
 - imageio-ffmpeg==0.6.0

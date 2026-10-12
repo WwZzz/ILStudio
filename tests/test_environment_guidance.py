@@ -37,17 +37,19 @@ def test_loaders_explain_missing_packages(monkeypatch, category, selector, flag)
     assert 'torch' in text and 'missing' in text
     argument = {'--policy': 'policy', '--dataset': 'dataset', '--env': 'environment'}[flag]
     assert f'{argument}=' in text and selector in text
-    assert 'vla.install_dependencies(' in text
+    assert 'python -m pip install' in text
+    assert 'install_dependencies' not in text
     assert 'python run.py' in text
     assert '-m vlastudio' not in text
 
 
 def test_handles_can_be_created_for_orchestration(monkeypatch):
     monkeypatch.setattr(dependencies, 'environment_plan', lambda **kw: pytest.fail('Unexpected dependency check'))
-    assert vla.load_policy('act', runtime='managed').runtime_options['runtime'] == 'managed'
+    with pytest.raises(ValueError, match='Install dependencies externally'):
+        vla.load_policy('act', runtime='managed')
     assert vla.load_policy('act', check_dependencies=False).config_path.is_file()
     assert vla.load_dataset(check_dependencies=False).config_path.is_file()
-    assert vla.load_env('aloha_transfer', runtime='managed').config_path.is_file()
+    assert vla.load_env('aloha_transfer', check_dependencies=False).config_path.is_file()
 
 
 def test_version_markers_overrides_and_cuda_local_version(monkeypatch):
@@ -110,7 +112,7 @@ def test_plan_and_check_do_not_create_cache(tmp_path, monkeypatch, capsys):
     assert main(['plan', '--policy', 'act', '--json']) == 0
     plan = json.loads(capsys.readouterr().out)
     assert 'uv venv --python 3.10' in plan['commands']['create']
-    assert "policy='act'" in plan['setup_python']
+    assert 'python -m pip install' in plan['commands']['install_current']
     assert main(['check', '--policy', 'act']) == 2
     assert not cache.exists()
 
@@ -119,7 +121,7 @@ def test_platform_requirement_does_not_hide_installation_plan(monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'win32')
     plan = vla.environment_plan(policy='pi0')
     assert any('platform' in issue for issue in plan['issues'])
-    assert "policy='pi0'" in plan['setup_python']
+    assert 'transformers==4.53.2' in plan['commands']['install_current']
 
 
 def test_legacy_model_metadata_is_discoverable():
@@ -150,12 +152,22 @@ def test_existing_example_runtimes_resolve(example, selector):
     assert combined['requirements'] == profile['requirements']
 
 
-def test_managed_cli_infers_simulator_without_ml_imports(capsys):
+def test_dispatch_uses_current_python_without_installing(monkeypatch):
+    from vlastudio import cli
+    calls = []
+    monkeypatch.setattr(cli, 'execute', lambda *args, **kwargs: calls.append((args, kwargs)) or 0)
+    assert cli.main(['train', '-p', 'act']) == 0
+    args, kwargs = calls[0]
+    assert args[2] == Path(sys.executable)
+    assert kwargs['isolated'] is False
+
+
+def test_legacy_dispatch_is_current_by_default(capsys):
     from vlastudio.cli import main as cli_main
     assert cli_main(['train', '-p', 'act', '--dry-run']) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert not any('LIBERO.git' in r for r in plan['profile']['requirements'])
-    assert 'torch==2.4.0' in plan['profile']['requirements']
+    assert plan['runtime'] == 'current'
+    assert plan['profile'] is None
 
 
 def test_shared_data_python_follows_model():
@@ -193,11 +205,13 @@ def test_rlds_requires_tensorflow_but_hdf5_does_not():
     assert not any(r.startswith(('tensorflow', 'dm-control', 'mujoco')) for r in hdf5['requirements'])
 
 
-def test_managed_evaluation_adds_selected_simulator(capsys):
+def test_dispatch_manifest_is_metadata_only(capsys):
     from vlastudio.cli import main as cli_main
-    assert cli_main(['evaluate', '-m', 'localhost:8765', '-e', 'aloha_transfer', '--dry-run']) == 0
+    assert cli_main(['evaluate', '-m', 'localhost:8765', '-e', 'aloha_transfer',
+                     '--runtime-manifest', str(recipe('aloha')), '--dry-run']) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert 'mujoco==3.3.6' in plan['profile']['requirements']
+    assert plan['runtime'] == 'current'
+    assert any(r.startswith('mujoco') for r in plan['profile']['requirements'])
 
 
 def test_linux_glibc_requirement(monkeypatch):
@@ -208,45 +222,36 @@ def test_linux_glibc_requirement(monkeypatch):
     assert 'glibc >= 2.31' in platform_issues({'min_glibc': '2.31'})[0]
 
 
-def test_documentation_does_not_change_environment_cache_identity():
-    from vlastudio.runtime import environment_identity
-    profile = {'python': '3.10', 'requirements': ['torch==2.4.0']}
-    assert environment_identity(profile) == environment_identity(dict(profile, notes=['Updated help'], description='New wording'))
+def test_library_has_no_package_installation_entrypoint():
+    assert not hasattr(vla, 'install_dependencies')
+    from vlastudio import runtime
+    assert not hasattr(runtime, 'prepare')
+    assert not hasattr(runtime, 'install_application')
+    assert not (ROOT / 'src/vlastudio/env_registry.py').exists()
 
 
-def test_library_install_preview_is_read_only(tmp_path, monkeypatch):
-    cache = tmp_path / 'absent-cache'
-    monkeypatch.setenv('VLASTUDIO_CACHE', str(cache))
-    plan = vla.install_dependencies(policy='act', dry_run=True)
-    assert 'torch==2.4.0' in plan['profile']['requirements']
-    assert not cache.exists()
+def test_default_install_declares_act_dp_and_aloha_requirements():
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+    from packaging.requirements import Requirement
+    project = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']
+    installed = {Requirement(r).name.lower(): Requirement(r) for r in project['dependencies']}
+    for name in ('base', 'data', 'diffusion_policy', 'aloha'):
+        profile = environment_for({}, recipe(name), str(recipe(name)), check_platform=False)
+        for requirement in profile['requirements']:
+            req = Requirement(requirement)
+            assert req.name.lower() in installed, f'{name}: {requirement} absent from default dependencies'
+            assert req.specifier == installed[req.name.lower()].specifier
 
 
-def test_library_install_targets_calling_interpreter(tmp_path, monkeypatch):
-    from vlastudio import env_registry
-    manifest = tmp_path / 'runtime.yaml'
-    manifest.write_text(f'python: "{sys.version_info.major}.{sys.version_info.minor}"\nrequirements: [example-package==1.0]\n')
-    calls = []
-    monkeypatch.setattr(env_registry, 'install', lambda *args: calls.append(args))
-    vla.install_dependencies(manifest=str(manifest), cache_dir=tmp_path / 'cache',
-                             index_url='https://example.test/simple', offline=True)
-    profile, python, cache, env = calls[0]
-    assert python == sys.executable
-    assert profile['requirements'] == ['example-package==1.0']
-    assert env['UV_INDEX_URL'] == 'https://example.test/simple'
-    assert env['UV_OFFLINE'] == '1'
-    assert not (cache / 'environments.json').exists()
-
-
-def test_library_install_rejects_wrong_python_before_mutating(tmp_path, monkeypatch):
-    from vlastudio import env_registry
-    manifest = tmp_path / 'runtime.yaml'
-    manifest.write_text('python: "3.0"\nrequirements: []\n')
-    cache = tmp_path / 'cache'
-    monkeypatch.setattr(env_registry, 'install', lambda *args: pytest.fail('Unexpected installation'))
-    with pytest.raises(ValueError, match='requires Python'):
-        vla.install_dependencies(manifest=str(manifest), cache_dir=cache)
-    assert not cache.exists()
+@pytest.mark.parametrize('name', ['data', 'base', 'smolvla', 'diffusion_policy', 'aloha', 'remote',
+                                  'libero', 'metaworld', 'openpi', 'openvla', 'fastwam', 'tabletop_sim', 'rlds'])
+def test_external_requirements_match_dependency_metadata(name):
+    profile = environment_for({}, recipe(name), str(recipe(name)), check_platform=False)
+    lines = (ROOT / 'requirements' / (name + '.txt')).read_text().splitlines()
+    assert [line for line in lines if line and not line.startswith('#')] == profile['requirements']
 
 
 def test_robot_library_calls_forward_configuration_and_policy(tmp_path, monkeypatch):

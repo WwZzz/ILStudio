@@ -6,16 +6,16 @@ Linux, Python 3.10 and an NVIDIA GPU with EGL support. From the repository root:
 python -m pip install uv
 python -m uv venv --python 3.10 --seed "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08"
 source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/bin/activate"
-python -m pip install -e .
-python examples/install_dependencies.py --runtime-manifest examples/08_fastwam_libero/runtime.yaml
+python -m pip install -e . -r examples/08_fastwam_libero/requirements.txt
 python examples/08_fastwam_libero/setup.py
+python -m pip install --no-deps -e "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/sources/FastWAM"
 source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/fastwam/env.sh"
 python examples/08_fastwam_libero/evaluate.py
 ```
 
 The evaluation command uses the official FastWAM Base checkpoint by default. Cache: `VLASTUDIO_CACHE`
-(default `~/.cache/vlastudio`). Pass `-i URL` to `examples/install_dependencies.py`
-to select a package index. Python setup accepts `--root` and `--assets` to reuse
+(default `~/.cache/vlastudio`). Pass `--index-url URL` to `python -m pip install`
+to select a package index. The asset preparation script never installs packages. It accepts `--root` and `--assets` to reuse
 the pinned LIBERO source and assets. Evaluation accepts
 `--suite spatial|object|goal|10`, `--checkpoint PATH`, `--device cuda:0`,
 and `--output-dir PATH`.

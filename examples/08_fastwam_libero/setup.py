@@ -24,7 +24,6 @@ def checkout(url, root, revision):
 
 
 def main():
-    import sys
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", help="Existing pinned vanilla LIBERO checkout")
     parser.add_argument("--assets", help="Existing LIBERO assets")
@@ -34,8 +33,6 @@ def main():
     sources.mkdir(parents=True, exist_ok=True)
     upstream = checkout("https://github.com/yuantianyuan01/FastWAM.git", sources/"FastWAM", FASTWAM_REVISION)
     libero = checkout("https://github.com/Lifelong-Robot-Learning/LIBERO.git", Path(args.root).expanduser().resolve() if args.root else sources/"LIBERO-fastwam", LIBERO_REVISION)
-    # The inference environment installs only the dependencies in runtime.yaml.
-    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", str(upstream)], check=True)
     package = libero / "libero/libero"
     assets = Path(args.assets).expanduser().resolve() if args.assets else package/"assets"
     if not assets.is_dir() or not any(assets.rglob("*.xml")):

@@ -2,15 +2,15 @@ python: '3.10'
 requires_python: '>=3.10,<3.13'
 description: Shared HDF5, LeRobot parquet/video loaders and processing (no simulators).
 requirements:
-- torch>=2.4,<3
-- torchvision>=0.19,<1
-- numpy>=1.26,<2
-- h5py>=3.11,<4
+- torch>=2.4,<2.8
+- torchvision>=0.19,<0.23
+- numpy==1.26.4
+- h5py==3.12.1
 - pillow>=11.3,<13
-- opencv-python>=4.9,<5
-- scipy>=1.10,<2
-- imageio>=2.34,<3
-- imageio-ffmpeg>=0.6,<1
+- opencv-python>=4.9,<=4.10.0.84
+- scipy==1.14.1
+- imageio==2.37.0
+- imageio-ffmpeg==0.6.0
 - tqdm>=4.67,<5
 - pyarrow>=14
 - av>=12,<16

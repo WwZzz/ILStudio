@@ -1,9 +1,8 @@
 import os
-import warnings
 import torch.nn as nn
 import torch
 import numpy as np
-from robomimic.models.base_nets import ResNet18Conv, SpatialSoftmax
+from .vision import ResNet18Conv, SpatialSoftmax
 from .policy import ConditionalUnet1D
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
@@ -81,10 +80,7 @@ class DiffusionPolicyModel(PreTrainedModel):
         for cam_id, cam_name in enumerate(self.camera_names):
             img_size = self.config.image_sizes[cam_id]
             if isinstance(img_size, str): img_size = eval(img_size)
-            # Suppress torchvision pretrained parameter deprecation warning from robomimic
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
-                backbones.append(ResNet18Conv(input_channel=3, pretrained=True, input_coord_conv=False))
+            backbones.append(ResNet18Conv(input_channel=3, pretrained=True, input_coord_conv=False))
             feat_shape = list(backbones[-1](torch.rand((1, 3, img_size[1], img_size[0])))[0].shape)
             # feat_shape = [512, 8, 8]
             pools.append(SpatialSoftmax(input_shape=feat_shape, num_kp=self.num_kp, temperature=1.0,
@@ -108,7 +104,7 @@ class DiffusionPolicyModel(PreTrainedModel):
                 'linears': linears,
                 'noise_pred_net': noise_pred_net,
             })
-        }).float().cuda()
+        }).float()
 
         # Use EMA
         self.ema = EMAModel(self.nets.parameters(), power=config.ema_power)

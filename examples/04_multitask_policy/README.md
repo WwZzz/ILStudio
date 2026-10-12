@@ -6,8 +6,7 @@ with pip or uv. Installation is separate from the workload; you can edit the
 Python script or copy its API calls into your own `run.py`.
 
 ```bash
-python -m pip install -e .
-python examples/install_dependencies.py --policy smolvla --env libero.object
+python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.txt
 python examples/04_multitask_policy/train_and_evaluate.py
 ```
 
@@ -15,3 +14,5 @@ The script loads `libero.libero_object`, trains the policy in this example's
 `smolvla.yaml`, and evaluates all ten `libero.object` tasks. Prepare LIBERO's
 assets and point the dataset YAML at your local demonstrations before running.
 For separate model/simulator environments, follow [Example 02](../02_remote_inference).
+
+LIBERO needs its source checkout and assets; set `LIBERO_ROOT` to that checkout. See [Example 07](../07_custom_sim_env_libero_plus) for source and asset preparation.

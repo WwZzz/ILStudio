@@ -24,6 +24,7 @@ class Trainer(BaseTrainer):
         """Extended training step, update EMA parameters"""
         loss = super().training_step(*args, **kwargs)
         if hasattr(self.model, "ema") and self.model.ema is not None:
+            self.model.ema.to(device=next(self.model.parameters()).device)
             self.model.ema.step(self.model.parameters())  # Use model's `ema` object to update weights
         return loss
     

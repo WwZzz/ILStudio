@@ -64,19 +64,8 @@ fi
 venv_dir="$(cd -- "$venv_dir" && pwd)"
 python="$venv_dir/bin/python"
 "$python" -c 'import sys; assert sys.version_info[:2] == (3, 10), "The existing venv must use Python 3.10"'
-"$python" -m pip install "${pip_args[@]}" -e "$repo_root"
-requirements="$(mktemp)"
-trap 'rm -f -- "$requirements"' EXIT
-"$python" - "$example_dir/runtime.yaml" "$requirements" <<'PY'
-import sys
-from pathlib import Path
-from vlastudio.profiles import environment_for
-path = Path(sys.argv[1]).resolve()
-manifest = environment_for({}, path, str(path))
-Path(sys.argv[2]).write_text("\n".join(manifest["requirements"]) + "\n")
-PY
-# Installing the project also installs shared dependencies such as loguru.
-"$python" -m pip install "${pip_args[@]}" -r "$requirements" -e "$repo_root"
+"$python" -m pip install "${pip_args[@]}" -e "$repo_root" -r "$example_dir/requirements.txt"
+
 if ((download_assets)); then setup_args+=(--download-assets); fi
 "$python" "$example_dir/setup.py" "${setup_args[@]}"
 

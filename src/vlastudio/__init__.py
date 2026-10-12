@@ -1,6 +1,6 @@
 """VLAStudio's lightweight public API. Importing it never installs dependencies."""
 from .extensions import register, resolve, create
-from .dependencies import DependencyError, environment_plan, install_dependencies
+from .dependencies import DependencyError, environment_plan
 from .api import (load_dataset, load_policy, load_env, connect_policy, train, serve,
                   show_camera, collect, infer,
                   Dataset, Policy, RemotePolicy, Environment, TrainingResult,
@@ -14,7 +14,7 @@ __all__ = ["register", "resolve", "create", "load_dataset", "load_policy", "load
 
 
 def run(command, args=(), **options):
-    """Run a task using the CLI's managed environments; return its exit code.
+    """Run a task in the calling Python environment; return its exit code.
 
     Example: run("train", ["-p", "my_policy.yaml", "-o", "/checkpoints/run"])
     """
@@ -30,4 +30,4 @@ def run(command, args=(), **options):
                 argv.extend([flag, str(item)])
     return main(argv)
 
-__all__.extend(["run", "DependencyError", "environment_plan", "install_dependencies"])
+__all__.extend(["run", "DependencyError", "environment_plan"])

@@ -7,7 +7,6 @@ Python script or copy its API calls into your own `run.py`.
 
 ```bash
 python -m pip install -e .
-python examples/install_dependencies.py --policy act --env aloha_sim
 python examples/03_customize_policy/train_and_evaluate.py
 ```
 

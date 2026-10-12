@@ -43,7 +43,7 @@ def _ensure_libero_importable():
                 sys.path.remove(path)
     raise ImportError(
         "LIBERO is not importable. Its setup.py builds an empty wheel, so the git checkout must be on sys.path. "
-        "Run `vlastudio env install --policy smolvla -n <env>` or set LIBERO_ROOT to a LIBERO checkout."
+        "Set LIBERO_ROOT to a LIBERO checkout prepared following the example README."
     )
 
 _ensure_libero_importable()

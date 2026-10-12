@@ -7,15 +7,12 @@ from pathlib import Path
 import sys
 import subprocess
 import yaml
-from .configuration import read_config
 from .paths import cache_root, runtime_env
-from .profiles import environment_for, combine_profiles, dataset_environment
-from .runtime import prepare, snapshot, execute
-from .worker import ENTRIES
-from .deploy.comm import is_server_address
+from .profiles import environment_for
+from .runtime import execute
 
 
-PUBLIC_COMMANDS = ["device", "train", "evaluate", "collect", "infer", "serve", "prepare", "doctor"]
+PUBLIC_COMMANDS = ["device", "train", "evaluate", "collect", "infer", "serve", "doctor"]
 LEGACY_ALIASES = {"eval-sim": "evaluate", "eval-real": "infer"}
 
 
@@ -25,7 +22,7 @@ def parse(argv):
         argv[0] = LEGACY_ALIASES[argv[0]]
     parser = argparse.ArgumentParser(prog="vlastudio", allow_abbrev=False)
     parser.add_argument("command", choices=PUBLIC_COMMANDS)
-    parser.add_argument("--runtime", choices=["managed", "current"], default="managed")
+    parser.add_argument("--runtime", choices=["current"], default="current")
     parser.add_argument("--runtime-manifest", help="Environment YAML, resolved from the current directory")
     parser.add_argument("--cache-dir")
     parser.add_argument("--model-cache-dir")
@@ -38,39 +35,6 @@ def parse(argv):
     if any(x in argv for x in ("-h", "--help")):
         parser.epilog = "train forwards -p/--policy (config name or YAML path), -t/--task, -c/--training_config, -o/--output_dir and dotted overrides unchanged. evaluate forwards the simulation evaluation flags; infer forwards the real-world inference flags; serve forwards -m/--model_name_or_path (checkpoint path)."
     return parser.parse_known_args(argv)
-
-
-def selected_config(command, args):
-    selector = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    if command in ("train", "prepare"):
-        selector.add_argument("-p", "--policy", default="act")
-        options, _ = selector.parse_known_args(args)
-        config, path = read_config(options.policy, "policy")
-        # Runtime selection must agree with a CLI policy type override.
-        for i, token in enumerate(args):
-            for key in ("type", "module_path"):
-                flag = "--policy." + key
-                if token == flag and i + 1 < len(args):
-                    config[key] = args[i + 1]
-                elif token.startswith(flag + "="):
-                    config[key] = token.split("=", 1)[1]
-        return config, path
-    if command == "device":
-        selector.add_argument("-c", "--config", required=True)
-        options, _ = selector.parse_known_args(args)
-        return read_config(options.config, "device")
-    if command in ("serve", "evaluate"):
-        selector.add_argument("-m", "--model_name_or_path", default="ckpt/act_sim_transfer_cube_scripted_zscore_example")
-        options, _ = selector.parse_known_args(args)
-        if command == "evaluate" and is_server_address(options.model_name_or_path):
-            return {"type": "vlastudio.policy.remote"}, Path.cwd()
-        checkpoint = Path(options.model_name_or_path).expanduser().resolve()
-        metadata_root = checkpoint.parent if checkpoint.name.startswith("checkpoint-") else checkpoint
-        metadata = metadata_root / "policy_metadata.json"
-        data = json.loads(metadata.read_text(encoding="utf-8"))
-        # Persisted runtime supports external checkpoint/policy extensions.
-        return {"type": data["policy_module"], "runtime": data.get("runtime")}, metadata
-    raise ValueError(f"{command} requires --runtime-manifest or --runtime current until an environment is declared")
 
 
 def main(argv=None):
@@ -98,25 +62,9 @@ def main(argv=None):
         os.environ["VLASTUDIO_CONFIG_PATH"] = env.get("VLASTUDIO_CONFIG_PATH", "")
         try:
             profile = None
-            if options.runtime == "managed":
-                if options.runtime_manifest:
-                    profile = environment_for({}, Path.cwd() / "config.yaml", str(Path(options.runtime_manifest).expanduser().resolve()))
-                else:
-                    config, path = selected_config(options.command, args)
-                    profile = environment_for(config, path)
-                    if options.command == "train":
-                        task_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-                        task_parser.add_argument("-t", "--task", default="sim_transfer_cube_scripted")
-                        task_args, _ = task_parser.parse_known_args(args)
-                        task_config, task_path = read_config(task_args.task, "task")
-                        profile = combine_profiles(profile, dataset_environment(task_config, task_path, python=profile['python']))
-                    elif options.command == "evaluate":
-                        env_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-                        env_parser.add_argument("-e", "--env", default="aloha_transfer")
-                        env_args, _ = env_parser.parse_known_args(args)
-                        env_config, env_path = read_config(env_args.env, "env")
-                        for component in (env_config if isinstance(env_config, list) else [env_config]):
-                            profile = combine_profiles(profile, environment_for(component, env_path))
+            if options.runtime_manifest:
+                profile = environment_for({}, Path.cwd() / "config.yaml", str(Path(options.runtime_manifest).expanduser().resolve()))
+
         finally:
             if previous is None:
                 os.environ.pop("VLASTUDIO_CONFIG_PATH", None)
@@ -128,18 +76,12 @@ def main(argv=None):
                 preview["lock"] = {"sha256": hashlib.sha256(preview["lock"].encode()).hexdigest(), "lines": len(preview["lock"].splitlines())}
             print(json.dumps({"command": options.command, "args": args, "runtime": options.runtime, "profile": preview, "cache": str(cache), "cwd": os.getcwd()}, indent=2))
             return 0
-        python = prepare(profile, cache, env, options.offline) if profile else Path(sys.executable)
-        if options.command == "prepare":
-            print(f"Environment ready: {python}")
-            return 0
+        from .paths import package_source_root
         if profile:
             env["VLASTUDIO_RUNTIME_JSON"] = json.dumps({k: v for k, v in profile.items() if k != "entrypoint"})
-        if options.runtime == "managed":
-            app = snapshot(cache)
-        else:
-            from .paths import package_source_root
-            app = package_source_root().parent
-        return execute(options.command, args, python, app, env, (profile or {}).get("entrypoint"), isolated=options.runtime == "managed")
+        return execute(options.command, args, Path(sys.executable), package_source_root().parent,
+                       env, (profile or {}).get("entrypoint"), isolated=False)
+
     except KeyboardInterrupt:
         return 130
     except (ValueError, RuntimeError, OSError, KeyError, yaml.YAMLError, subprocess.CalledProcessError) as error:
