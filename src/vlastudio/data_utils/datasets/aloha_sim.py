@@ -19,6 +19,10 @@ class AlohaSimDataset(EpisodicDataset):
     This class handles loading and processing of ALOHA simulation datasets,
     including transfer and insertion tasks.
     """ 
+    def __init__(self, *args, expected_episodes=None, **kwargs):
+        self.expected_episodes = expected_episodes
+        super().__init__(*args, **kwargs)
+
     def _download_dataset_if_needed(self):
         """
         Download dataset from HuggingFace if dataset_dir is empty or doesn't exist.
@@ -74,12 +78,17 @@ class AlohaSimDataset(EpisodicDataset):
     
     def initialize(self):
         """Initialize the dataset with automatic download if needed"""
-        # Download dataset if needed
-        self.dataset_dir = self._download_dataset_if_needed()
-        # Re-scan for HDF5 files after potential download
-        if hasattr(self, 'dataset_path_list') and len(self.dataset_path_list) == 0:
+        if not self.multi_dataset:
+            self.dataset_dir = self._download_dataset_if_needed()
+            # A partially populated cache can grow during snapshot_download.
+            # Always refresh the file list, including when it was non-empty.
             self.dataset_path_list = self._find_all_hdf5(self.dataset_dir)
             self.episode_ids = np.arange(len(self.dataset_path_list))
+        if self.expected_episodes is not None and len(self.dataset_path_list) != self.expected_episodes:
+            raise RuntimeError(
+                f"Expected {self.expected_episodes} HDF5 episodes in {self.dataset_dir}, "
+                f"found {len(self.dataset_path_list)}. Dataset download/cache is incomplete."
+            )
         super().initialize()
 
     def get_language_instruction(self):

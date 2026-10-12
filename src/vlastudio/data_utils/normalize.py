@@ -423,6 +423,17 @@ class BaseNormalizer:
         if rank == 0:
             if self.is_stats_exist():
                 self.all_stats = self.load_stats()
+                if self.dataset is not None and hasattr(self.dataset, 'num_episodes'):
+                    episodes = self.all_stats.get('num_trajectories')
+                    transitions = self.all_stats.get('num_transitions')
+                    if (episodes is not None and int(episodes) != self.dataset.num_episodes or
+                            transitions is not None and int(transitions) != len(self.dataset)):
+                        logger.warning(
+                            "Cached normalization statistics do not match the current dataset "
+                            "({} episodes, {} transitions); recomputing.",
+                            self.dataset.num_episodes, len(self.dataset),
+                        )
+                        self.all_stats = self.compute_and_save_stats()
             else:
                 assert self.dataset is not None, "dataset cannot be None when stats file does not exist"
                 _ = self.compute_and_save_stats()
@@ -434,18 +445,16 @@ class BaseNormalizer:
 
     def _safe_scale(self, scale, min_scale=None):
         if isinstance(scale, torch.Tensor):
-            safe_scale = scale
             if min_scale is not None:
-                safe_scale = torch.clamp(safe_scale, min=min_scale)
+                return torch.clamp(scale, min=min_scale)
             return torch.where(
                 scale.abs() <= MIN_SCALE_THRESHOLD,
                 torch.ones_like(scale),
-                safe_scale,
+                scale,
             )
-        safe_scale = scale
         if min_scale is not None:
-            safe_scale = np.clip(safe_scale, min_scale, np.inf)
-        return np.where(np.abs(scale) <= MIN_SCALE_THRESHOLD, 1.0, safe_scale)
+            return np.clip(scale, min_scale, np.inf)
+        return np.where(np.abs(scale) <= MIN_SCALE_THRESHOLD, 1.0, scale)
 
     @classmethod
     def meta2name(cls, dataset_dir:str, ctrl_space:str='ee', ctrl_type:str='delta'):

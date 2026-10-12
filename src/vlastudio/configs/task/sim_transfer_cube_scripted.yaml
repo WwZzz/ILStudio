@@ -13,6 +13,7 @@ datasets:
     ctrl_space: joint
     ctrl_type: abs
     preload_data: false
+    expected_episodes: 50
 
 # Task metadata
 meta:
