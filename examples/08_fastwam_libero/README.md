@@ -8,6 +8,11 @@ source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/activate.sh"
 python examples/08_fastwam_libero/evaluate.py
 ```
 
+For an existing environment, `python -m pip install -e ".[fastwam]"` installs
+the pinned Python dependency layer. The setup script is still required for the
+pinned upstream source, LIBERO checkout/assets, released weights, EGL configuration,
+and activation file.
+
 The evaluation command uses the official FastWAM Base checkpoint by default. Cache: `VLASTUDIO_CACHE`
 (default `~/.cache/vlastudio`). Setup accepts `-i URL`. Evaluation accepts
 `--suite spatial|object|goal|10`, `--checkpoint PATH`, `--device cuda:0`,

@@ -15,6 +15,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install ".[dev]"
+      - run: python -m pytest tests/test_optional_dependencies.py
       - run: python -m build
       - run: python -c "import vlastudio; print(vlastudio.__file__)"
       - run: python examples/train_policy.py --help

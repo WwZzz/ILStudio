@@ -120,24 +120,34 @@ class Environment:
         return EvaluationResult(output, metrics)
 
 
-def load_dataset(config="sim_transfer_cube_scripted", *, cache_dir=None):
+def load_dataset(config="sim_transfer_cube_scripted", *, cache_dir=None,
+                 check_dependencies=True):
     """Select a task alias or custom YAML, with an optional dataset-only cache.
 
     Examples: 'sim_transfer_cube_scripted', 'rlbench.reach_target', '/my/task.yaml'.
     None defers to the runtime's default data cache; no directories are created here.
     """
-    return Dataset(_config(config, "task"), _path(cache_dir) if cache_dir is not None else None)
+    path = _config(config, "task")
+    if check_dependencies:
+        from .optional_dependencies import require_optional
+        require_optional(("data", "torch"), operation=f"load_dataset({config!r})")
+    return Dataset(path, _path(cache_dir) if cache_dir is not None else None)
 
 
-def load_policy(config="act", *, checkpoint=None, **runtime_options):
+def load_policy(config="act", *, checkpoint=None, check_dependencies=True,
+                **runtime_options):
     """Describe a policy using the same selector as train.py --policy.
 
     checkpoint is for evaluation. To initialize training weights use the policy
     config's pretrained_weight_path; to resume use training overrides.
     """
+    path = _config(config, "policy")
+    if check_dependencies:
+        from .optional_dependencies import groups_for_policy, require_optional
+        require_optional(groups_for_policy(path), operation=f"load_policy({config!r})")
     options = _normalize_options(runtime_options)
     options.setdefault("runtime", "managed" if options.get("runtime_manifest") else "current")
-    return Policy(_config(config, "policy"), _path(checkpoint) if checkpoint else None, options)
+    return Policy(path, _path(checkpoint) if checkpoint else None, options)
 
 
 def connect_policy(address):

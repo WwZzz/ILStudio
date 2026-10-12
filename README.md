@@ -38,7 +38,7 @@ The former root scripts have been removed. Use the CLI or Python API instead.
 The lightweight package requires Python 3.10 or newer:
 
 ```bash
-git clone --branch codex/package-runtime-isolation https://github.com/WwZzz/VLAStudio.git
+git clone https://github.com/WwZzz/VLAStudio.git
 cd VLAStudio
 python -m pip install -e .
 # Regular installation from a checkout:
@@ -60,6 +60,19 @@ must be available on the host or in the container.
 They are installed in the package and every managed environment. Component profiles
 declare additional requirements. Complete lockfiles must also contain these shared
 dependencies; preparation verifies them before starting a task.
+
+For a regular Python environment, install only the layer you need:
+
+```bash
+python -m pip install -e ".[base]"       # shared data stack + PyTorch base
+python -m pip install -e ".[act]"        # one complete policy family
+python -m pip install -e ".[fastwam]"    # FastWAM Python dependencies
+```
+
+`import vlastudio` remains lightweight. `load_dataset` and `load_policy` report
+missing imports with the exact extra command to run. See the
+[layered installation guide](docs/installation.md) for all extras, managed-runtime
+handoff, CUDA notes, and FastWAM's additional system/resource setup.
 
 ## Environment management
 

@@ -4,12 +4,13 @@ from .api import (load_dataset, load_policy, load_env, connect_policy, train, se
                   show_camera,
                   Dataset, Policy, RemotePolicy, Environment, TrainingResult,
                   EvaluationResult, TaskError)
+from .optional_dependencies import OptionalDependencyError
 
 __version__ = "0.2.0.dev0"
 __all__ = ["register", "resolve", "create", "load_dataset", "load_policy", "load_env",
            "connect_policy", "train", "serve", "show_camera",
            "Dataset", "Policy", "RemotePolicy", "Environment", "TrainingResult",
-           "EvaluationResult", "TaskError"]
+           "EvaluationResult", "TaskError", "OptionalDependencyError"]
 
 
 def run(command, args=(), **options):
