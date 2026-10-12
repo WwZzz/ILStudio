@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--checkpoint", default=os.path.expandvars("${VLASTUDIO_CACHE}/fastwam/bundle") if os.getenv("VLASTUDIO_CACHE") else str(Path.home()/".cache/vlastudio/fastwam/bundle"))
     parser.add_argument("--output-dir", default="results/example08_fastwam")
     parser.add_argument("--num-rollouts", type=int, default=50)
+    parser.add_argument("--device", default="cuda", help="Policy inference device, e.g. cuda:1")
     args = parser.parse_args()
     if not 1 <= args.num_rollouts <= 50:
         parser.error("--num-rollouts must be between 1 and 50 official initial states")
@@ -20,7 +21,7 @@ def main():
     for suite in (["spatial", "object", "goal", "10"] if args.suite == "all" else [args.suite]):
         result = vla.load_env(str(config/f"libero_{suite}.yaml")).evaluate(
             policy, output_dir=str(Path(args.output_dir)/f"libero_{suite}"),
-            num_rollout=args.num_rollouts, batch_size=0,
+            num_rollout=args.num_rollouts, batch_size=0, device=args.device,
             action_manager=str(config/"action_manager.yaml"), overrides={"seed": 42},
         )
         tasks = [value for key, value in result.metrics.items()

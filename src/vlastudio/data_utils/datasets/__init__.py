@@ -3,6 +3,7 @@ from importlib import import_module
 
 
 _EXPORTS = {
+    "HDF5SequenceDataset": (".hdf5_sequence", "HDF5SequenceDataset"),
     "EpisodicDataset": (".base", "EpisodicDataset"),
     "AlohaSimDataset": (".aloha_sim", "AlohaSimDataset"),
     "AlohaSIIDataset": (".aloha_sii", "AlohaSIIDataset"),

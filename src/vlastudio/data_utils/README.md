@@ -65,3 +65,15 @@ dataset_class: AlohaSimDataset
 ctrl_type: abs
 ctrl_space: joint
 ```
+## Temporal image windows
+
+`HDF5SequenceDataset` reads the same episode HDF5 layout. Set `image_offsets`
+(relative transition indices) to load multiple frames. With multiple offsets,
+`image` is uint8 `[camera, time, channel, height, width]`; `image_is_pad` is
+bool `[time]`. Offset zero is the current observation. Boundary frames repeat
+within the same episode and are marked as padding. With only `[0]`, `image`
+retains the single-frame `[camera, channel, height, width]` layout.
+
+`action` and `state` have `[chunk_size, dimension]` shapes. `is_pad` marks
+padded action steps. Delta action padding uses zero motion and repeats the last
+gripper target. Policy processors own resizing and model-specific normalization.

@@ -1,0 +1,12 @@
+type: vlastudio.policy.fastwam
+name: fastwam
+trainer_class: FastWAMTrainer
+args:
+  initialization: official
+  action_dit_pretrained_path: ${VLASTUDIO_CACHE}/models/fastwam/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt
+  upstream_root: ${VLASTUDIO_CACHE}/sources/FastWAM
+  dataset_stats: ${VLASTUDIO_CACHE}/data/fastwam/libero_hdf5/dataset_stats.json
+  text_cache: ${VLASTUDIO_CACHE}/data/fastwam/text_embeds_cache/libero
+  chunk_size: 32
+  action_normalize: identity
+  state_normalize: identity

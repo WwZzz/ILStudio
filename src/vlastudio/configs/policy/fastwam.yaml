@@ -1,6 +1,13 @@
 type: vlastudio.policy.fastwam
 name: fastwam
+trainer_class: FastWAMTrainer
 args:
+  upstream_root: ${VLASTUDIO_CACHE}/sources/FastWAM
+  dataset_stats: ${VLASTUDIO_CACHE}/data/fastwam/libero_hdf5/dataset_stats.json
+  text_cache: ${VLASTUDIO_CACHE}/data/fastwam/text_embeds_cache/libero
+  chunk_size: 32
+  action_normalize: identity
+  state_normalize: identity
   seed: 42
   num_inference_steps: 10
   sigma_shift: 5.0

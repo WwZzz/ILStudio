@@ -10,6 +10,7 @@ venv_dir="${VENV_DIR:-$VLASTUDIO_CACHE/envs/example08}"
 pip_args=()
 setup_args=()
 install_system=1
+install_training=0
 while (($#)); do
     case "$1" in
         -h|--help)
@@ -18,6 +19,7 @@ Usage: bash examples/08_fastwam_libero/setup.sh [options]
   -i, --index-url URL  Override the Python package index.
   --root PATH         Reuse an existing LIBERO checkout.
   --assets PATH       Reuse an existing LIBERO assets directory.
+  --training          Also install training and dataset conversion dependencies.
   --skip-system       Skip apt packages when native dependencies are installed.
 Environment: PYTHON (Python 3.10), VLASTUDIO_CACHE, VENV_DIR.
 HELP
@@ -30,6 +32,7 @@ HELP
                 --assets) setup_args+=(--assets "$2") ;;
             esac
             shift 2 ;;
+        --training) install_training=1; shift ;;
         --skip-system) install_system=0; shift ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -75,6 +78,9 @@ Path(sys.argv[2]).write_text("\n".join(manifest["requirements"]) + "\n")
 PY
 # Installing the project also installs shared dependencies such as loguru.
 "$python" -m pip install "${pip_args[@]}" -r "$requirements" -e "$repo_root"
+if ((install_training)); then
+    "$python" -m pip install "${pip_args[@]}" 'deepspeed==0.18.7' 'pyarrow==24.0.0' 'ninja' 'tensorboard'
+fi
 "$python" "$example_dir/setup.py" "${setup_args[@]}"
 
 # One activation command selects Python and the simulator configuration.

@@ -113,6 +113,8 @@ def save_example_data(train_data, output_dir):
         # Match testing phase format: save as camera_{i}.png without resizing
         if 'image' in sample and sample['image'] is not None:
             image_data = sample['image']
+            if image_data.ndim == 5:
+                image_data = image_data[:, 0]  # Preview the current frame of each camera.
             
             # Convert tensor to numpy if needed
             if isinstance(image_data, torch.Tensor):

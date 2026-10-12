@@ -1,4 +1,4 @@
-"""FastWAM Base inference adapter using the official model and normalization."""
+"""FastWAM model adapter for VLAStudio training and inference."""
 import json
 import os
 from pathlib import Path
@@ -19,6 +19,13 @@ def create_runtime(spec, device="cuda"):
     register_default_resolvers()
     with initialize_config_dir(version_base=None, config_dir=str(root / "configs")):
         cfg = compose(config_name="sim_libero", overrides=["task=libero_uncond_2cam224_1e-4"])
+    if spec.get("model_config"):
+        from omegaconf import OmegaConf
+        cfg.model = OmegaConf.create(spec["model_config"])
+        cfg.model.load_text_encoder = True
+    # Both experts are restored strictly from the trained checkpoint below.
+    cfg.model.skip_dit_load_from_pretrain = True
+    cfg.model.action_dit_pretrained_path = None
     cfg.model.redirect_common_files = False
     cfg.seed = int(spec.get("seed", 42))
     set_global_seed(cfg.seed, get_worker_init_fn=False)
@@ -92,7 +99,35 @@ class FastWAMPolicy(torch.nn.Module):
 
 
 def load_model(args):
+    if getattr(args, "is_training", False):
+        from .training import FastWAMTrainingPolicy
+        return {"model": FastWAMTrainingPolicy(args)}
     bundle = Path(args.model_name_or_path).expanduser()
     spec = json.loads((bundle / "fastwam.json").read_text())
+    for key in ("seed", "num_inference_steps", "sigma_shift", "compile_action_infer"):
+        value = getattr(args, key, None)
+        if value is not None:
+            spec[key] = value
+    for key in ("weights", "dataset_stats"):
+        path = Path(spec[key]).expanduser()
+        if not path.is_absolute():
+            spec[key] = str(bundle / path)
     policy = FastWAMPolicy(spec, device=getattr(args, "device", "cuda"))
     return {"model": policy, "config": None}
+
+
+def get_data_processor(args, model_components):
+    from .processing import FastWAMProcessor
+    return FastWAMProcessor(args.dataset_stats, args.text_cache)
+
+
+def get_data_collator(args, model_components):
+    from .processing import collate
+    return collate
+
+
+def __getattr__(name):
+    if name == "FastWAMTrainer":
+        from .training import FastWAMTrainer
+        return FastWAMTrainer
+    raise AttributeError(name)
