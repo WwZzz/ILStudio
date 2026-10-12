@@ -40,132 +40,263 @@
 </table>
 
 
-IL-Studio is an open-source repository that lets researchers and engineers jump-start imitation-learning experiments on popular robot manipulation benchmarks with minimal friction. The entire training, evaluation, and deployment pipeline has been carefully modularized so that you can swap-in your own policy, environment, or dataset without touching the rest of the stack.
+VLAStudio is a Python library for robot learning. Write your own `run.py` to load demonstrations, train imitation-learning and vision-language-action policies, evaluate in simulation, and deploy on real robots. Compose these steps with ordinary Python functions and run your file with `python run.py`.
+
+- **Train and fine-tune** ACT, Diffusion Policy, SmolVLA, Pi0/Pi0.5, and other policies with a shared Python API.
+- **Combine data sources** through HDF5, LeRobot, and RLDS loaders and shared data processing.
+- **Evaluate and deploy** locally or through a policy server, with simulation benchmarks and real robot integrations.
+- **Extend the library** with your own policy, dataset, simulator, or robot without rewriting the pipeline.
+- **Choose your own Python environment.** Install ACT, Diffusion Policy and ALOHA-Sim with pip; use uv virtual environments and requirements files for other models.
 
 ## 🛠️ Installation
 
-### uv
-We recommend using [uv](https://docs.astral.sh/uv/) to manage Python dependencies. See the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/) to set it up. Once uv is installed, you can set up the environment.
+### Install the default environment
 
+Clone the main branch, then install with pip in a uv virtual environment:
 
-This will install the core dependencies for the main `IL-Studio` project.
-
-```shell
-git clone https://github.com/WwZzz/IL-Studio.git
-# Navigate to the project root
-cd IL-Studio
-# Init submodule (Optional)
-git submodule update --init --recursive 
-# Install uv by 'pip install uv' before running the command below
-uv sync
-# Install lerobot (Optinal)
-cd third_party/lerobot
-uv pip install -e . # or `uv pip install -e ".[smolvla]"` for smolvla usage
-uv pip install numpy==1.26.4
-# Optional: XVLA uses the patched lerobot fork bundled at `./lerobot`
-# cd ../../lerobot && uv pip install -e ".[xvla]" && cd ..
-# activate the uv python environment
+```bash
+git clone https://github.com/WwZzz/VLAStudio.git
+cd VLAStudio
+python -m pip install uv
+python -m uv venv --python 3.10 --seed .venv
 source .venv/bin/activate
+python -m pip install -e .
 ```
 
-### pip
-If `uv` is not preferred, just use `pip install -r requirements.txt` to use this repo.
+That is the complete Python dependency installation for **ACT, Diffusion Policy,
+shared HDF5/LeRobot parquet and video processing, and ALOHA-Sim**. No additional
+model or simulator package installation is needed for the ACT/DP ALOHA examples.
+Provide demonstrations before training; the policies may download pretrained
+ResNet weights on first use. GPU execution needs a compatible NVIDIA driver,
+and headless rendering needs the host's OpenGL/EGL libraries.
 
-## 🚀 Quick Start
+On Windows, activate with `.venv\Scripts\Activate.ps1`. Use `python -m pip install .`
+for a non-editable installation. Without a checkout, install the main branch:
 
-### ACT on AlohaSim
-
-```shell
-python train.py --policy act --task sim_transfer_cube_scripted --output_dir ckpt/act_aloha_sim_transfer
-
-# Evaluation at local 
-
-
-# 🛠️Note:
-# If you are running this code on a local computer or workstation, you need to perform the following additional steps:
-# Option 0 [Headless server with GPU]
-export MUJOCO_GL=egl
-python eval_sim.py -m  ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_ --use_spawn
-# Option 1 [without GPU]
-export MUJOCO_GL=osmesa
-python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_
-# Option 2 [with GPU]
-export MUJOCO_GL=glfw
-python eval_sim.py -m ckpt/act_aloha_sim_transfer -e aloha_transfer -o results/test_ --use_spawn
+```bash
+python -m pip install "git+https://github.com/WwZzz/VLAStudio.git@main"
 ```
 
-### DP on AlohaSim
+`import vlastudio` itself loads only Python's standard library. It never imports
+Torch, starts a simulator, creates an environment, or installs packages.
 
-```shell
-# You can use --training.xxx to update the training parameters
-python train.py -p diffusion_policy -t sim_transfer_cube_scripted -o ckpt/dp_aloha_sim_transfer --training.max_steps 200000 --training.save_steps 10000 -c dp
+### Other models: a separate environment and a requirements file
 
-# Evaluation at local 
+For example, install SmolVLA and LIBERO in a separate environment:
 
-python eval_sim.py --model_name_or_path ckpt/dp_aloha_sim_transfer --env_name aloha --task sim_transfer_cube_scripted
+```bash
+deactivate
+python -m uv venv --python 3.10 --seed .venv-smolvla
+source .venv-smolvla/bin/activate
+python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.txt
+```
+
+Install the project and selected requirements in the **same pip invocation** so
+the resolver considers their versions together. The model files share a base
+and select model-specific versions. Simulator assets are prepared separately;
+follow the corresponding example before evaluation.
+
+The checkout also supports `python -m uv sync --python 3.10` after installing uv
+in the environment; its lock includes the default ACT/DP/ALOHA packages. Use
+ordinary `python run.py` after activation. For optional models, follow their
+requirements-file instructions instead of syncing the default lock.
+
+`load_policy`, `load_dataset`, and `load_env` report missing or incompatible
+dependencies and print an external pip installation command. For a read-only check:
+
+```python
+import vlastudio as vla
+
+plan = vla.environment_plan(policy="act", environment="aloha_sim")
+print(plan["issues"])
+print(plan["commands"]["install_current"])
+```
+
+See the [environment guide](docs/environments.md) for other models, Python versions,
+CUDA wheels, and custom dependency metadata. Installation is performed only by
+your terminal's pip/uv commands; workflow code uses the installed environment.
+
+## 🚀 Write Your Own run.py
+
+### ACT on ALOHA-Sim
+
+Prepare the demonstrations at `data/sim_transfer_cube_scripted`, or use a task YAML with your own dataset path. The built-in starting point is [sim_transfer_cube_scripted.yaml](src/vlastudio/configs/task/sim_transfer_cube_scripted.yaml).
+
+Save this as `run.py` in your project:
+
+```python
+import vlastudio as vla
+
+
+def main():
+    dataset = vla.load_dataset("sim_transfer_cube_scripted")
+    policy = vla.load_policy("act")
+    result = vla.train(
+        policy, dataset, "default", output_dir="checkpoints/act_aloha"
+    )
+    benchmark = vla.load_env("aloha_transfer")
+    evaluation = benchmark.evaluate(result.policy, output_dir="results/act_aloha")
+    print(evaluation.metrics)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash
+python run.py
+```
+
+The script uses your current Python environment. Paths resolve relative to your working directory; pass your own YAML paths or built-in names to the loaders. You can freely add preprocessing, logging, evaluation logic, or other library calls to this file.
+
+The [ACT example](examples/01_train_and_eval_act_on_aloha) provides the same workflow:
+
+```bash
+python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
+```
+
+### Diffusion Policy
+
+The default installation above already includes Diffusion Policy and ALOHA-Sim. Write `run_dp.py`:
+
+```python
+import vlastudio as vla
+
+
+def main():
+    dataset = vla.load_dataset("sim_transfer_cube_scripted")
+    policy = vla.load_policy("diffusion_policy")
+    vla.train(
+        policy, dataset, "dp", output_dir="checkpoints/dp_aloha",
+        overrides={"training.max_steps": 200000, "training.save_steps": 10000},
+    )
+    vla.load_env("aloha_transfer").evaluate(policy, output_dir="results/dp_aloha")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash
+python run_dp.py
 ```
 
 ### SmolVLA on MetaWorld
-```shell
-# train
-python train.py --policy smolvla --task metaworld --output_dir ckpt/smolvla_metaworld --training.max_steps 100000 --training.per_device_train_batch_size 64
 
-# eval with policy server
-# Terminal 1
-# the default server address is localhost:5000
-python start_policy_server.py -m ckpt/smolvla_metaworld
+In a separate Python 3.10 environment, run `python -m pip install -e . -r requirements/smolvla.txt`. The built-in task uses the LeRobot MetaWorld dataset. Provide access to that dataset and the pretrained policy weights.
 
-# Terminal 2
-# Follow benchmark/metaworld/README.md to install the virtual environment for metaworld before evalution
-# e.g.,
-# -n denotes the number of rollouts for each task
-# -bs denotes the number of rollouts in parallel for acceleration
-# the default address is localhost:5000. You can use other address or /path/to/ckpt to evaluate locally without policy server
-source benchmark/metaworld/.venv/bin/activate
-python eval_sim.py -o results/smolvla_mw_easy -e metaworld.easy -n 10 -bs 10
+Write `train_smolvla.py`:
+
+```python
+import vlastudio as vla
+
+
+def main():
+    dataset = vla.load_dataset("metaworld")
+    policy = vla.load_policy("smolvla")
+    vla.train(
+        policy, dataset, "smolvla", output_dir="checkpoints/smolvla_metaworld",
+        overrides={"training.max_steps": 100000,
+                   "training.per_device_train_batch_size": 64},
+    )
+
+
+if __name__ == "__main__":
+    main()
 ```
 
+```bash
+python train_smolvla.py
+```
+
+Use the policy-server workflow below to evaluate with a simulator in another environment.
+
+### Runnable examples
+
+Each example shows its own environment setup and Python files. Run from the repository root after installing the required dependencies.
+
+| Goal | Example |
+| --- | --- |
+| Train and evaluate ACT | [01 · ACT on ALOHA](examples/01_train_and_eval_act_on_aloha) |
+| Serve a policy and evaluate remotely | [02 · Remote inference](examples/02_remote_inference) |
+| Write a custom policy | [03 · Custom policy](examples/03_customize_policy) |
+| Train and evaluate across tasks | [04 · Multitask policy](examples/04_multitask_policy) |
+| Fine-tune Pi0.5 | [05 · Pi0.5](examples/05_finetune_vla_pi05) |
+| Write and control a custom robot | [06 · Custom robot](examples/06_custom_robot) |
+| Integrate a custom simulator | [07 · LIBERO Plus](examples/07_custom_sim_env_libero_plus) |
+| Train and evaluate FastWAM | [08 · FastWAM on LIBERO](examples/08_fastwam_libero) |
+
 ## Overview
+
 ![framework](https://raw.githubusercontent.com/WwZzz/myfigs/refs/heads/master/fig_1_ilstudio.png)
 
 ## 🌐 Policy Server
 
-```shell
-# Start policy server (localhost:5000 as default)
-python start_policy_server -m /path/to/checkpoint # ckpt/act_aloha_sim_transfer 
+Write `serve.py` in the model environment:
 
-# Start policy server by specifying port
-python start_policy_server -m /path/to/checkpoint -p port_id
+```python
+import vlastudio as vla
 
-# Start policy server and spcifying the normalization statistical
-python start_policy_server -m /path/to/checkpoint --dataset_id DATASET_ID
+
+if __name__ == "__main__":
+    policy = vla.load_policy("smolvla", checkpoint="checkpoints/smolvla_metaworld")
+    vla.serve(policy, address="127.0.0.1:5000")
 ```
 
-To eval policy running on the server, please run command below
+In a separate simulation environment, run `python -m pip install -e . -r requirements/metaworld.txt`, then write `evaluate.py`:
 
-```shell
-# aloha corresponds to configs/env/aloha.yaml
-python eval_sim.py -e aloha -m localhost:5000 
+```python
+import vlastudio as vla
+
+
+if __name__ == "__main__":
+    policy = vla.connect_policy("127.0.0.1:5000")
+    benchmark = vla.load_env("metaworld.easy")
+    result = benchmark.evaluate(
+        policy, output_dir="results/smolvla_metaworld", num_rollout=10, batch_size=10
+    )
+    print(result.metrics)
 ```
 
-## 🤖 Deploy in the Real World
-```shell
-# aloha corresponds to configs/env/aloha.yaml
-python eval_real.py -m /path/to/ckpt -c so101_follower 
+Start `python serve.py` in the model environment, wait for the server to listen, then start `python evaluate.py` in the simulation environment. The server handles inference while the client handles observations and actions. See [Example 02](examples/02_remote_inference) for runnable files.
+
+## 🤖 Real Robots and Data Collection
+
+For SO101, create a dedicated Python 3.10 environment and install the model and motor SDK together:
+
+```bash
+python -m pip install -e . -r requirements/smolvla.txt "lerobot[feetech]==0.3.3"
 ```
 
-## 🎮 Teleoperation for Data Collection
-```shell
-# Before run the two commands below, you need to carefully check the port following the instructions provided by lerobot
-# start the teleoperator
-python start_teleop_controller.py -c so101_leader
+Customize serial ports, camera devices, IDs, and calibration paths in your robot and teleoperator YAMLs. Starting points: [so101.yaml](src/vlastudio/configs/robot/so101.yaml), [so101_leader.yaml](src/vlastudio/configs/teleop/so101_leader.yaml).
 
-# start the follower
-python start_teleop_recorder.py -c so101_follower
+Write `collect.py`:
+
+```python
+import vlastudio as vla
+
+
+if __name__ == "__main__":
+    vla.collect(
+        "so101", teleop="so101_leader", output_dir="data/so101_pick_place",
+        dataset_format="hdf5", task="pick up the cube",
+    )
 ```
 
+Write `infer.py` to use an already running policy server:
 
-## 🎨 Policy Gallery:
+```python
+import vlastudio as vla
+
+
+if __name__ == "__main__":
+    policy = vla.connect_policy("127.0.0.1:5000")
+    vla.infer("so101", policy)
+```
+
+Run `python collect.py` to collect demonstrations or `python infer.py` to deploy. Pass custom YAML paths instead of built-in names for your own robot. See the [SO101 guide](src/vlastudio/deploy/robot/so101/README.md).
+
+## 🎨 Policy Gallery
 
 | **Policy**            | **Reference**                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -180,7 +311,7 @@ python start_teleop_recorder.py -c so101_follower
 | Pi0.5                   | [[8]](https://arxiv.org/abs/2504.16054)                                                             |
 | MLP                   | -                                                                                                      |
 | ResNet                | [[9]](https://arxiv.org/abs/1512.03385)                                                                |
-| SMolVLA               | [[10]](https://arxiv.org/abs/2506.01844)                                                                |
+| SmolVLA               | [[10]](https://arxiv.org/abs/2506.01844)                                                                |
 | Octo                  | [[11]](https://octo-models.github.io/)    |
 | FlowMatching                  |  -    |
 | GR00T| [[12]](https://arxiv.org/abs/2503.14734)|
@@ -188,7 +319,7 @@ python start_teleop_recorder.py -c so101_follower
 
 ## 🏆 Simulation Benchmark Gallery
 
-| Environment | IsParallal | Need Vulkan |
+| Environment | Parallel rollouts | Need Vulkan |
 |------------|--------|------------|
 | aloha_sim | ✅ | ❌ |
 | gymnasium_robotics | ✅ | ❌ |
@@ -210,57 +341,34 @@ python start_teleop_recorder.py -c so101_follower
 - AgilexAloha (CobotMagic)
 
 
-## 📜 Policy
-important APIs from each `policy.algo_name.__init__`
-- `def load_model(args) -> dict(model=transformers.PreTrainedModel, ...)` # loading models
-- (OPTIONAL) `def get_data_processor(dataset: torch.utils.data.Dataset, args: transformers.HfArgumentParser, model_components: dict) -> function` # sample-level data processing
-- (OPTIONAL) `def get_data_collator(args: transformers.HfArgumentParser, model_components:dict) -> function` # batch-level data processing
-- (OPTIONAL) `class Trainer(transformers.trainer.Trainer)`
+## 📊 Datasets and Extensions
 
-The model returned by `load_model` should implement:
-- `def select_action(self, obs) -> action`
+VLAStudio provides HDF5, LeRobot, and RLDS loaders. Data processing and batch collation adapt each source to the selected policy. Your `run.py` can select built-in names or your own task and policy YAML files:
 
+```python
+import vlastudio as vla
 
-
-## 📊 Dataset
-Currently we support three types of dataset:
-
-- h5py
-- LerobotDataset
-- rlds
-
-We align the format of the data at the level of dataloader, thus is compatible to any format of datasets. This enables the framework to be flexible any composint different data sources.
-
-
-## 🩹 TroubleShooting
-
-- aloha env raises error 'mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called'. 
-
-if the platform is headless, please use the command below to solve this issue:
-```shell
-export MUJOCO_GL=egl
+dataset = vla.load_dataset("path/to/task.yaml")
+policy = vla.load_policy("path/to/policy.yaml")
 ```
 
-- **Romomimic Module Error**: your_path/IL-studio/.venv/bin/python3: can't open file 'your_path/repos/robomimic/train.py': [Errno 2] No such file or directory. 
-```shell
-uv pip install robomimic==0.3.0 
-```
+Built-in configurations live in [src/vlastudio/configs](src/vlastudio/configs). User configurations can live anywhere.
 
+Start from the examples above to write your own components. A policy supplies `load_model` and a model with `select_action`; optional data processors, collators, and trainers customize training. The [developer guide](docs/package_runtime.md) describes package and runtime internals.
 
-- **Cmake Error**: CMake Error at CMakeLists.txt:1 (cmake_minimum_required):  Compatibility with CMake < 3.5 has been removed from CMake. 
-```shell
-export CMAKE_POLICY_VERSION_MINIMUM=X.X # your cmake version, e.g., 3.5 or 4.0
-```
+## 🩹 Troubleshooting
 
-- when `eval_sim.py` raises errors like `malloc(): unaligned tcache chunk detected`, please add `--use_spawn` at the end fo the evaluation command.  
+- **Missing or conflicting dependencies:** inspect `vla.environment_plan(...)` and use its pip command in the intended environment, or install the corresponding requirements file.
+- **Headless MuJoCo on Linux:** set `os.environ["MUJOCO_GL"] = "egl"` near the start of your Python file. CPU rendering needs system OSMesa libraries and the `osmesa` backend; a desktop display can use `glfw`.
+- **Old CMake projects fail with “Compatibility with CMake < 3.5 has been removed”:** set `CMAKE_POLICY_VERSION_MINIMUM=3.5` in the terminal before running pip for that optional simulator.
+- **Model or simulator resources are missing:** Python dependencies, pretrained weights, datasets, and native simulator assets are separate setup steps. Follow the relevant example's README.
 
-- **Failed to build `evdev` on Ubuntu**:  `sudo apt-get update && sudo apt-get install -y python3.10-dev`
+## 📫 Contact
 
-## 📫 Concat:
 - Wang Z. <zwang@stu.xmu.edu.cn>
 - Yuxin G. <yuxinxmu@163.com>
 
-## 🙏 Acknowledge
+## 🙏 Acknowledgements
 This repo is built on the open source codebases below. Thanks to the authors' wonderful contributions.
 
 - [Lerobot](https://github.com/huggingface/lerobot/tree/main)

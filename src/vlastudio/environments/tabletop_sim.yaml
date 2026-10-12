@@ -1,0 +1,9 @@
+extends: base.yaml
+description: Tabletop-Sim client with the simulator's original MuJoCo/dm_control pins.
+requirements:
+- mujoco==3.2.0
+- dm-control==1.0.21
+- pexpect
+- tianshou==0.2.0
+notes:
+- Install the Tabletop-Sim source checkout with python -m pip install --no-deps -e /path/Tabletop-Sim and initialize its submodules.

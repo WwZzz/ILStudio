@@ -1,0 +1,15 @@
+action_dim: 7
+state_dim: 8
+camera_names: [primary, wrist]
+action_normalize: identity
+state_normalize: identity
+datasets:
+  - name: fastwam
+    type: vlastudio.data_utils.datasets.hdf5_sequence.HDF5SequenceDataset
+    args:
+      dataset_path_list: ["${VLASTUDIO_FASTWAM_DATA}"]
+      camera_names: [primary, wrist]
+      chunk_size: 32
+      image_offsets: [0, 4, 8, 12, 16, 20, 24, 28, 32]
+      ctrl_space: ee
+      ctrl_type: delta

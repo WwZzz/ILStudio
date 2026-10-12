@@ -1,0 +1,10 @@
+extends: base.yaml
+min_glibc: '2.31'
+notes:
+- On Linux, LeRobot 0.3.3's rerun-sdk wheels require glibc >= 2.31.
+requirements:
+- lerobot[smolvla]==0.3.3
+- torch==2.7.1
+- torchvision==0.22.1
+- transformers==4.51.3
+- accelerate>=1.0,<2

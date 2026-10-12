@@ -1,0 +1,9 @@
+extends: ../../src/vlastudio/environments/fastwam.yaml
+requirements:
+- robosuite==1.4.1
+- mujoco==3.3.2
+- bddl==1.0.1
+- gym==0.25.2
+- easydict
+- cloudpickle
+- future>=0.18.2

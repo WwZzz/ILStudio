@@ -1,0 +1,17 @@
+{
+  "bf16": {
+    "enabled": "auto"
+  },
+  "zero_optimization": {
+    "stage": 1,
+    "overlap_comm": false,
+    "contiguous_gradients": false,
+    "reduce_bucket_size": 200000000,
+    "allgather_bucket_size": 200000000
+  },
+  "train_micro_batch_size_per_gpu": "auto",
+  "gradient_accumulation_steps": "auto",
+  "train_batch_size": "auto",
+  "gradient_clipping": "auto",
+  "steps_per_print": 1000000
+}

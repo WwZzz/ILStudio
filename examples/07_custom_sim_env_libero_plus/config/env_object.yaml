@@ -1,0 +1,91 @@
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_0
+  args:
+    task: libero_object_0
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_table_15
+    perturbation: Background Textures
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_1
+  args:
+    task: libero_object_1
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_view_0_0_100_0_0_initstate_11
+    perturbation: Robot Initial States
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_2
+  args:
+    task: libero_object_2
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_view_0_0_100_2_4_initstate_0
+    perturbation: Camera Viewpoints
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_3
+  args:
+    task: libero_object_3
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_language_5_view_0_0_100_0_0_initstate_0
+    perturbation: Language Instructions
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_4
+  args:
+    task: libero_object_4
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_view_0_0_100_0_0_initstate_0_noise_22
+    perturbation: Sensor Noise
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_5
+  args:
+    task: libero_object_5
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_add_10
+    perturbation: Objects Layout
+- runtime: ../runtime.yaml
+  type: examples/07_custom_sim_env_libero_plus/libero_plus_env.py:LiberoPlusEnv
+  name: libero_object_6
+  args:
+    task: libero_object_6
+    max_timesteps: 280
+    image_size:
+    - 256
+    - 256
+    use_wrist: true
+    image_transform: rotate180
+    task_name: pick_up_the_alphabet_soup_and_place_it_in_the_basket_light_43
+    perturbation: Light Conditions

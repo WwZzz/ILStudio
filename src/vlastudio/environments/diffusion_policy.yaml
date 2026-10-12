@@ -1,0 +1,3 @@
+extends: base.yaml
+requirements:
+- diffusers>=0.30.3,<=0.35.1

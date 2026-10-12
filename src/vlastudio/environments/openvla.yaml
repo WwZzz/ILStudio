@@ -1,0 +1,11 @@
+extends: base.yaml
+platforms:
+- linux
+requirements:
+- timm==0.9.16
+- transformers==4.40.1
+- tokenizers==0.19.1
+- peft==0.13.2
+- sentencepiece==0.2.0
+- draccus==0.10.0
+- rich==13.9.4

@@ -1,0 +1,24 @@
+name: Package and extension contracts
+on:
+  pull_request:
+  push:
+    branches: [codex/package-runtime-isolation]
+jobs:
+  package:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install ".[dev]"
+      - run: python -m build
+      - run: python -c "import vlastudio; print(vlastudio.__file__)"
+      - run: python examples/train_policy.py --help
+      - run: python -m py_compile examples/_01_train_and_eval_act_on_aloha.py
+      - run: vlastudio train --policy act --dry-run --output_dir "custom checkpoints"
+      - run: vlastudio train --policy examples/policy.yaml --cache-dir .runtime-test
+      - run: vlastudio train --policy examples/policy.yaml --cache-dir .runtime-test --offline
