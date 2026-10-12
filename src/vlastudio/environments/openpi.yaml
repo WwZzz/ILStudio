@@ -1,0 +1,26 @@
+extends: base.yaml
+python: '3.11'
+platforms:
+- linux
+min_glibc: '2.31'
+requirements:
+- torch==2.7.1
+- torchvision==0.22.1
+- transformers==4.53.2
+- opencv-python==4.10.0.84
+- openpi @ https://github.com/Physical-Intelligence/openpi/archive/0d3eb2db836e443a6ca9debb242d0aabe4628f1f.tar.gz
+- openpi-client @ https://github.com/Physical-Intelligence/openpi/archive/0d3eb2db836e443a6ca9debb242d0aabe4628f1f.tar.gz#subdirectory=packages/openpi-client
+- lerobot @ git+https://github.com/huggingface/lerobot.git@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5
+- peft==0.17.1
+- rich==14.0.0
+- draccus==0.10.0
+- tyro==1.0.3
+- pytest==8.3.5
+- chex==0.1.89
+overrides:
+- ml-dtypes==0.4.1
+- tensorstore==0.1.74
+overlays:
+- source_module: openpi
+  source: models_pytorch/transformers_replace
+  target_module: transformers

@@ -5,8 +5,8 @@ Use your own policies, datasets, robots, devices, action managers, and configura
 without changing VLAStudio's source code.
 
 Organize experiments as Python scripts or use the `vlastudio` CLI. Reusable Python
-environments keep policy and simulator dependencies separate. ACT, MLP, DP, and
-basic simulators share the base profile; SmolVLA and OpenPI use separate profiles.
+environments compose shared data processing, a Torch base, and optional model or
+simulator recipes. ACT/MLP share base; DP, SmolVLA and OpenPI add their own requirements.
 
 ## Repository layout
 
@@ -38,7 +38,7 @@ The former root scripts have been removed. Use the CLI or Python API instead.
 The lightweight package requires Python 3.10 or newer:
 
 ```bash
-git clone --branch codex/package-runtime-isolation https://github.com/WwZzz/VLAStudio.git
+git clone --branch codex/layered-environments https://github.com/WwZzz/VLAStudio.git
 cd VLAStudio
 python -m pip install -e .
 # Regular installation from a checkout:
@@ -56,7 +56,14 @@ current Python environment and do not automatically install dependencies.
 GPU drivers, system libraries, simulator assets, and hardware SDK system components
 must be available on the host or in the container.
 
-`PyYAML`, `platformdirs`, `filelock`, and `loguru` are shared runtime dependencies.
+`import vlastudio` uses only the Python standard library, even without Torch or
+simulator packages. `load_policy`, `load_dataset` and `load_env` check declared
+dependencies and raise `vlastudio.DependencyError` with installation commands
+when packages are missing or incompatible. They still return configuration
+handles; no weights, data, or packages are downloaded by these calls.
+
+`PyYAML`, `platformdirs`, `filelock`, `loguru`, `packaging`, and (on Python 3.10)
+`tomli` are shared runtime dependencies.
 They are installed in the package and every managed environment. Component profiles
 declare additional requirements. Complete lockfiles must also contain these shared
 dependencies; preparation verifies them before starting a task.
@@ -66,12 +73,21 @@ dependencies; preparation verifies them before starting a task.
 Choose components without having to look up package extras:
 
 ```bash
+vlastudio env catalog
+vlastudio env plan --policy smolvla --env libero.object
 vlastudio env create
-vlastudio env create --policy smolvla -n smol_work
+vlastudio env create --policy smolvla --env libero.object -n smol_work
+vlastudio env create --dataset -n data_work
 vlastudio env create --env robotwin -n robotwin_work
 vlastudio env list
 vlastudio env run -n smol_work -- python my_training_script.py
 ```
+
+`env plan` and `env check` inspect installed package metadata without importing ML
+libraries or changing environments. `check` exits with code 2 if requirements are
+missing or incompatible. Both accept `--json`. Base includes Torch 2.4 and shared
+data processing, with no simulators. Each model or simulator environment inherits
+declarations and reuses downloaded packages; it does not copy a mutable base venv.
 
 Base is automatically recorded from the launcher's Python environment when the
 environment manager is first used. Registration does not install training dependencies.
@@ -112,10 +128,12 @@ deactivation returns to base. `env path` prints an interpreter without installin
 
 | Policy profile | Python and main libraries | Platform |
 | --- | --- | --- |
-| Base: ACT / MLP / DP | Python 3.10, Torch 2.4 | Subject to component dependencies |
+| Base: ACT / MLP | Python 3.10 default, Torch 2.4 | Subject to component dependencies |
+| DP | Base + diffusers / robomimic | Subject to component dependencies |
 | SmolVLA | Python 3.10, Torch 2.7.1 | Subject to LeRobot dependencies |
 | OpenPI | Python 3.11, Torch 2.7.1 | Linux, glibc >= 2.31 |
 | OpenVLA | Python 3.10, Torch 2.4 | Linux |
+| FastWAM | Python 3.10, Torch 2.7.1 | Linux; example08 setup also prepares sources/assets |
 | Custom policy | Declares `runtime` in its configuration | Subject to declared dependencies |
 
 Policy selectors accept configuration names or YAML paths. OpenPI's built-in
@@ -154,7 +172,7 @@ If a command fails, see that example's README. You can also run a script in a
 selected environment without `run.sh`:
 
 ```bash
-vlastudio env run --policy act -- python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
+vlastudio env run --policy act --env aloha_sim -- python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
 ```
 
 The minimal ACT example uses five lines:
@@ -166,6 +184,13 @@ policy = vla.load_policy("act")
 vla.train(policy, dataset, "default", output_dir="checkpoints/act_aloha")
 vla.load_env("aloha_transfer").evaluate(policy, output_dir="results/act_aloha")
 ```
+
+For configuration-only orchestration in a lightweight process, use
+`load_dataset(..., check_dependencies=False)` and `load_policy(..., runtime="managed")`.
+To inspect a plan from Python, call `vla.environment_plan(policy="smolvla")`.
+The dependency check reads metadata; CUDA, native libraries, assets, extras, and
+VCS revisions still require component-specific validation. See the
+[installation guide](docs/environments.md) for shared recipes and custom runtimes.
 
 Built-in datasets and policies accept aliases; custom configurations accept YAML paths:
 

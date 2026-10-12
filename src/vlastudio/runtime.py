@@ -12,7 +12,7 @@ import subprocess
 import sys
 from filelock import FileLock
 
-CORE = ["PyYAML==6.0.2", "platformdirs==4.3.6", "filelock==3.18.0", "loguru==0.7.3"]
+CORE = ["PyYAML==6.0.2", "platformdirs==4.3.6", "filelock==3.18.0", "loguru==0.7.3", "packaging>=24", "tomli>=2; python_version < '3.11'"]
 
 
 def project_root():
@@ -200,7 +200,7 @@ def snapshot(cache):
 
 
 def environment_identity(profile):
-    identity = {k: v for k, v in profile.items() if k != "entrypoint"}
+    identity = {k: v for k, v in profile.items() if k not in ("entrypoint", "description", "notes")}
     identity["platform"] = [sys.platform, platform.machine()]
     identity["core"] = CORE
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
@@ -248,7 +248,7 @@ def prepare(profile, cache, env, offline=False, name=None):
             lock.write_text(profile["lock"], encoding="utf-8")
             run([*uv, "pip", "sync", "--python", python, lock], env)
             # Supplied locks must include the lightweight runtime dependencies.
-            run([python, "-c", "import yaml, platformdirs, filelock, loguru"], env)
+            run([python, "-c", "import yaml, platformdirs, filelock, loguru, packaging"], env)
         else:
             extra = []
             if profile.get("overrides"):

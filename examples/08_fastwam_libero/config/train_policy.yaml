@@ -1,3 +1,4 @@
+runtime: ../runtime.yaml
 type: vlastudio.policy.fastwam
 name: fastwam
 trainer_class: FastWAMTrainer

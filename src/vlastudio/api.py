@@ -120,24 +120,36 @@ class Environment:
         return EvaluationResult(output, metrics)
 
 
-def load_dataset(config="sim_transfer_cube_scripted", *, cache_dir=None):
+def load_dataset(config="sim_transfer_cube_scripted", *, cache_dir=None, check_dependencies=True):
     """Select a task alias or custom YAML, with an optional dataset-only cache.
 
     Examples: 'sim_transfer_cube_scripted', 'rlbench.reach_target', '/my/task.yaml'.
     None defers to the runtime's default data cache; no directories are created here.
+    Missing requirements raise DependencyError with install commands. Use
+    check_dependencies=False for configuration-only orchestration.
     """
-    return Dataset(_config(config, "task"), _path(cache_dir) if cache_dir is not None else None)
+    path = _config(config, "task")
+    if check_dependencies:
+        from .dependencies import require_dependencies
+        require_dependencies(dataset=str(path))
+    return Dataset(path, _path(cache_dir) if cache_dir is not None else None)
 
 
-def load_policy(config="act", *, checkpoint=None, **runtime_options):
+def load_policy(config="act", *, checkpoint=None, check_dependencies=True, **runtime_options):
     """Describe a policy using the same selector as train.py --policy.
 
     checkpoint is for evaluation. To initialize training weights use the policy
     config's pretrained_weight_path; to resume use training overrides.
+    Current-runtime calls check declared package metadata without importing the
+    model. Managed calls defer dependencies to the worker environment.
     """
     options = _normalize_options(runtime_options)
     options.setdefault("runtime", "managed" if options.get("runtime_manifest") else "current")
-    return Policy(_config(config, "policy"), _path(checkpoint) if checkpoint else None, options)
+    path = _config(config, "policy")
+    if check_dependencies and options['runtime'] == 'current':
+        from .dependencies import require_dependencies
+        require_dependencies(**({'manifest': options['runtime_manifest']} if options.get('runtime_manifest') else {'policy': str(path)}))
+    return Policy(path, _path(checkpoint) if checkpoint else None, options)
 
 
 def connect_policy(address):
@@ -151,11 +163,15 @@ def connect_policy(address):
     return RemotePolicy(value)
 
 
-def load_env(config, **runtime_options):
-    """Describe a simulation benchmark that runs in the current Python environment."""
+def load_env(config, *, check_dependencies=True, **runtime_options):
+    """Describe a benchmark and explain missing dependencies in the current runtime."""
     options = _normalize_options(runtime_options)
     options.setdefault("runtime", "managed" if options.get("runtime_manifest") else "current")
-    return Environment(_config(config, "env"), options)
+    path = _config(config, "env")
+    if check_dependencies and options['runtime'] == 'current':
+        from .dependencies import require_dependencies
+        require_dependencies(**({'manifest': options['runtime_manifest']} if options.get('runtime_manifest') else {'environment': str(path)}))
+    return Environment(path, options)
 
 
 def show_camera(config, *, camera_names=None, fps=30.0, title="Camera",

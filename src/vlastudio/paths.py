@@ -2,7 +2,6 @@
 import os
 import json
 from pathlib import Path
-from platformdirs import user_cache_dir, user_config_dir
 
 
 def package_root():
@@ -71,6 +70,7 @@ def legacy_root():
 
 
 def user_settings():
+    from platformdirs import user_config_dir
     path = Path(os.environ.get("VLASTUDIO_SETTINGS", str(Path(user_config_dir("vlastudio")) / "settings.json")))
     if not path.is_file():
         return {}

@@ -1,5 +1,6 @@
 """VLAStudio's lightweight public API. Importing it never installs dependencies."""
 from .extensions import register, resolve, create
+from .dependencies import DependencyError, environment_plan
 from .api import (load_dataset, load_policy, load_env, connect_policy, train, serve,
                   show_camera,
                   Dataset, Policy, RemotePolicy, Environment, TrainingResult,
@@ -29,4 +30,4 @@ def run(command, args=(), **options):
                 argv.extend([flag, str(item)])
     return main(argv)
 
-__all__.append("run")
+__all__.extend(["run", "DependencyError", "environment_plan"])

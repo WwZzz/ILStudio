@@ -1,125 +1,223 @@
-"""Environment declarations are data: inspecting one never imports the policy."""
+"""Composable runtime recipes. Reading them never imports a component."""
 import copy
 from pathlib import Path
+import platform
+import sys
+
 import yaml
-from .configuration import read_config
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
 from .paths import package_source_root
 
-TORCH = ["torch==2.4.0", "torchvision==0.19.0", "numpy==1.26.4", "transformers==4.45.2", "accelerate==1.0.1", "loguru==0.7.3", "h5py==3.12.1", "pillow==11.3.0", "opencv-python==4.9.0.80", "einops==0.8.1", "scipy==1.14.1", "timm==1.0.15", "torchdata==0.9.0", "matplotlib==3.9.4", "imageio==2.37.0", "imageio-ffmpeg==0.6.0", "websockets==13.1", "psutil==6.1.1", "tensorboardX==2.6.4"]
-BUILTINS = {name: {"python": "3.10", "requirements": TORCH} for name in ("policy.act", "policy.mlp")}
-REMOTE_EVAL = ["torch==2.4.0", "numpy==1.26.4", "pillow==11.3.0",
-               "opencv-python==4.9.0.80", "imageio==2.37.0",
-               "imageio-ffmpeg==0.6.0", "tqdm==4.67.1", "requests==2.32.5",
-               "psutil==6.1.1"]
-BUILTINS["policy.remote"] = {"python": "3.10", "requirements": REMOTE_EVAL}
+
+POLICY_PROFILES = {
+    'act': 'base', 'mlp': 'base', 'diffusion_policy': 'diffusion_policy',
+    'remote': 'remote', 'smolvla': 'smolvla', 'openpi': 'openpi',
+    'openvla': 'openvla', 'fastwam': 'fastwam',
+}
+ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld'}
+FIELDS = {'extends', 'python', 'requires_python', 'requirements', 'lockfile', 'lock', 'entrypoint',
+          'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes'}
 
 
-def environment_for(config, path, manifest=None):
-    declaration = manifest or config.get("runtime")
-    if not declaration:
-        module = config.get("type") or config.get("module_path")
-        if module and module.startswith('vlastudio.'):
-            module = module[len('vlastudio.'):]
-        family_manifest = {'policy.act': 'base', 'policy.mlp': 'base',
-                           'policy.diffusion_policy': 'base', 'policy.remote': 'base',
-                           'policy.smolvla': 'smolvla'}.get(module)
-        if family_manifest:
-            manifest_path = package_source_root() / 'environments' / (family_manifest + '.yaml')
-            return environment_for({'runtime': str(manifest_path)}, path)
-        if module not in BUILTINS:
-            raise ValueError(f"No managed runtime for {module!r}. Declare runtime in the config, use --runtime-manifest, or --runtime current.")
-        declaration = copy.deepcopy(BUILTINS[module])
-        import sys, platform
-        family = "torch310" if module in ("policy.act", "policy.mlp") else module.split(".")[-1]
-        lock = Path(__file__).parent / "locks" / f"{family}-{sys.platform}-{platform.machine().lower()}.txt"
-        if lock.is_file():
-            declaration["lock"] = lock.read_text(encoding="utf-8")
-    if isinstance(declaration, str):
-        manifest_path = Path(declaration).expanduser()
-        if not manifest_path.is_absolute():
-            manifest_path = path.parent / manifest_path
-        path = manifest_path.resolve()
-        declaration = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(declaration, dict):
-        raise ValueError("runtime must be a mapping or a YAML manifest path")
-    unknown = set(declaration) - {"python", "requirements", "lockfile", "lock", "entrypoint", "overrides", "overlays", "platforms", "min_glibc"}
+def recipe(name):
+    return package_source_root() / 'environments' / (name + '.yaml')
+
+
+def _requirements(parent, child):
+    """A child explicitly replaces a parent's package constraints, including pins."""
+    def key(value):
+        req = Requirement(value)
+        return canonicalize_name(req.name), str(req.marker or '')
+    names = {key(r) for r in child}
+    return [r for r in parent if key(r) not in names] + child
+
+
+def _inherit(parent, child):
+    result = {**parent, **child}
+    if 'python' in child and 'requires_python' not in child:
+        result.pop('requires_python', None)
+    result['requirements'] = _requirements(parent.get('requirements', []), child.get('requirements', []))
+    for field in ('overrides', 'overlays', 'notes'):
+        if field in parent or field in child:
+            if not isinstance(child.get(field, []), list):
+                raise ValueError(f'runtime.{field} must be a list')
+            result[field] = list(parent.get(field, []))
+            result[field].extend(v for v in child.get(field, []) if v not in result[field])
+    return result
+
+
+def _declaration(value, path, seen):
+    if isinstance(value, str):
+        target = Path(value).expanduser()
+        if not target.is_absolute():
+            target = path.parent / target
+        path = target.resolve()
+        if path in seen:
+            raise ValueError(f'Runtime inheritance cycle: {path}')
+        seen = (*seen, path)
+        value = yaml.safe_load(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict):
+        raise ValueError('runtime must be a mapping or a YAML manifest path')
+    unknown = set(value) - FIELDS
     if unknown:
-        raise ValueError(f"Unknown runtime fields: {sorted(unknown)}")
-    profile = copy.deepcopy(declaration)
-    import sys
-    if profile.get("platforms") and sys.platform not in profile["platforms"]:
-        raise ValueError(f"This runtime supports {profile['platforms']}; current platform is {sys.platform}")
-    if profile.get("min_glibc"):
-        import platform
-        libc, version = platform.libc_ver()
-        if libc != "glibc" or tuple(map(int, version.split("."))) < tuple(map(int, profile["min_glibc"].split("."))):
-            raise ValueError(f"Runtime requires glibc >= {profile['min_glibc']}; found {libc} {version}")
-    profile.setdefault("python", "3.10")
-    requirements = profile.setdefault("requirements", [])
+        raise ValueError(f'Unknown runtime fields: {sorted(unknown)}')
+    profile = copy.deepcopy(value)
+    parents = profile.pop('extends', [])
+    if isinstance(parents, str):
+        parents = [parents]
+    if not isinstance(parents, list) or not all(isinstance(p, str) for p in parents):
+        raise ValueError('runtime.extends must be a manifest path or list of paths')
+    requirements = profile.setdefault('requirements', [])
     if not isinstance(requirements, list) or not all(isinstance(r, str) for r in requirements):
-        raise ValueError("runtime.requirements must be a list of requirement strings")
-    if profile.get("lockfile"):
-        if requirements:
-            raise ValueError("Use either a complete runtime.lockfile or runtime.requirements")
-        lock = Path(profile.pop("lockfile")).expanduser()
+        raise ValueError('runtime.requirements must be a list of requirement strings')
+    _requirements([], requirements)
+    if profile.get('lockfile'):
+        if requirements or profile.get('lock'):
+            raise ValueError('Use either a complete runtime.lockfile or runtime.requirements/lock')
+        lock = Path(profile.pop('lockfile')).expanduser()
         if not lock.is_absolute():
             lock = path.parent / lock
-        profile["lock"] = lock.read_text(encoding="utf-8")
-    if ".py:" in profile.get("entrypoint", ""):
-        filename, attribute = profile["entrypoint"].rsplit(":", 1)
+        profile['lock'] = lock.read_text(encoding='utf-8')
+    if '.py:' in profile.get('entrypoint', ''):
+        filename, attribute = profile['entrypoint'].rsplit(':', 1)
         entry = Path(filename).expanduser()
         if not entry.is_absolute():
             entry = path.parent / entry
-        profile["entrypoint"] = str(entry.resolve()) + ":" + attribute
-    profile["python"] = str(profile["python"])
+        profile['entrypoint'] = str(entry.resolve()) + ':' + attribute
+    result = {}
+    for parent in parents:
+        inherited = _declaration(parent, path, seen)
+        if inherited.get('lock') or profile.get('lock'):
+            raise ValueError('Complete lockfiles cannot be extended; supply one final lockfile')
+        result = _inherit(result, inherited)
+    return _inherit(result, profile)
+
+
+def platform_issues(profile):
+    issues = []
+    if profile.get('platforms') and sys.platform not in profile['platforms']:
+        issues.append(f"Requires platform {profile['platforms']}; current platform is {sys.platform}")
+    if profile.get('min_glibc') and sys.platform.startswith('linux'):
+        libc, version = platform.libc_ver()
+        if libc != 'glibc' or tuple(map(int, version.split('.'))) < tuple(map(int, profile['min_glibc'].split('.'))):
+            issues.append(f"Requires glibc >= {profile['min_glibc']}; found {libc} {version}")
+    return issues
+
+
+def environment_for(config, path, manifest=None, *, check_platform=True):
+    declaration = manifest or config.get('runtime')
+    if not declaration:
+        module = (config.get('type') or config.get('module_path') or '').removeprefix('vlastudio.')
+        parts = module.split('.')
+        family = POLICY_PROFILES.get(parts[1]) if len(parts) == 2 and parts[0] == 'policy' else None
+        if len(parts) >= 2 and parts[0] == 'benchmark':
+            family = ENV_PROFILES.get(parts[1])
+        if family:
+            declaration = str(recipe(family))
+        else:
+            # Historical models retain their own requirements rather than a
+            # guessed compatible base. Surface this limitation in the plan.
+            metadata = package_source_root().joinpath(*parts[:2], 'pyproject.toml')
+            if len(parts) >= 2 and parts[0] == 'policy' and metadata.is_file():
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib
+                project = tomllib.loads(metadata.read_text(encoding='utf-8'))['project']
+                from packaging.specifiers import SpecifierSet
+                supported = project.get('requires-python', '>=3.10')
+                python = next((v for v in ('3.10', '3.11', '3.12') if v in SpecifierSet(supported)), None)
+                if python is None:
+                    raise ValueError(f'No supported default Python in {supported}; supply --runtime-manifest with an explicit Python version')
+                declaration = {'python': python, 'requires_python': supported,
+                               'requirements': project.get('dependencies', []),
+                               'notes': ['Legacy component requirements; not a validated layered recipe. See ' + str(metadata)]}
+            else:
+                raise ValueError(
+                    f'No runtime recipe for {module!r}. Add runtime: /path/runtime.yaml to the '
+                    'component config, or supply --runtime-manifest /path/runtime.yaml. '
+                    'Use check_dependencies=False only to create a configuration handle.'
+                )
+    profile = _declaration(declaration, Path(path), ())
+    profile['python'] = str(profile.get('python', '3.10'))
+    if check_platform and platform_issues(profile):
+        raise ValueError('; '.join(platform_issues(profile)))
     return profile
 
 
+def combine_profiles(profile, extra):
+    """Peer components must coexist; keep constraints for the resolver to check."""
+    if profile['python'] != extra['python']:
+        raise ValueError('Components require different Python versions; use separate environments/services or one compatible --runtime-manifest')
+    if extra.get('entrypoint'):
+        raise ValueError('Only the top-level runtime may select the task entrypoint')
+    if extra.get('lock'):
+        raise ValueError('Use one complete lockfile instead of multiple component lockfiles')
+    result = copy.deepcopy(profile)
+    if result.get('lock') and extra['requirements']:
+        result['requirements'] = [line for line in result.pop('lock').splitlines() if line.strip() and not line.lstrip().startswith('#')]
+    for field in ('requirements', 'overrides', 'overlays', 'notes'):
+        if field in result or field in extra:
+            result.setdefault(field, [])
+            result[field].extend(v for v in extra.get(field, []) if v not in result[field])
+    if extra.get('platforms'):
+        allowed = set(result.get('platforms', extra['platforms'])) & set(extra['platforms'])
+        if not allowed:
+            raise ValueError('Components require incompatible platforms; use separate services')
+        result['platforms'] = sorted(allowed)
+    if extra.get('min_glibc'):
+        result['min_glibc'] = max(result.get('min_glibc', '0'), extra['min_glibc'], key=lambda v: tuple(map(int, v.split('.'))))
+    if extra.get('requires_python'):
+        current = result.get('requires_python', '==' + result['python'] + '.*')
+        result['requires_python'] = current + ',' + extra['requires_python']
+    return result
+
+
 def merge_component_runtimes(profile, config, path):
-    """Combine dependency declarations for components sharing one worker process."""
+    """Combine explicitly declared nested component runtimes for a worker."""
     result = copy.deepcopy(profile)
     def visit(value):
+        nonlocal result
         if isinstance(value, list):
             for child in value:
                 visit(child)
         elif isinstance(value, dict):
-            if value.get("runtime"):
-                extra = environment_for(value, path)
-                if extra["python"] != result["python"]:
-                    raise ValueError("Components in one process require different Python versions; use a compatible manifest or separate services")
-                if extra.get("entrypoint"):
-                    raise ValueError("Only the top-level runtime may select the task entrypoint")
-                if extra.get("lock"):
-                    raise ValueError("Use one complete lockfile instead of multiple component lockfiles")
-                if result.get("lock") and extra["requirements"]:
-                    # Keep the validated base pins while resolving additional plugin dependencies.
-                    result["requirements"] = [line for line in result.pop("lock").splitlines() if line.strip() and not line.lstrip().startswith("#")]
-                for requirement in extra["requirements"]:
-                    if requirement not in result["requirements"]:
-                        result["requirements"].append(requirement)
+            if value.get('runtime'):
+                result = combine_profiles(result, environment_for(value, path))
             for key, child in value.items():
-                if key != "runtime":
+                if key != 'runtime':
                     visit(child)
     visit(config)
     return result
 
 
-_OPENPI_REV = "0d3eb2db836e443a6ca9debb242d0aabe4628f1f"
-_OPENPI_URL = "https://github.com/Physical-Intelligence/openpi/archive/" + _OPENPI_REV + ".tar.gz"
-_OPENPI_DEPS = [r for r in TORCH if not r.startswith(("torch==", "torchvision==", "transformers==", "opencv-python=="))]
-BUILTINS["policy.openpi"] = {
-    "python": "3.11", "platforms": ["linux"], "min_glibc": "2.31",
-    "requirements": _OPENPI_DEPS + [
-        "torch==2.7.1", "torchvision==0.22.1", "transformers==4.53.2", "opencv-python==4.10.0.84",
-        "openpi @ " + _OPENPI_URL,
-        "openpi-client @ " + _OPENPI_URL + "#subdirectory=packages/openpi-client",
-        "lerobot @ git+https://github.com/huggingface/lerobot.git@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5",
-        "peft==0.17.1", "rich==14.0.0", "draccus==0.10.0", "tyro==1.0.3", "pytest==8.3.5", "chex==0.1.89",
-    ],
-    "overrides": ["ml-dtypes==0.4.1", "tensorstore==0.1.74"],
-    "overlays": [{"source_module": "openpi", "source": "models_pytorch/transformers_replace", "target_module": "transformers"}],
-}
-BUILTINS["policy.openvla"] = {
-    "python": "3.10", "platforms": ["linux"],
-    "requirements": [r for r in TORCH if not r.startswith(("timm==", "transformers=="))] + ["timm==0.9.16", "transformers==4.40.1", "tokenizers==0.19.1", "peft==0.13.2", "sentencepiece==0.2.0", "draccus==0.10.0", "rich==13.9.4"],
-}
+def dataset_environment(config, path, *, check_platform=True, python=None):
+    """Shared loaders need no simulator, even for LIBERO/RLBench recordings."""
+    profile = environment_for({}, path, str(recipe('data')), check_platform=check_platform)
+    fixed_python = python is not None
+    if python:
+        profile['python'] = python
+    def visit(value):
+        nonlocal profile, fixed_python
+        if isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, dict):
+            module = str(value.get('type', '')).removeprefix('vlastudio.')
+            if value.get('runtime'):
+                extra = environment_for(value, path, check_platform=check_platform)
+                if not fixed_python:
+                    profile['python'] = extra['python']
+                    fixed_python = True
+                profile = combine_profiles(profile, extra)
+            elif module.startswith('data_utils.datasets') and any(s in module.lower() for s in ('droid', 'rlds', 'oxe')):
+                profile = combine_profiles(profile, environment_for({}, path, str(recipe('rlds')), check_platform=check_platform))
+            elif module.endswith('.WrappedLerobotDataset') or module.startswith('data_utils.datasets.libero_lerobot'):
+                profile = combine_profiles(profile, {'python': profile['python'], 'requirements': ['lerobot==0.3.3']})
+            for key, child in value.items():
+                if key != 'runtime':
+                    visit(child)
+    visit(config)
+    return profile

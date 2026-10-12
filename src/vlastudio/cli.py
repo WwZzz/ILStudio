@@ -9,7 +9,7 @@ import subprocess
 import yaml
 from .configuration import read_config
 from .paths import cache_root, runtime_env
-from .profiles import environment_for, merge_component_runtimes
+from .profiles import environment_for, combine_profiles, dataset_environment
 from .runtime import prepare, snapshot, execute
 from .worker import ENTRIES
 from .deploy.comm import is_server_address
@@ -109,13 +109,14 @@ def main(argv=None):
                         task_parser.add_argument("-t", "--task", default="sim_transfer_cube_scripted")
                         task_args, _ = task_parser.parse_known_args(args)
                         task_config, task_path = read_config(task_args.task, "task")
-                        profile = merge_component_runtimes(profile, task_config, task_path)
+                        profile = combine_profiles(profile, dataset_environment(task_config, task_path, python=profile['python']))
                     elif options.command == "evaluate":
                         env_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
                         env_parser.add_argument("-e", "--env", default="aloha_transfer")
                         env_args, _ = env_parser.parse_known_args(args)
                         env_config, env_path = read_config(env_args.env, "env")
-                        profile = merge_component_runtimes(profile, env_config, env_path)
+                        for component in (env_config if isinstance(env_config, list) else [env_config]):
+                            profile = combine_profiles(profile, environment_for(component, env_path))
         finally:
             if previous is None:
                 os.environ.pop("VLASTUDIO_CONFIG_PATH", None)

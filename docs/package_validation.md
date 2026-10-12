@@ -1,5 +1,27 @@
 # Packaging and GPU validation
 
+## Layered environment guidance (2026-10-12)
+
+Branch: `codex/layered-environments`, based on example08 commit `fcbecbf`.
+26 targeted tests pass (`python -m pytest tests -q`), covering standard-library-only
+imports, actionable dependency errors, version/marker/platform checks, relative
+recipe inheritance, cycles, lockfile restrictions, custom runtimes, and automatic
+dataset/simulator composition. Example07/08 manifests resolve through the same loader.
+
+A fresh Python 3.14 venv was installed with only the lightweight editable package.
+`import vlastudio` and `env catalog` work without NumPy or Torch. All three load
+functions produce their installation commands without importing ML libraries.
+Python 3.10 Linux dependency resolution passed for ACT/base and FastWAM; SmolVLA
+passed with the glibc 2.31 platform target required by its rerun-sdk wheels.
+The root uv lockfile is synchronized and passes an offline consistency check.
+
+Wheel and source distributions build. A wheel extracted outside the checkout
+passes the standard-library-only import and resolves packaged ACT recipes and
+installation plans. GPU training, simulator execution and native-library health
+have not been rerun for these new recipes. The results below are historical.
+
+## Historical runtime validation
+
 Validation date: 2026-09-14. Branch: `codex/package-runtime-isolation`.
 Base: `db79c4c12c4858e310a6990c5c4c9f4b4d76f381` (main, PR #39).
 

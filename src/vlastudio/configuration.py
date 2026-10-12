@@ -1,7 +1,6 @@
 """Resolve user configs without importing training libraries."""
 import os
 from pathlib import Path
-import yaml
 from .paths import package_root
 from .extensions import resolve
 
@@ -39,6 +38,7 @@ def resolve_config(value, category, base_dir=None):
 
 
 def read_config(value, category):
+    import yaml
     path = resolve_config(value, category)
     with path.open(encoding="utf-8") as stream:
         return yaml.safe_load(stream) or {}, path

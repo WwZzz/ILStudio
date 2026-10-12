@@ -1,3 +1,4 @@
+runtime: ../runtime.yaml
 type: vlastudio.policy.smolvla
 name: smolvla_libero
 args:

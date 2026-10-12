@@ -9,7 +9,7 @@ description = "Extensible robotics policy training and deployment"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-dependencies = ["PyYAML>=6,<7", "platformdirs>=4,<5", "filelock>=3.16,<4", "loguru>=0.7,<1", "uv>=0.8,<1"]
+dependencies = ["PyYAML>=6,<7", "platformdirs>=4,<5", "filelock>=3.16,<4", "loguru>=0.7,<1", "packaging>=24", "tomli>=2; python_version < '3.11'", "uv>=0.8,<1"]
 
 [project.scripts]
 vlastudio = "vlastudio.cli:main"
@@ -26,5 +26,5 @@ packages = ["src/vlastudio"]
 exclude = ["**/.venv/**", "**/__pycache__/**", "**/.git/**", "**/.ipynb_checkpoints/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/README.md", "/README.legacy.md", "/LICENSE", "/pyproject.toml", "/examples", "/docs/package_runtime.md", "/docs/environments.md", "/docs/package_validation.md", "/docs/gpu_validation.json", "/requirements-legacy.txt", "/uv.lock"]
+include = ["/src", "/README.md", "/README.legacy.md", "/LICENSE", "/pyproject.toml", "/examples", "/tests", "/docs/package_runtime.md", "/docs/environments.md", "/docs/package_validation.md", "/docs/gpu_validation.json", "/requirements-legacy.txt", "/uv.lock"]
 exclude = ["**/.venv/**", "**/__pycache__/**", "**/.git/**"]

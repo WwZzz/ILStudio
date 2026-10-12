@@ -66,14 +66,15 @@ fi
 venv_dir="$(cd -- "$venv_dir" && pwd)"
 python="$venv_dir/bin/python"
 "$python" -c 'import sys; assert sys.version_info[:2] == (3, 10), "The existing venv must use Python 3.10"'
-"$python" -m pip install "${pip_args[@]}" 'PyYAML==6.0.2'
+"$python" -m pip install "${pip_args[@]}" -e "$repo_root"
 requirements="$(mktemp)"
 trap 'rm -f -- "$requirements"' EXIT
 "$python" - "$example_dir/runtime.yaml" "$requirements" <<'PY'
 import sys
 from pathlib import Path
-import yaml
-manifest = yaml.safe_load(Path(sys.argv[1]).read_text())
+from vlastudio.profiles import environment_for
+path = Path(sys.argv[1]).resolve()
+manifest = environment_for({}, path, str(path))
 Path(sys.argv[2]).write_text("\n".join(manifest["requirements"]) + "\n")
 PY
 # Installing the project also installs shared dependencies such as loguru.

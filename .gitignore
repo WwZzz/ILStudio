@@ -48,5 +48,4 @@ configs/task/local/
 .packaging-outside/
 dist/
 /final-results/
-/tests/
 results/*

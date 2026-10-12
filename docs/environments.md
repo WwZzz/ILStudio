@@ -1,125 +1,181 @@
-# 环境管理
+# 环境安装：先选功能，再复制命令
 
-base 默认存在：首次执行环境管理命令时，自动记录启动器所在的 Python 环境。
-这一步不安装依赖；`env activate` 与 `env deactivate` 默认返回该环境。
-已有 base 记录不会被自动覆盖，`VLASTUDIO_BASE_PYTHON` 可显式指定初始解释器。
-`env install` 默认在当前环境安装并更新 base；`env create` 默认创建并准备
-托管 base，已有用户登记的 base 则继续复用。
+安装入口只需要 Python 3.10+：
 
-首次给当前终端加载 shell 支持：
+```bash
+python -m pip install -e .
+python -c "import vlastudio"
+```
+
+顶层导入只使用 Python 标准库，不导入 Torch、模型、数据集或仿真器。
+读取 YAML 和运行环境管理命令时才需要安装包声明的轻量依赖。
+安装 VLAStudio 不会自动安装训练环境。
+
+## 不知道该装什么
+
+先查看功能清单和安装方案：
+
+```bash
+vlastudio env catalog
+vlastudio env plan --policy act
+vlastudio env plan --policy smolvla --dataset libero.libero_object --env libero.object
+vlastudio env plan --dataset sim_transfer_cube_scripted
+vlastudio env check --policy act
+```
+
+`plan` 显示当前解释器、缺失包、版本不匹配、Python/平台要求，以及可复制的
+create、run、install 命令。`plan` 和 `catalog` 不安装、不登记环境、不创建缓存；
+`check` 执行相同检查，有问题时退出码为 2，否则为 0。`--json` 输出结构化结果。
+检查读取已安装发行包的元数据，不导入模型库。它不验证 CUDA、动态库、模型权重、
+仿真资源、extras 或 Git 源码版本；包版本齐全仍可能需要组件的系统准备步骤。
+
+推荐创建独立环境，再在其中执行脚本：
+
+```bash
+# Torch base；没有仿真器
+vlastudio env create -n base
+# ACT 训练并在 ALOHA 评测
+vlastudio env create --policy act --env aloha_sim -n act_aloha
+vlastudio env run -n act_aloha -- python my_training_script.py
+# SmolVLA 与 LIBERO，同一进程使用的组件一起选择
+vlastudio env create --policy smolvla --env libero.object -n smol_libero
+vlastudio env run -n smol_libero -- python my_smolvla_script.py
+# 只做共享数据加载、变换和缓存
+vlastudio env create --dataset -n data
+vlastudio env run -n data -- python inspect_data.py
+```
+
+`--dataset` 接受 task YAML 的名称或路径；不跟值时选择默认共享数据配置。
+策略选择器接受名称或 YAML 路径，`dp` 对应 `diffusion_policy`，
+`openpi` 对应 `pi0`。`aloha_sim` 对应 `aloha_transfer`。
+不兼容的 Python/依赖请分开创建环境，通过 policy server 通信。
+
+## 依赖分层
+
+清单位于 `src/vlastudio/environments/`：
+
+| 层 | 内容 | 选择方式 |
+| --- | --- | --- |
+| 轻量入口 | 配置、注册、环境管理 | 安装 vlastudio |
+| data | HDF5、LeRobot parquet/video、图像、变换、缓存；Torch/NumPy 使用兼容范围 | `--dataset <task>` |
+| base | 继承 data，固定 Torch 2.4 / torchvision 0.19 及通用训练依赖 | 无选择器，或 `--policy act/mlp` |
+| 模型 | 继承共享层并声明模型差异 | `--policy smolvla/pi0/openvla/fastwam/dp` |
+| 数据格式扩展 | RLDS/DROID 的 TensorFlow/dlimp；原生 LeRobot adapter 的 lerobot | 从 task 中的数据集类型或 runtime 选择 |
+| 仿真 | ALOHA、LIBERO、MetaWorld 等独立依赖 | `--env <config>` |
+
+base 不安装 LIBERO、MuJoCo、MetaWorld 等仿真器。DP 在 base 上增加 diffusers
+和 robomimic；SmolVLA/FastWAM 改用 Torch 2.7.1；OpenPI 默认 Python 3.11，
+并保留 transformers overlay 与 glibc 要求。
+
+“基于 base 新建”通过清单继承实现：每个新环境重新解析完整依赖，并复用 uv 的下载缓存。
+它不复制当前 base 中手工安装的包，也不通过 system-site-packages 共享可变环境。
+因此升级某个模型环境不会更改 base。
+
+其他历史模型仍可从组件自身的 `pyproject.toml` 生成安装方案；
+输出会标记为 legacy 清单，不能把这些旧依赖视为已验证的分层环境。
+FastWAM 的包清单只覆盖 Python 依赖；上游源码、权重、LIBERO 资源以及训练专用依赖
+仍按 [example08](../examples/08_fastwam_libero/README.md) 的 setup 步骤准备。
+
+## Python 加载入口的提示
+
+```python
+import vlastudio as vla             # 不要求 Torch 或仿真环境
+policy = vla.load_policy("smolvla")  # 缺失/不兼容时抛出 vla.DependencyError
+dataset = vla.load_dataset("sim_transfer_cube_scripted")
+bench = vla.load_env("aloha_transfer")
+```
+
+错误包含所选配置对应的安装、创建和运行命令，且保留结构化的 `error.plan`。
+这些函数仍返回配置句柄，不立即加载模型权重或数据，也不自动安装包。
+
+只编排任务、准备托管任务时，可以显式跳过当前进程检查：
+
+```python
+dataset = vla.load_dataset("sim_transfer_cube_scripted", check_dependencies=False)
+policy = vla.load_policy("act", runtime="managed")
+# 或 vla.load_policy("act", check_dependencies=False)
+vla.train(policy, dataset, output_dir="checkpoints/act")
+```
+
+`load_policy/load_env(runtime="managed")` 不检查调用者的 ML 环境；任务执行时准备独立环境。
+`load_dataset(check_dependencies=False)` 用于相同的编排场景。
+API 默认使用当前解释器；与以前的行为相比，load_* 默认增加了依赖预检，
+仅创建配置句柄的旧代码应显式关闭检查。
+
+也可直接获取只读方案：
+
+```python
+plan = vla.environment_plan(policy="smolvla", environment="libero.object")
+print(plan["commands"]["create"])
+```
+
+## 自定义组件的共享清单
+
+自定义 YAML 中声明 `runtime: /path/my-runtime.yaml`，或环境命令使用
+`--runtime-manifest /path/my-runtime.yaml`。完整 manifest 与组件选择器二选一。
+
+```yaml
+# my-runtime.yaml；extends 相对当前 manifest 解析
+extends: /path/VLAStudio/src/vlastudio/environments/base.yaml
+python: '3.10'
+requirements:
+  - transformers==4.51.3
+  - my-policy-package>=1
+notes:
+  - Prepare the model weights separately.
+```
+
+`extends` 支持一个路径或路径列表，可多层继承，会检测循环。子清单明确写出的同名
+依赖覆盖父层约束；同时选择 policy、dataset、env 属于并列组合，保留各自的约束，
+安装工具会报告冲突。Python 版本不同会直接报错。`requires_python` 可声明允许的
+Python 范围，`python` 指定创建环境默认使用的版本。
+完整 lockfile 不参与继承；请提供最终完整 lockfile，包含所有轻量运行依赖。
+原有 `entrypoint`、`overrides`、`overlays`、`platforms`、`min_glibc` 继续支持。
+
+## 当前环境安装、缓存和终端切换
+
+```bash
+# 增量安装到当前解释器，可能升级/降级已有包
+vlastudio env install --policy act --env aloha_sim
+# 已登记的环境可直接安装，无需激活
+vlastudio env install -n smol_libero --policy smolvla --env libero.object
+vlastudio env list
+vlastudio env path --policy act
+vlastudio env prepare --policy act --dry-run
+```
+
+安装前可使用 `--dry-run` 查看目标解释器及完整清单。`path` 不安装；
+`prepare` 准备环境，`run` 准备后执行命令。
+显式命名的新环境位于 `$VLASTUDIO_CACHE/envs/named-<名称>`；
+不命名时按完整清单哈希复用。重复 create 复用已有环境并保留手动修改，
+更新依赖请使用 `env install -n <名称> ...`，或新建另一个名称。
+
+base 首次由启动器环境登记，不代表 Torch 已安装；`env create` 会准备托管 base，
+已有用户登记的 base 则复用。`env install` 默认使用当前解释器并登记为 base，
+指定已登记名称则安装到该环境，指定新名称则登记当前解释器。
+`VLASTUDIO_BASE_PYTHON` 可指定已有 base，VLAStudio 不自动修改该外部环境。
+
+默认缓存根目录为 `~/.cache/vlastudio`，用 `VLASTUDIO_CACHE` 修改。
+下载源继承系统和安装工具配置，使用 `-i/--index-url URL` 仅覆盖本次安装：
+
+```bash
+vlastudio env create --policy smolvla -i https://pypi.org/simple/
+```
+
+`env run` 不需要激活。需要切换当前终端时，先加载 shell 支持：
 
 ```bash
 eval "$(vlastudio env init --shell bash)"
 # zsh: eval "$(vlastudio env init --shell zsh)"
+vlastudio env activate smol_libero
+vlastudio env deactivate
 ```
 
 PowerShell：
 
 ```powershell
 vlastudio env init --shell powershell | Out-String | Invoke-Expression
+vlastudio env activate smol_libero
 ```
 
-初始化后可以创建并自动激活环境，也可以安装到当前环境：
-
-```bash
-vlastudio env create                   # 默认创建/复用 base；ACT 无需单独 create
-vlastudio env create --policy smolvla
-vlastudio env create --policy smolvla -n smol_work
-vlastudio env create --env robotwin
-vlastudio env install                  # 安装到当前环境，并登记为 base
-vlastudio env install --policy smolvla -n work
-vlastudio env list
-vlastudio env activate work
-vlastudio env activate                 # 默认切换到 base
-vlastudio env deactivate               # 同样切换到 base
-```
-
-未初始化 shell 时，create 完成创建和安装，但不能切换父终端。
-install 不创建 venv，使用增量安装；版本约束可能升级或降级现有包。
-
-`-n` 与 `--name` 等价。显式命名的新环境使用独立目录
-`$VLASTUDIO_CACHE/envs/named-<名称>`；两个名称不会因依赖相同而共用目录。
-重复 create 会复用已登记环境，保留后续手动修改。旧记录仍沿用原路径。
-不传名称时继续按依赖哈希复用缓存，默认仍为 base。
-
-可以先激活环境再安装，也可以直接指定已登记的环境名称：
-
-```bash
-vlastudio env activate smol_work
-vlastudio env install --policy smolvla
-vlastudio env install -n act_work --policy act --env aloha_sim
-```
-
-install 指定已有 `-n` 时直接安装到该解释器，无需先激活。
-指定尚未登记的名称时，将当前解释器登记为该名称，不创建新环境。
-不指定 `-n` 时仍安装到当前环境并登记为 base。
-`--policy` 和 `--env` 可同时用于 install，合并两份依赖声明；解析器会报告
-版本冲突，不会静默覆盖约束。存在完整 lockfile 时需提供合并后的
-`--runtime-manifest`。不能兼容的依赖仍应分开运行服务端和仿真端。
-安装成功后登记到 `$VLASTUDIO_CACHE/environments.json`，保存环境名、解释器路径和来源。
-list 也显示缓存中的旧环境，以及已删除解释器的 missing 状态。`-n` 指定环境名。
-省略组件或环境名时，create、install、prepare、path、run、activate 均默认使用 base。
-install 未指定 `-n` 时将当前解释器登记为 base，即使使用了 `--policy` 或 `--env`。
-重新登记 base 会更新默认解释器，原记录保留为 `base-<路径哈希>`；其他同名环境附加路径哈希。
-run、path 和 create/prepare 复用已登记的 base。deactivate 始终返回 base，不恢复之前的任意环境。
-更新后请重新执行上述 shell 初始化命令，以启用 deactivate。
-RoboTwin 和 BEHAVIOR 清单安装 Python 依赖；仿真资源、SDK 和系统驱动需另行准备。
-
-安装 VLAStudio 入口后，按组件名称运行脚本，无需知道 extras 名称：
-
-```bash
-pip install -e .
-vlastudio env run --policy act -- examples/01_train_and_eval_act_on_aloha/run.sh
-vlastudio env run --policy smolvla -- python my_smolvla_script.py
-vlastudio env run --policy pi0 -- python my_openpi_script.py
-vlastudio env run --remote --env aloha_sim -- python examples/02_remote_inference/evaluate.py
-```
-
-ACT、MLP、DP 以及 ALOHA、MetaWorld、LIBERO 共用 base manifest。
-SmolVLA 和 OpenPI 各自使用独立 manifest。`--policy` 接收已有 policy
-配置名称或路径；环境命令额外接受 `dp`、`openpi` 别名。
-`--env` 接收 env 配置名称或路径，`aloha_sim` 对应 `aloha_transfer`。
-
-```bash
-vlastudio env prepare --policy act
-vlastudio env path --policy act
-vlastudio env list
-vlastudio env prepare --policy act --dry-run
-```
-
-`path` 只输出解释器路径，不触发安装。`prepare` 安装环境，`run` 安装后执行命令。
-默认目录是 `~/.cache/vlastudio/envs/<依赖哈希>`，设置 `VLASTUDIO_CACHE`
-修改缓存根目录。环境清单变化生成新目录，已有环境保持原样。
-下载源继承进程环境和安装工具自身配置；VLAStudio 不指定镜像。
-
-需要为本次创建或安装指定源时，使用 `-i`（等价于 `--index-url`）：
-
-```bash
-vlastudio env create --policy smolvla -i http://nexus.sii.shaipower.online/repository/pypi/simple/
-vlastudio env install -i http://nexus.sii.shaipower.online/repository/pypi/simple/
-```
-
-`prepare` 和 `run` 首次准备环境时也支持这个参数。源地址只传给本次
-依赖解析与安装，不写入全局配置，也不改变环境的依赖哈希。
-命令中的地址应为纯 URL，不要包含 Markdown 的 `[地址](地址)` 格式。
-
-已有准备好的 base 环境可以直接复用：
-
-```bash
-export VLASTUDIO_BASE_PYTHON=/absolute/path/to/.venv/bin/python
-vlastudio env run --policy act -- python experiment.py
-```
-
-该解释器由用户维护，VLAStudio 不向其中安装或升级依赖。
-复杂仿真所需 SDK、资源及依赖需由组件的 runtime 声明；没有完整声明时提供 manifest：
-
-```bash
-vlastudio env run --runtime-manifest /my/robotwin-runtime.yaml -- python evaluate.py
-```
-
-manifest 沿用现有 `python`、`requirements`、`lockfile` 和 `overlays` 字段。
-不能共存的 policy 和仿真请分别启动服务端和客户端。
-RoboTwin/BEHAVIOR 的仿真资源和平台 SDK 不会因创建 venv 自动出现。
-
-base 清单的依赖解析与 GPU/仿真执行验证是两项独立检查；安装成功不代表模型下载、
-场景资源和系统渲染驱动已经配置完成。
+初始化后 create 会自动激活创建的环境；activate/deactivate 默认返回 base。

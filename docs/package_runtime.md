@@ -30,7 +30,8 @@ are not added to a managed worker. Explicit local plugin paths are supported.
 
 This default applies to the `vlastudio` CLI. Python API handles default to
 `runtime="current"`, so `python script.py` never creates or modifies an environment.
-Install the required extras first, for example `pip install ".[act,aloha]"`.
+Inspect the recipe with `vlastudio env plan --policy act --env aloha_sim`, then
+create an environment or use `env install` to add its requirements to the current one.
 Passing a runtime manifest or `runtime="managed"` opts a Python API call into the
 environment manager explicitly.
 
@@ -38,10 +39,11 @@ VLAStudio's shared worker dependencies are part of every managed environment.
 Component profiles declare only their additional packages. A supplied complete
 lock must contain the shared dependencies and is validated before its worker starts.
 
-Built-in initial recipes: ACT/MLP (Python 3.10), OpenPI (Python 3.11, Linux/glibc >= 2.31), OpenVLA
-(Python 3.10, Linux). OpenPI uses pinned upstream commits and installs its required
-Transformers overlay only into its own environment. Other policies must declare
-`runtime` or use `--runtime current`; dependency compatibility is never guessed.
+Layered recipes cover shared data processing, ACT/MLP base, DP, SmolVLA, OpenPI,
+OpenVLA and FastWAM, plus separate simulators. OpenPI uses pinned upstream commits
+and installs its required Transformers overlay only into its own environment.
+Historical model pyproject requirements are exposed as legacy recipes; custom
+components can declare `runtime`. See [environment installation](environments.md).
 Recipes describe dependencies, not a guarantee of GPU training on every driver.
 See the validation report for actual checks performed on this branch.
 
@@ -199,6 +201,9 @@ code = vlastudio.run("train", ["-p", "my_policy.yaml", "-o", "/results/run"],
 ```
 
 The Python API also exposes `load_dataset`, `load_policy`, `train` and `load_env`.
+The load functions check declared dependencies and provide installation commands
+through `DependencyError`; `check_dependencies=False` disables the current-process
+check, and `runtime="managed"` on policy/env handles defers it to the worker.
 These return configuration handles and dispatch training/evaluation to workers;
 they do not expose tensors in the caller. `train(policy, dataset, config,
 output_dir=...)` updates `policy.checkpoint` after success; `bench.evaluate(policy,

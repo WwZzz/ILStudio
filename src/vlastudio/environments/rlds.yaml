@@ -1,0 +1,7 @@
+extends: data.yaml
+requires_python: '>=3.10,<3.12'
+requirements:
+- tensorflow==2.15.0
+- tensorflow-datasets
+- tensorflow-graphics
+- dlimp @ git+https://github.com/kvablack/dlimp@5edaa4691567873d495633f2708982b42edf1972

@@ -7,8 +7,4 @@ args:
   ctrl_type: abs
   camera_ids: [0]
   image_size: [640, 480]
-runtime:
-  python: "3.10"
-  requirements:
-    - dm-control==1.0.34
-    - mujoco==3.3.6
+runtime: ../../../environments/aloha.yaml

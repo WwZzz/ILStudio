@@ -1,0 +1,4 @@
+extends: base.yaml
+requirements:
+- diffusers==0.30.3
+- robomimic==0.3.0

@@ -1,4 +1,5 @@
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_0
@@ -6,7 +7,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_1
@@ -14,7 +16,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_2
@@ -22,7 +25,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_3
@@ -30,7 +34,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_4
@@ -38,7 +43,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_5
@@ -46,7 +52,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_6
@@ -54,7 +61,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_7
@@ -62,7 +70,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_8
@@ -70,7 +79,8 @@
     seed: 42
     ctrl_space: ee
     ctrl_type: delta
-- type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
+- runtime: ../runtime.yaml
+  type: vlastudio.benchmark.libero.fastwam:FastWAMLiberoEnv
   args:
     reuse_env: true
     task: libero_object_9

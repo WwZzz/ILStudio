@@ -91,7 +91,7 @@ shutil.copytree(source, target, dirs_exist_ok=True)
             run([python, '-c', script, overlay['source_module'], overlay['target_module'], overlay['source']], env)
         install_application(python, env)
         ensure_source_layout_packages(python, profile, env)
-        run([python, '-c', 'import yaml, platformdirs, filelock, loguru, vlastudio'], env)
+        run([python, '-c', 'import yaml, platformdirs, filelock, loguru, packaging, vlastudio'], env)
 
 
 def activation(cache, name, shell):

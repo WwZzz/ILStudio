@@ -1,0 +1,6 @@
+extends: data.yaml
+requirements:
+- dm-control==1.0.34
+- mujoco==3.3.6
+- requests==2.32.5
+- psutil==6.1.1

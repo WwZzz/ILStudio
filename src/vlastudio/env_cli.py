@@ -7,13 +7,9 @@ import subprocess
 import sys
 
 from .configuration import read_config
-from .paths import cache_root, package_source_root, runtime_env
+from .paths import cache_root, runtime_env
 from .profiles import environment_for
 from .runtime import prepare, environment_target, snapshot
-
-BASE_POLICIES = {'policy.act', 'policy.mlp', 'policy.diffusion_policy'}
-BASE_ENVS = {'aloha', 'metaworld', 'libero'}
-
 
 def current_python():
     """Keep installation in the selected environment and reject stale paths."""
@@ -41,68 +37,65 @@ def installation_env(cache, index_url=None, offline=False):
     return env
 
 
-def select_profile(policy=None, environment=None, manifest=None, remote=False):
-    base_path = package_source_root() / 'environments' / 'base.yaml'
+def select_profile(policy=None, environment=None, manifest=None, remote=False,
+                   dataset=None, *, check_platform=True):
+    from .profiles import combine_profiles, dataset_environment, recipe
     if manifest:
-        return 'custom', environment_for({}, base_path, str(Path(manifest).expanduser().resolve()))
+        if policy or environment or dataset:
+            raise ValueError('Use either a complete --runtime-manifest or component selectors')
+        return 'custom', environment_for({}, Path.cwd() / 'config.yaml',
+                                         str(Path(manifest).expanduser().resolve()),
+                                         check_platform=check_platform)
     selected = []
     if policy and not remote:
-        policy = {'openpi': 'pi0'}.get(policy, policy)
-        config, path = read_config('diffusion_policy' if policy == 'dp' else policy, 'policy')
-        module = (config.get('type') or '').removeprefix('vlastudio.')
-        if module == 'policy.smolvla' and not config.get('runtime'):
-            config = dict(config, runtime=str(base_path.with_name('smolvla.yaml')))
-        selected.append(('base' if module in BASE_POLICIES and not config.get('runtime') else 'policy', config, path))
+        policy = {'openpi': 'pi0', 'dp': 'diffusion_policy'}.get(policy, policy)
+        config, path = read_config(policy, 'policy')
+        selected.append(('policy', environment_for(config, path, check_platform=check_platform)))
+    elif remote:
+        selected.append(('remote', environment_for({}, recipe('remote'), str(recipe('remote')),
+                                                   check_platform=check_platform)))
     if environment:
         family = {'robotwin': 'robotwin', 'behavior': 'behavior1k', 'behavior1k': 'behavior1k'}.get(environment)
         if family:
-            if selected:
-                raise ValueError('Use separate policy and simulation environments for this simulator')
-            manifest = base_path.with_name(family + '.yaml')
-            return family, environment_for({}, manifest, str(manifest))
-        config, path = read_config('aloha_transfer' if environment == 'aloha_sim' else environment, 'env')
-        configs = config if isinstance(config, list) else [config]
-        simple = all((c.get('type', '').removeprefix('vlastudio.benchmark.').split('.')[0] in BASE_ENVS) for c in configs)
-        selected.append(('base' if simple else 'env', config, path))
-    if all(kind == 'base' for kind, _, _ in selected):
-        return 'base', environment_for({}, base_path, str(base_path))
-    if len(selected) > 1:
-        raise ValueError('These components require separate environments. Run serve with --policy and evaluation with --remote --env, or supply --runtime-manifest.')
-    kind, config, path = selected[0]
-    if isinstance(config, list):
-        raise ValueError('Use --runtime-manifest for a multi-environment configuration')
-    profile = environment_for(config, path)
-    return kind, profile
+            profile = environment_for({}, recipe(family), str(recipe(family)), check_platform=check_platform)
+        else:
+            config, path = read_config('aloha_transfer' if environment == 'aloha_sim' else environment, 'env')
+            configs = config if isinstance(config, list) else [config]
+            profiles = [environment_for(c, path, check_platform=check_platform) for c in configs]
+            profile = profiles[0]
+            for extra in profiles[1:]:
+                profile = combine_profiles(profile, extra)
+        selected.append(('env', profile))
+    if dataset:
+        config, path = read_config(dataset, 'task')
+        # Shared data requirements work on the selected model's Python version.
+        profile = dataset_environment(config, path, check_platform=check_platform,
+                                      python=selected[0][1]['python'] if selected else None)
+        selected.append(('data', profile))
+    if not selected:
+        return 'base', environment_for({}, recipe('base'), str(recipe('base')), check_platform=check_platform)
+    kind, profile = selected[0]
+    for _, extra in selected[1:]:
+        profile = combine_profiles(profile, extra)
+    return ('combined' if len(selected) > 1 else kind), profile
 
 
-def install_profile(policy=None, environment=None, manifest=None, remote=False):
-    if manifest or not (policy and environment) or remote:
-        return select_profile(policy, environment, manifest, remote)
-    _, policy_profile = select_profile(policy=policy)
-    _, env_profile = select_profile(environment=environment)
-    if policy_profile == env_profile:
-        return 'combined', policy_profile
-    if policy_profile.get('lock') or env_profile.get('lock'):
-        raise ValueError('Combining components with complete lockfiles requires one --runtime-manifest containing both components')
-    combined = dict(policy_profile)
-    for field in ('requirements', 'overrides', 'overlays'):
-        combined[field] = list(policy_profile.get(field, []))
-        for value in env_profile.get(field, []):
-            if value not in combined[field]:
-                combined[field].append(value)
-    return 'combined', combined
+# Installation and creation use the same resolved dependency contract.
+install_profile = select_profile
 
 
 def main(argv):
     from . import env_registry
     parser = argparse.ArgumentParser(prog='vlastudio env')
-    parser.add_argument('action', choices=['create', 'install', 'activate', 'deactivate', 'init', 'prepare', 'run', 'path', 'list'])
+    parser.add_argument('action', choices=['create', 'install', 'activate', 'deactivate', 'init', 'prepare', 'run', 'path', 'list', 'plan', 'check', 'catalog'])
     parser.add_argument('name', nargs='?')
     parser.add_argument('-n', '--name', dest='environment_name')
     parser.add_argument('--last-created', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--shell', choices=['bash', 'zsh', 'powershell'])
     parser.add_argument('--policy')
     parser.add_argument('--env')
+    parser.add_argument('--dataset', nargs='?', const='sim_transfer_cube_scripted', help='Task config; omit the value for shared data loaders')
+    parser.add_argument('--json', action='store_true', help='Machine-readable plan/check output')
     parser.add_argument('--remote', action='store_true')
     parser.add_argument('--runtime-manifest')
     parser.add_argument('-i', '--index-url', help='Package index URL for this invocation; otherwise inherit system configuration')
@@ -112,6 +105,28 @@ def main(argv):
     split = argv.index('--') if '--' in argv else len(argv)
     args = parser.parse_args(argv[:split])
     command = argv[split + 1:]
+    if args.action in ('plan', 'check', 'catalog'):
+        from .dependencies import environment_plan, format_plan
+        try:
+            if args.action == 'catalog':
+                from .profiles import POLICY_PROFILES
+                for component, family in POLICY_PROFILES.items():
+                    if component == 'remote':
+                        print('remote policy client: vlastudio env plan --remote --env <env-config>')
+                        continue
+                    print(f'policy {component} -> {family}; vlastudio env plan --policy ' +
+                          ('pi0' if component == 'openpi' else component))
+                print('data: vlastudio env plan --dataset <task-config>')
+                print('simulators: vlastudio env plan --env <env-config>')
+                print('Other policies: their local pyproject.toml is exposed as a legacy recipe.')
+                return 0
+            plan = environment_plan(policy=args.policy, environment=args.env,
+                                    dataset=args.dataset, manifest=args.runtime_manifest, remote=args.remote)
+            print(json.dumps(plan, indent=2) if args.json else format_plan(plan))
+            return 2 if args.action == 'check' and plan['issues'] else 0
+        except (ValueError, OSError) as error:
+            print(f'vlastudio env: {error}', file=sys.stderr)
+            return 2
     cache = cache_root(args.cache_dir)
     if not args.dry_run:
         try:
@@ -162,9 +177,9 @@ def main(argv):
         return 0
     try:
         selector = install_profile if args.action == 'install' else select_profile
-        name, profile = selector(args.policy, args.env, args.runtime_manifest, args.remote)
+        name, profile = selector(args.policy, args.env, args.runtime_manifest, args.remote, args.dataset)
         explicit_name = args.environment_name or args.name
-        label = explicit_name or (name if name == 'base' else args.policy or args.env or 'custom')
+        label = explicit_name or (name if name == 'base' else args.policy or args.env or ('data' if args.dataset else 'custom'))
         if args.action == 'install':
             label = explicit_name or 'base'
             registered = env_registry.read(cache).get(explicit_name, {}) if explicit_name else {}
