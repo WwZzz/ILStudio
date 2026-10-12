@@ -106,12 +106,22 @@ nodes; the DataLoader comparison used the same node.
 
 ## VLAStudio-trained checkpoints
 
-Audited results as of October 12, 2026: 500 trials per completed suite,
-MuJoCo 3.3.2, seed 42, eager BF16 inference on H100.
+Completed October 12, 2026: both checkpoints trained through VLAStudio for
+21,700 updates and evaluated with the protocol above. Each checkpoint has
+500 trials per suite (2,000 total), using MuJoCo 3.3.2, seed 42 and eager BF16
+inference on H100, with rendering and inference on separate GPUs.
 
-| Initialization | Spatial | Object | Goal | Long |
-| --- | ---: | ---: | ---: | ---: |
-| Wan pretrained | 97.6% (488/500) | 99.2% (496/500) | Pending | Pending |
-| Random experts | 80.0% (400/500) | 97.8% (489/500) | Pending | Pending |
+| Initialization | Spatial | Object | Goal | Long | Overall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wan pretrained | 97.6% (488/500) | 99.2% (496/500) | 97.4% (487/500) | 94.2% (471/500) | **97.1% (1942/2000)** |
+| Random experts | 80.0% (400/500) | 97.8% (489/500) | 87.2% (436/500) | 63.6% (318/500) | **82.15% (1643/2000)** |
 
-Goal and Long evaluation is still running. No four-suite average is claimed yet.
+All 4,000 unique trials passed the checkpoint, seed and per-task summary audit;
+only complete 50-trial tasks were retained across restarts. Incomplete and
+diagnostic runs are excluded. Random initialization applies to the video/action
+experts; VAE/T5 remain pretrained and frozen.
+
+Wan initialization is 0.5 percentage points below the paper's 97.6%, 0.6 points
+above our earlier released-weight evaluation (96.5%), and 14.95 points above
+random initialization. The released weights were evaluated on RTX 4090 and
+our trained checkpoints on H100; these are single-seed results.
