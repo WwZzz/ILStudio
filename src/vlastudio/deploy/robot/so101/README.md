@@ -9,10 +9,18 @@ The So101 implementation provides:
 - **Leader Teleoperator**: `So101Leader` - Captures movements from a So101 leader arm for teleoperation
 
 ## Installation
-```shell
-cd third_party/lerobot
-pip install -e ".[feetech]"
+From the repository root, activate a dedicated Python 3.10 environment and install:
+
+```bash
+python -m pip install -e .
+vlastudio env install --policy smolvla
+python -m pip install "lerobot[feetech]==0.3.3"
 ```
+
+The SmolVLA recipe supplies a compatible Torch/LeRobot runtime, including shared
+data and deployment dependencies. The Feetech extra supplies the motor SDK.
+For uv-managed setup, run `uv sync --python 3.10`, activate `.venv`, then run the
+last two commands above. See the [environment guide](../../../../../docs/environments.md).
 
 ## Architecture
 
@@ -34,12 +42,15 @@ So101Leader (BaseTeleopDevice)
 ## Configuration Files
 
 ### Robot Configurations
-- `configs/robot/so101_follower.yaml` - Linux configuration
-- `configs/robot/so101_follower_win.yaml` - Windows configuration
+- `src/vlastudio/configs/robot/so101.yaml` - Linux configuration (`-r so101`)
+- `src/vlastudio/configs/robot/so101_win.yaml` - Windows configuration (`-r so101_win`)
 
 ### Teleop Configurations  
-- `configs/teleop/so101_leader.yaml` - Linux configuration
-- `configs/teleop/so101_leader_win.yaml` - Windows configuration
+- `src/vlastudio/configs/teleop/so101_leader.yaml` - Linux configuration (`-t so101_leader`)
+- `src/vlastudio/configs/teleop/so101_leader_win.yaml` - Windows configuration (`-t so101_leader_win`)
+
+Paths above are relative to the repository root. Copy the YAML files to your own
+directory to customize them, then pass the file paths to `-r` and `-t`.
 
 ## Implementation Notes
 
@@ -63,17 +74,17 @@ Make sure to adjust the following in the config files:
 
 ### Training Data Collection
 ```bash
-# Start the follower robot
-python start_teleop_recorder.py --robot_config configs/robot/so101_follower.yaml --task_config configs/task/your_task.yaml
-
-# Start the leader for teleoperation
-python start_teleop_controller.py --teleop_config configs/teleop/so101_leader.yaml
+# Start both the leader and follower, recording HDF5 episodes
+vlastudio collect --runtime current -r so101 -t so101_leader -o data/so101_pick_place --dataset-format hdf5
 ```
 
 ### Policy Evaluation
 ```bash
-# Evaluate trained policy
-vlastudio infer --runtime current -r configs/robot/so101_follower.yaml --policy_config configs/policy/your_policy.yaml
+# Connect to an already running policy server
+vlastudio infer --runtime current -r so101 -m localhost:5000
+
+# Or load a checkpoint locally (install its model dependencies first)
+vlastudio infer --runtime current -r so101 -m checkpoints/my_policy
 ```
 
 ## Hardware Requirements
