@@ -6,7 +6,7 @@ Two modes:
    (examples/06_custom_robot/my_robot.py) and shows its ``frontview`` camera.
 
 2. ``--connect``: attaches to an already-running robot's shared memory
-   (e.g. one started by ``vlastudio collect`` for keyboard teleop) and shows the
+   (e.g. one started by ``vla.collect(...)`` for keyboard teleop) and shows the
    camera feed alongside it, without spawning a second robot.
 
 Cross-platform behaviour:
@@ -26,7 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--connect", action="store_true",
-        help="attach to an already-running robot (e.g. via vlastudio collect) "
+        help="attach to an already-running robot (e.g. via vla.collect(...)) "
              "instead of starting one",
     )
     parser.add_argument(

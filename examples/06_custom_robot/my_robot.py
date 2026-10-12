@@ -3,7 +3,7 @@ External custom robot example.
 
 Demonstrates how to add a *new robot externally* without modifying VLAStudio
 source: define your own robot class, reference it from a YAML config via a local
-file path, and drive it with a keyboard teleoperator through ``vlastudio collect``.
+file path, and drive it with a keyboard teleoperator through ``vla.collect(...)``.
 
 The example reuses the package's MuJoCo SO101 simulation under the hood
 (``So101SimRobot``), so it runs on any desktop with ``mujoco`` installed. A

@@ -3,13 +3,19 @@
 Requires Linux, Python 3.10 and an NVIDIA GPU. Run from the repository root:
 
 ```bash
-bash examples/07_custom_sim_env_libero_plus/setup.sh
-source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example07/activate.sh"
+python -m pip install uv
+python -m uv venv --python 3.10 --seed "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example07"
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example07/bin/activate"
+python -m pip install -e .
+python examples/install_dependencies.py --runtime-manifest examples/07_custom_sim_env_libero_plus/runtime.yaml
+python examples/07_custom_sim_env_libero_plus/setup.py --download-assets
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/libero-plus/env.sh"
 python examples/07_custom_sim_env_libero_plus/train_and_evaluate.py
 ```
 
 - Cache: `~/.cache/vlastudio`; override with `VLASTUDIO_CACHE`.
-- Setup options and native dependencies: [setup.sh](setup.sh) (`--help`, `-i URL`).
+- Python setup options: `python examples/07_custom_sim_env_libero_plus/setup.py --help` (`--root`, `--assets`). Pass `-i URL` to `examples/install_dependencies.py` to select a package index.
+- Native dependencies: Git, a C/C++ build toolchain, Python development headers, ImageMagick Wand, OpenGL, and EGL. The optional [setup.sh](setup.sh) installs the Ubuntu packages and runs the Python setup for you.
 - Training budget and output paths: [train_and_evaluate.py](train_and_evaluate.py). Use fresh evaluation outputs.
 - Custom benchmark: implement [libero_plus_env.py](libero_plus_env.py), reference it in [env_object.yaml](config/env_object.yaml).
 

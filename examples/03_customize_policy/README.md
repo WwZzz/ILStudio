@@ -1,20 +1,15 @@
 # Custom Policy Example
 
-## Run
-
-From the repository root:
+Activate a Python 3.10 virtual environment and run from the repository root.
+See the [environment guide](../../docs/environments.md) to create an environment
+with pip or uv. Installation is separate from the workload; you can edit the
+Python script or copy its API calls into your own `run.py`.
 
 ```bash
-examples/03_customize_policy/run.sh
+python -m pip install -e .
+python examples/install_dependencies.py --policy act --env aloha_sim
+python examples/03_customize_policy/train_and_evaluate.py
 ```
-
-## Troubleshooting
-
-- `vlastudio: command not found`: from the repository root, `python -m pip install -e .`
-- `python: can't open file 'examples/...'`: run `run.sh` from the repository root, not from this directory.
-- `Unknown environment: act`: `vlastudio env create` failed; check its output.
-- HuggingFace timeout / missing ALOHA hdf5: same as the ACT example; point the task YAML at a local dataset.
-- `No module named 'examples/03_customize_policy/my_policy/'`: `unset PYTHONPATH` and rerun so the live checkout is imported, not a cached app snapshot.
 
 ## Composition
 

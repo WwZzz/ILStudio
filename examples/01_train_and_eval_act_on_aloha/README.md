@@ -1,16 +1,16 @@
 # Train and evaluate ACT on ALOHA
 
-From the repository root:
+Activate a Python 3.10 virtual environment and run from the repository root.
+See the [environment guide](../../docs/environments.md) to create an environment
+with pip or uv. Installation is separate from the workload; you can edit the
+Python script or copy its API calls into your own `run.py`.
 
 ```bash
-examples/01_train_and_eval_act_on_aloha/run.sh
+python -m pip install -e .
+python examples/install_dependencies.py --policy act --env aloha_sim
+python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
 ```
 
-## Troubleshooting
-
-- `vlastudio: command not found`: from the repository root, `python -m pip install -e .`
-- `python: can't open file 'examples/...'`: run `run.sh` from the repository root, not from this directory.
-- `Unknown environment: act`: `vlastudio env create` failed; check its output. Pass `-i <index-url>` if package downloads fail.
-- HuggingFace timeout / missing ALOHA hdf5: the built-in task config downloads `cadene/aloha_sim_transfer_cube_scripted_raw`. Use a local copy and point the task YAML `root` at it.
-- CUDA / torch import errors: the host needs a matching GPU driver. ACT uses the base profile (Torch 2.4).
-- Stale `No module named 'examples/...'` imports: `unset PYTHONPATH` and rerun.
+Prepare the demonstrations at `data/sim_transfer_cube_scripted`, or update
+the task YAML's `dataset_path_list` to your own data path. The script trains ACT
+and evaluates the resulting checkpoint on ALOHA-Sim.

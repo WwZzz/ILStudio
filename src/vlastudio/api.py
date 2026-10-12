@@ -286,6 +286,58 @@ def _normalize_options(options):
     return result
 
 
+def collect(robot, *, teleop=None, output_dir, dataset_format="hdf5", task="",
+            frequency=25, visualize=False, **runtime_options):
+    """Collect demonstrations with robot/teleoperator YAMLs in a prepared environment.
+
+    Call from a script guarded by if __name__ == '__main__' on platforms using
+    multiprocessing spawn. This starts devices and runs until interrupted.
+    """
+    if dataset_format not in {'hdf5', 'lerobotv21', 'lerobotv30'}:
+        raise ValueError('dataset_format must be hdf5, lerobotv21, or lerobotv30')
+    if frequency <= 0:
+        raise ValueError('frequency must be positive')
+    args = ['-r', str(_config(robot, 'robot')), '-o', str(_path(output_dir)),
+            '--dataset-format', dataset_format, '--task', task, '-f', str(frequency)]
+    if teleop is not None:
+        args.extend(['-t', str(_config(teleop, 'teleop'))])
+    if visualize:
+        args.append('--visualize')
+    options = _normalize_options(runtime_options)
+    options.setdefault('runtime', 'current')
+    _run('collect', args, options)
+
+
+def infer(robot, policy, *, output_dir=None, device="cuda", action_manager="basic",
+          publish_rate=25, sensing_rate=20, visualize=False, **runtime_options):
+    """Deploy a Policy checkpoint or RemotePolicy on a configured robot.
+
+    Call from a script guarded by if __name__ == '__main__'. The robot and model
+    dependencies must already be installed in the selected environment.
+    """
+    if isinstance(policy, Policy) and policy.checkpoint is not None:
+        model = str(policy.checkpoint)
+        options = dict(policy.runtime_options)
+    elif isinstance(policy, RemotePolicy):
+        model, options = policy.address, {}
+    elif isinstance(policy, str):
+        model, options = policy, {}
+    else:
+        raise ValueError('infer() requires a saved Policy, RemotePolicy, checkpoint path, or server address')
+    if publish_rate <= 0 or sensing_rate <= 0:
+        raise ValueError('publish_rate and sensing_rate must be positive')
+    args = ['-r', str(_config(robot, 'robot')), '-m', model, '--device', device,
+            '-am', str(_config(action_manager, 'action_manager')),
+            '-pr', str(publish_rate), '-sr', str(sensing_rate)]
+    if output_dir is not None:
+        args.extend(['-o', str(_path(output_dir))])
+    if visualize:
+        args.append('--visualize')
+    options.update(_normalize_options(runtime_options))
+    options.setdefault('runtime', 'current')
+    _run('infer', args, options)
+
+
 def train(policy, dataset, training_config_path="default", *, output_dir,
           overrides: Mapping | None = None, **runtime_options):
     """Train synchronously, update policy.checkpoint on success and return artifacts.

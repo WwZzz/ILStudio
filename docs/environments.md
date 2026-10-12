@@ -1,181 +1,168 @@
-# 环境安装：先选功能，再复制命令
+# 作为 Python 库使用：安装环境与编写 run.py
 
-安装入口只需要 Python 3.10+：
+VLAStudio 的主要用法是 `import vlastudio as vla`，在自己的 Python 文件里组合
+数据、模型、训练、评估和设备操作，然后运行 `python run.py`。
+工作脚本使用当前 Python 环境。环境准备是独立步骤，导入库和调用加载函数不会自动安装包。
+
+## 1. 创建普通虚拟环境，安装库
+
+在仓库根目录执行，以 ACT 的 Python 3.10 环境为例：
 
 ```bash
+python -m pip install uv
+python -m uv venv --python 3.10 --seed .venv
+source .venv/bin/activate
 python -m pip install -e .
-python -c "import vlastudio"
 ```
 
-顶层导入只使用 Python 标准库，不导入 Torch、模型、数据集或仿真器。
-读取 YAML 和运行环境管理命令时才需要安装包声明的轻量依赖。
-安装 VLAStudio 不会自动安装训练环境。
+Windows 激活方式为 `.venv\Scripts\Activate.ps1`。已有合适的 Python 时，也可以
+使用 `python -m venv .venv`。不需要可编辑安装时使用 `python -m pip install .`。
+未发布到 PyPI 的开发版本可以通过仓库的 Git 地址安装，见首页。
 
-## 不知道该装什么
+uv 负责选择 Python 和安装依赖；VLAStudio 作为库装在这个环境中。
+安装包只包含轻量运行依赖，不会一起安装 Torch、模型、仿真器或数据集。
+即使没有这些依赖，`import vlastudio` 也只使用 Python 标准库。
 
-先查看功能清单和安装方案：
+## 2. 写一个独立的 setup_environment.py
+
+```python
+import vlastudio as vla
+
+vla.install_dependencies(policy="act", environment="aloha_sim")
+```
 
 ```bash
-vlastudio env catalog
-vlastudio env plan --policy act
-vlastudio env plan --policy smolvla --dataset libero.libero_object --env libero.object
-vlastudio env plan --dataset sim_transfer_cube_scripted
-vlastudio env check --policy act
+python setup_environment.py
 ```
 
-`plan` 显示当前解释器、缺失包、版本不匹配、Python/平台要求，以及可复制的
-create、run、install 命令。`plan` 和 `catalog` 不安装、不登记环境、不创建缓存；
-`check` 执行相同检查，有问题时退出码为 2，否则为 0。`--json` 输出结构化结果。
-检查读取已安装发行包的元数据，不导入模型库。它不验证 CUDA、动态库、模型权重、
-仿真资源、extras 或 Git 源码版本；包版本齐全仍可能需要组件的系统准备步骤。
+这个函数使用 uv 增量安装到运行该文件的 `sys.executable`，不会切换解释器、
+创建另一个环境或修改其他虚拟环境。它可能升级或降级当前环境已有的包，
+因此不同模型应分别使用自己的虚拟环境。它会检查 Python 和平台要求，
+并应用模型清单中声明的必要补丁。权重、数据、设备 SDK 和仿真资源按各组件说明另外准备。
 
-推荐创建独立环境，再在其中执行脚本：
+不传选择器时，`vla.install_dependencies()` 安装 Torch 2.4 base。
+其他选择器示例（每次选择自己需要的组合）：
+
+```python
+import vlastudio as vla
+
+# 只做数据加载、变换和缓存
+vla.install_dependencies(dataset="sim_transfer_cube_scripted")
+
+# SmolVLA 模型环境；覆盖 base 的 Torch/Transformers 版本
+# vla.install_dependencies(policy="smolvla")
+
+# 同一个脚本中训练并在 LIBERO 评估
+# vla.install_dependencies(policy="smolvla", environment="libero.object")
+
+# 独立仿真客户端，不安装远端模型的依赖
+# vla.install_dependencies(remote=True, environment="metaworld.easy")
+
+# 自定义完整环境清单
+# vla.install_dependencies(manifest="my-runtime.yaml")
+```
+
+源码示例提供了可编辑的安装脚本，内部调用同一个 Python API：
 
 ```bash
-# Torch base；没有仿真器
-vlastudio env create -n base
-# ACT 训练并在 ALOHA 评测
-vlastudio env create --policy act --env aloha_sim -n act_aloha
-vlastudio env run -n act_aloha -- python my_training_script.py
-# SmolVLA 与 LIBERO，同一进程使用的组件一起选择
-vlastudio env create --policy smolvla --env libero.object -n smol_libero
-vlastudio env run -n smol_libero -- python my_smolvla_script.py
-# 只做共享数据加载、变换和缓存
-vlastudio env create --dataset -n data
-vlastudio env run -n data -- python inspect_data.py
+python examples/install_dependencies.py --policy act --env aloha_sim
 ```
 
-`--dataset` 接受 task YAML 的名称或路径；不跟值时选择默认共享数据配置。
-策略选择器接受名称或 YAML 路径，`dp` 对应 `diffusion_policy`，
-`openpi` 对应 `pi0`。`aloha_sim` 对应 `aloha_transfer`。
-不兼容的 Python/依赖请分开创建环境，通过 policy server 通信。
+也可以完全自己编写 setup 文件，不需要使用这个辅助脚本。
 
-## 依赖分层
-
-清单位于 `src/vlastudio/environments/`：
-
-| 层 | 内容 | 选择方式 |
-| --- | --- | --- |
-| 轻量入口 | 配置、注册、环境管理 | 安装 vlastudio |
-| data | HDF5、LeRobot parquet/video、图像、变换、缓存；Torch/NumPy 使用兼容范围 | `--dataset <task>` |
-| base | 继承 data，固定 Torch 2.4 / torchvision 0.19 及通用训练依赖 | 无选择器，或 `--policy act/mlp` |
-| 模型 | 继承共享层并声明模型差异 | `--policy smolvla/pi0/openvla/fastwam/dp` |
-| 数据格式扩展 | RLDS/DROID 的 TensorFlow/dlimp；原生 LeRobot adapter 的 lerobot | 从 task 中的数据集类型或 runtime 选择 |
-| 仿真 | ALOHA、LIBERO、MetaWorld 等独立依赖 | `--env <config>` |
-
-base 不安装 LIBERO、MuJoCo、MetaWorld 等仿真器。DP 在 base 上增加 diffusers
-和 robomimic；SmolVLA/FastWAM 改用 Torch 2.7.1；OpenPI 默认 Python 3.11，
-并保留 transformers overlay 与 glibc 要求。
-
-“基于 base 新建”通过清单继承实现：每个新环境重新解析完整依赖，并复用 uv 的下载缓存。
-它不复制当前 base 中手工安装的包，也不通过 system-site-packages 共享可变环境。
-因此升级某个模型环境不会更改 base。
-
-其他历史模型仍可从组件自身的 `pyproject.toml` 生成安装方案；
-输出会标记为 legacy 清单，不能把这些旧依赖视为已验证的分层环境。
-FastWAM 的包清单只覆盖 Python 依赖；上游源码、权重、LIBERO 资源以及训练专用依赖
-仍按 [example08](../examples/08_fastwam_libero/README.md) 的 setup 步骤准备。
-
-## Python 加载入口的提示
+## 3. 写自己的 run.py
 
 ```python
-import vlastudio as vla             # 不要求 Torch 或仿真环境
-policy = vla.load_policy("smolvla")  # 缺失/不兼容时抛出 vla.DependencyError
-dataset = vla.load_dataset("sim_transfer_cube_scripted")
-bench = vla.load_env("aloha_transfer")
+import vlastudio as vla
+
+
+def main():
+    dataset = vla.load_dataset("sim_transfer_cube_scripted")
+    policy = vla.load_policy("act")
+    vla.train(policy, dataset, "default", output_dir="checkpoints/my_act")
+    benchmark = vla.load_env("aloha_transfer")
+    result = benchmark.evaluate(policy, output_dir="results/my_act")
+    print(result.metrics)
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-错误包含所选配置对应的安装、创建和运行命令，且保留结构化的 `error.plan`。
-这些函数仍返回配置句柄，不立即加载模型权重或数据，也不自动安装包。
-
-只编排任务、准备托管任务时，可以显式跳过当前进程检查：
-
-```python
-dataset = vla.load_dataset("sim_transfer_cube_scripted", check_dependencies=False)
-policy = vla.load_policy("act", runtime="managed")
-# 或 vla.load_policy("act", check_dependencies=False)
-vla.train(policy, dataset, output_dir="checkpoints/act")
+```bash
+python run.py
 ```
 
-`load_policy/load_env(runtime="managed")` 不检查调用者的 ML 环境；任务执行时准备独立环境。
-`load_dataset(check_dependencies=False)` 用于相同的编排场景。
-API 默认使用当前解释器；与以前的行为相比，load_* 默认增加了依赖预检，
-仅创建配置句柄的旧代码应显式关闭检查。
+数据路径、训练参数、策略服务、采集逻辑都可以在自己的文件里定义。
+使用内置配置名或自己的 YAML 路径即可。相对路径按当前工作目录解析。
+依赖缺失或版本不匹配时，`load_policy`、`load_dataset`、`load_env` 会提示
+需要的包和 setup 代码。`DependencyError` 继承 `ImportError`，也可读取其 `plan` 字段。
 
-也可直接获取只读方案：
+## 查看环境需求，不执行安装
 
 ```python
+import vlastudio as vla
+
 plan = vla.environment_plan(policy="smolvla", environment="libero.object")
-print(plan["commands"]["create"])
+print(plan["required_python"])
+print(plan["profile"]["requirements"])
+print(plan["issues"])
+
+# 也可预览一次安装调用；不会创建缓存或修改环境
+preview = vla.install_dependencies(policy="act", dry_run=True)
 ```
 
-## 自定义组件的共享清单
+检查只读取已安装包的元数据，不导入模型库，也不验证 CUDA、动态库、权重、
+仿真资源、extras 或 Git 源码版本。包版本齐全不代表系统资源已准备完成。
 
-自定义 YAML 中声明 `runtime: /path/my-runtime.yaml`，或环境命令使用
-`--runtime-manifest /path/my-runtime.yaml`。完整 manifest 与组件选择器二选一。
+## 共享层与模型层
+
+清单位于 `src/vlastudio/environments/`，依赖关系由 `extends` 声明：
+
+| 层或组件 | Python | 主要内容 |
+| --- | --- | --- |
+| data | 默认 3.10，允许 3.10–3.12 | HDF5、parquet、视频、图像与通用数据处理 |
+| base / ACT / MLP | 3.10 | data + Torch 2.4.0 / torchvision 0.19.0 / Transformers 4.45.2 |
+| Diffusion Policy | 3.10 | base + 扩散策略依赖 |
+| SmolVLA | 3.10 | base 的版本覆盖：Torch 2.7.1、LeRobot 0.3.3；Linux glibc ≥ 2.31 |
+| OpenPI / Pi0 / Pi0.5 | 3.11 | OpenPI 固定版本、Torch 2.7.1 和 Transformers 补丁；Linux glibc ≥ 2.31 |
+| FastWAM | 3.10 / Linux | Torch 2.7.1、视频模型依赖；另行准备源码和权重 |
+| simulator | 按组件 | ALOHA、LIBERO、MetaWorld、Tabletop-Sim 等独立仿真依赖 |
+
+子清单明确声明的同名包覆盖父层版本。并列选择的模型、数据集和仿真器需要
+同时满足各自约束；冲突时使用不同虚拟环境，通过 `vla.serve` 和 `vla.connect_policy` 通信。
+新环境继承的是共享配置，不会复制另一个虚拟环境中的文件。
+
+## 自定义清单、下载源与缓存
 
 ```yaml
-# my-runtime.yaml；extends 相对当前 manifest 解析
+# my-runtime.yaml；extends 相对当前清单文件解析
 extends: /path/VLAStudio/src/vlastudio/environments/base.yaml
 python: '3.10'
 requirements:
   - transformers==4.51.3
   - my-policy-package>=1
-notes:
-  - Prepare the model weights separately.
 ```
 
-`extends` 支持一个路径或路径列表，可多层继承，会检测循环。子清单明确写出的同名
-依赖覆盖父层约束；同时选择 policy、dataset、env 属于并列组合，保留各自的约束，
-安装工具会报告冲突。Python 版本不同会直接报错。`requires_python` 可声明允许的
-Python 范围，`python` 指定创建环境默认使用的版本。
-完整 lockfile 不参与继承；请提供最终完整 lockfile，包含所有轻量运行依赖。
-原有 `entrypoint`、`overrides`、`overlays`、`platforms`、`min_glibc` 继续支持。
+```python
+import vlastudio as vla
 
-## 当前环境安装、缓存和终端切换
-
-```bash
-# 增量安装到当前解释器，可能升级/降级已有包
-vlastudio env install --policy act --env aloha_sim
-# 已登记的环境可直接安装，无需激活
-vlastudio env install -n smol_libero --policy smolvla --env libero.object
-vlastudio env list
-vlastudio env path --policy act
-vlastudio env prepare --policy act --dry-run
+vla.install_dependencies(
+    manifest="my-runtime.yaml",
+    index_url="https://pypi.org/simple/",
+    cache_dir="/scratch/vlastudio",
+    offline=False,
+)
 ```
 
-安装前可使用 `--dry-run` 查看目标解释器及完整清单。`path` 不安装；
-`prepare` 准备环境，`run` 准备后执行命令。
-显式命名的新环境位于 `$VLASTUDIO_CACHE/envs/named-<名称>`；
-不命名时按完整清单哈希复用。重复 create 复用已有环境并保留手动修改，
-更新依赖请使用 `env install -n <名称> ...`，或新建另一个名称。
+`extends` 支持路径列表和多层继承，会检测循环。完整 lockfile 不能参与继承，
+应提供包含轻量运行依赖的最终完整锁定文件。`requires_python` 可声明允许的 Python 范围；
+`overrides`、`overlays`、平台和 glibc 限制继续适用。
+Python packages 的 CUDA 构建选择使用安装工具的索引配置；GPU 驱动仍由系统管理。
 
-base 首次由启动器环境登记，不代表 Torch 已安装；`env create` 会准备托管 base，
-已有用户登记的 base 则复用。`env install` 默认使用当前解释器并登记为 base，
-指定已登记名称则安装到该环境，指定新名称则登记当前解释器。
-`VLASTUDIO_BASE_PYTHON` 可指定已有 base，VLAStudio 不自动修改该外部环境。
+默认缓存为 `~/.cache/vlastudio`，可通过 `VLASTUDIO_CACHE` 或 `cache_dir` 修改。
+数据和模型缓存可分别通过工作流 API 的 `data_cache_dir`、`model_cache_dir` 配置。
+离线模式要求依赖包和源码已在缓存中，模型权重和仿真资源也要提前准备。
 
-默认缓存根目录为 `~/.cache/vlastudio`，用 `VLASTUDIO_CACHE` 修改。
-下载源继承系统和安装工具配置，使用 `-i/--index-url URL` 仅覆盖本次安装：
-
-```bash
-vlastudio env create --policy smolvla -i https://pypi.org/simple/
-```
-
-`env run` 不需要激活。需要切换当前终端时，先加载 shell 支持：
-
-```bash
-eval "$(vlastudio env init --shell bash)"
-# zsh: eval "$(vlastudio env init --shell zsh)"
-vlastudio env activate smol_libero
-vlastudio env deactivate
-```
-
-PowerShell：
-
-```powershell
-vlastudio env init --shell powershell | Out-String | Invoke-Expression
-vlastudio env activate smol_libero
-```
-
-初始化后 create 会自动激活创建的环境；activate/deactivate 默认返回 base。
+使用根目录 `uv sync` 后又增加模型包时，直接运行当前环境的 `python run.py`，
+或使用 `python -m uv run --no-sync python run.py`，保留额外安装的包。

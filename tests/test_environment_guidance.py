@@ -35,9 +35,11 @@ def test_loaders_explain_missing_packages(monkeypatch, category, selector, flag)
         getattr(vla, 'load_' + category)(selector)
     text = str(caught.value)
     assert 'torch' in text and 'missing' in text
-    assert 'env create ' + flag in text
-    assert 'env install ' + flag in text
-    assert 'env run ' + flag in text
+    argument = {'--policy': 'policy', '--dataset': 'dataset', '--env': 'environment'}[flag]
+    assert f'{argument}=' in text and selector in text
+    assert 'vla.install_dependencies(' in text
+    assert 'python run.py' in text
+    assert '-m vlastudio' not in text
 
 
 def test_handles_can_be_created_for_orchestration(monkeypatch):
@@ -107,7 +109,8 @@ def test_plan_and_check_do_not_create_cache(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(dependencies.metadata, 'version', missing)
     assert main(['plan', '--policy', 'act', '--json']) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert plan['commands']['create'].endswith('--policy act')
+    assert 'uv venv --python 3.10' in plan['commands']['create']
+    assert "policy='act'" in plan['setup_python']
     assert main(['check', '--policy', 'act']) == 2
     assert not cache.exists()
 
@@ -116,7 +119,7 @@ def test_platform_requirement_does_not_hide_installation_plan(monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'win32')
     plan = vla.environment_plan(policy='pi0')
     assert any('platform' in issue for issue in plan['issues'])
-    assert plan['commands']['create'].endswith('--policy pi0')
+    assert "policy='pi0'" in plan['setup_python']
 
 
 def test_legacy_model_metadata_is_discoverable():
@@ -209,3 +212,75 @@ def test_documentation_does_not_change_environment_cache_identity():
     from vlastudio.runtime import environment_identity
     profile = {'python': '3.10', 'requirements': ['torch==2.4.0']}
     assert environment_identity(profile) == environment_identity(dict(profile, notes=['Updated help'], description='New wording'))
+
+
+def test_library_install_preview_is_read_only(tmp_path, monkeypatch):
+    cache = tmp_path / 'absent-cache'
+    monkeypatch.setenv('VLASTUDIO_CACHE', str(cache))
+    plan = vla.install_dependencies(policy='act', dry_run=True)
+    assert 'torch==2.4.0' in plan['profile']['requirements']
+    assert not cache.exists()
+
+
+def test_library_install_targets_calling_interpreter(tmp_path, monkeypatch):
+    from vlastudio import env_registry
+    manifest = tmp_path / 'runtime.yaml'
+    manifest.write_text(f'python: "{sys.version_info.major}.{sys.version_info.minor}"\nrequirements: [example-package==1.0]\n')
+    calls = []
+    monkeypatch.setattr(env_registry, 'install', lambda *args: calls.append(args))
+    vla.install_dependencies(manifest=str(manifest), cache_dir=tmp_path / 'cache',
+                             index_url='https://example.test/simple', offline=True)
+    profile, python, cache, env = calls[0]
+    assert python == sys.executable
+    assert profile['requirements'] == ['example-package==1.0']
+    assert env['UV_INDEX_URL'] == 'https://example.test/simple'
+    assert env['UV_OFFLINE'] == '1'
+    assert not (cache / 'environments.json').exists()
+
+
+def test_library_install_rejects_wrong_python_before_mutating(tmp_path, monkeypatch):
+    from vlastudio import env_registry
+    manifest = tmp_path / 'runtime.yaml'
+    manifest.write_text('python: "3.0"\nrequirements: []\n')
+    cache = tmp_path / 'cache'
+    monkeypatch.setattr(env_registry, 'install', lambda *args: pytest.fail('Unexpected installation'))
+    with pytest.raises(ValueError, match='requires Python'):
+        vla.install_dependencies(manifest=str(manifest), cache_dir=cache)
+    assert not cache.exists()
+
+
+def test_robot_library_calls_forward_configuration_and_policy(tmp_path, monkeypatch):
+    from vlastudio import api
+    calls = []
+    monkeypatch.setattr(api, '_run', lambda *args: calls.append(args))
+    vla.collect('so101', teleop='so101_leader', output_dir=tmp_path / 'data',
+                task='pick up the cube', visualize=True)
+    command, args, options = calls.pop()
+    assert command == 'collect' and options['runtime'] == 'current'
+    assert args[args.index('--dataset-format') + 1] == 'hdf5'
+    assert args[args.index('--task') + 1] == 'pick up the cube'
+    assert args[args.index('-r') + 1].endswith('so101.yaml')
+    assert args[args.index('-t') + 1].endswith('so101_leader.yaml')
+    assert '--visualize' in args
+    vla.infer('so101', vla.connect_policy('localhost:5000'), output_dir=tmp_path / 'eval')
+    command, args, options = calls.pop()
+    assert command == 'infer' and options['runtime'] == 'current'
+    assert args[args.index('-m') + 1] == 'localhost:5000'
+    assert args[args.index('-am') + 1].endswith('basic.yaml')
+    policy = vla.load_policy('act', checkpoint=tmp_path / 'checkpoint', check_dependencies=False)
+    vla.infer('so101', policy)
+    assert calls[-1][1][calls[-1][1].index('-m') + 1] == str(tmp_path / 'checkpoint')
+    with pytest.raises(ValueError, match='frequency'):
+        vla.collect('so101', output_dir=tmp_path, frequency=0)
+    with pytest.raises(ValueError, match='saved Policy'):
+        vla.infer('so101', object())
+
+
+def test_example05_selects_separate_model_and_simulator_recipes():
+    _, model = select_profile(policy='pi05', dataset='tabletop_sim.dish_drainer', check_platform=False)
+    _, client = select_profile(environment='tabletop_sim.dish_drainer', remote=True, check_platform=False)
+    assert model['python'] == '3.11'
+    assert client['python'] == '3.10'
+    assert 'mujoco==3.2.0' in client['requirements']
+    assert 'dm-control==1.0.21' in client['requirements']
+    assert not any(req.startswith('mujoco') for req in model['requirements'])

@@ -16,7 +16,8 @@ POLICY_PROFILES = {
     'remote': 'remote', 'smolvla': 'smolvla', 'openpi': 'openpi',
     'openvla': 'openvla', 'fastwam': 'fastwam',
 }
-ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld'}
+ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld',
+                'tabletop_sim': 'tabletop_sim'}
 FIELDS = {'extends', 'python', 'requires_python', 'requirements', 'lockfile', 'lock', 'entrypoint',
           'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes'}
 

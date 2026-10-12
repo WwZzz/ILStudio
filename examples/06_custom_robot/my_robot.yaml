@@ -2,7 +2,7 @@
 #
 # A YAML list: the first row is the robot device (an external class referenced
 # by a local file path, so no VLAStudio source change is needed); the second row
-# is a camera-feed visualizer that `vlastudio collect --visualize` starts as a
+# is a camera-feed visualizer that `vla.collect(..., visualize=True)` starts as a
 # subprocess and shows the robot's camera in real time.
 #
 # ``type`` supports several external references:
@@ -30,7 +30,7 @@
     rotation_scale: 1.0
     gripper_scale: 1.0
     # control_shm_name is auto-filled from the first teleop device when using
-    # `vlastudio collect -t <teleop>`; no need to set it here.
+    # `vla.collect(..., teleop=...)`; no need to set it here.
 
 - type: vlastudio.deploy.visualizer.camera_view.CameraViewVisualizer
   name: my_so101_sim_view

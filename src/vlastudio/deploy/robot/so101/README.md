@@ -13,14 +13,26 @@ From the repository root, activate a dedicated Python 3.10 environment and insta
 
 ```bash
 python -m pip install -e .
-vlastudio env install --policy smolvla
+```
+
+The dependency setup file should contain:
+
+```python
+import vlastudio as vla
+
+vla.install_dependencies(policy="smolvla")
+```
+
+Save it as `setup_environment.py`, then run:
+
+```bash
+python setup_environment.py
 python -m pip install "lerobot[feetech]==0.3.3"
 ```
 
 The SmolVLA recipe supplies a compatible Torch/LeRobot runtime, including shared
 data and deployment dependencies. The Feetech extra supplies the motor SDK.
-For uv-managed setup, run `uv sync --python 3.10`, activate `.venv`, then run the
-last two commands above. See the [environment guide](../../../../../docs/environments.md).
+See the [environment guide](../../../../../docs/environments.md) for pip/uv setup.
 
 ## Architecture
 
@@ -42,15 +54,15 @@ So101Leader (BaseTeleopDevice)
 ## Configuration Files
 
 ### Robot Configurations
-- `src/vlastudio/configs/robot/so101.yaml` - Linux configuration (`-r so101`)
-- `src/vlastudio/configs/robot/so101_win.yaml` - Windows configuration (`-r so101_win`)
+- `src/vlastudio/configs/robot/so101.yaml` - Linux configuration (`"so101"`)
+- `src/vlastudio/configs/robot/so101_win.yaml` - Windows configuration (`"so101_win"`)
 
 ### Teleop Configurations  
-- `src/vlastudio/configs/teleop/so101_leader.yaml` - Linux configuration (`-t so101_leader`)
-- `src/vlastudio/configs/teleop/so101_leader_win.yaml` - Windows configuration (`-t so101_leader_win`)
+- `src/vlastudio/configs/teleop/so101_leader.yaml` - Linux configuration (`"so101_leader"`)
+- `src/vlastudio/configs/teleop/so101_leader_win.yaml` - Windows configuration (`"so101_leader_win"`)
 
 Paths above are relative to the repository root. Copy the YAML files to your own
-directory to customize them, then pass the file paths to `-r` and `-t`.
+directory to customize them, then pass the file paths to the Python functions.
 
 ## Implementation Notes
 
@@ -73,19 +85,28 @@ Make sure to adjust the following in the config files:
 ## Usage
 
 ### Training Data Collection
-```bash
-# Start both the leader and follower, recording HDF5 episodes
-vlastudio collect --runtime current -r so101 -t so101_leader -o data/so101_pick_place --dataset-format hdf5
+Save as `collect.py` and run `python collect.py`:
+
+```python
+import vlastudio as vla
+
+if __name__ == "__main__":
+    vla.collect("so101", teleop="so101_leader", output_dir="data/so101_pick_place")
 ```
 
 ### Policy Evaluation
-```bash
-# Connect to an already running policy server
-vlastudio infer --runtime current -r so101 -m localhost:5000
+Save as `infer.py` and run `python infer.py`:
 
-# Or load a checkpoint locally (install its model dependencies first)
-vlastudio infer --runtime current -r so101 -m checkpoints/my_policy
+```python
+import vlastudio as vla
+
+if __name__ == "__main__":
+    policy = vla.connect_policy("localhost:5000")
+    vla.infer("so101", policy)
 ```
+
+For a local model, use `vla.load_policy(..., checkpoint="checkpoints/my_policy")`
+after installing that model's dependencies into the device environment.
 
 ## Hardware Requirements
 

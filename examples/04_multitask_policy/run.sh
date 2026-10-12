@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Run from the repository root.
-vlastudio env create --policy smolvla --env libero.object -n smolvla
-eval "$(vlastudio env activate -n smolvla --shell bash)"
+# Optional convenience wrapper; activate your prepared environment first.
+set -euo pipefail
 python examples/04_multitask_policy/train_and_evaluate.py

@@ -1,5 +1,9 @@
 # Package and managed runtimes (development branch)
 
+For normal library use, write a Python workflow file and run `python run.py`.
+Start with the [homepage](../README.md) and [Python environment guide](environments.md).
+The command-line references below document the optional runtime tooling and compatibility interfaces.
+
 The package is now named `vlastudio`. This branch has not been published to PyPI.
 Install a locally built wheel with `pip install dist/vlastudio-*.whl`, or use
 `pip install -e .` for development. `import vlastudio` does not import Torch,

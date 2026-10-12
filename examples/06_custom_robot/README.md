@@ -6,7 +6,7 @@ teleoperator:
 
 1. Write a robot class (your file).
 2. Reference it from a YAML config by a local file path.
-3. Wire it to a teleoperator via `vlastudio collect`.
+3. Wire it to a teleoperator via `vla.collect(...)`.
 4. Watch the MuJoCo viewer follow your keyboard.
 
 It reuses the package's MuJoCo SO101 simulation (`So101SimRobot`), so it runs on
@@ -58,7 +58,7 @@ The `type` field supports several external references (see `extensions.py`):
 - **Dotted / module**: `my_package.devices:MyRobot`
 
 `control_shm_name` is **auto-filled** from the first teleop device by
-`vlastudio collect`, so you do not set it manually.
+`vla.collect(...)`, so you do not set it manually.
 
 ## 3. Keyboard teleop config
 
@@ -85,20 +85,19 @@ One `key_mappings` entry = one action dimension; positive/negative keys map to
 
 ## 4. Run it (pure Python)
 
-Install the dependencies, then launch with the Python script (no `vlastudio`
-console command needed):
+Activate a Python 3.10 virtual environment and install the shared deployment
+and simulator dependencies, then run the Python file directly:
 
 ```bash
-# Windows
-uv venv --python 3.11 .venv
-uv pip install -e . mujoco opencv-python scipy pillow
-.\examples\06_custom_robot\run.bat            # or: python examples/06_custom_robot/run.py
-
-# Linux / macOS
-uv venv --python 3.11 .venv
-uv pip install -e . mujoco opencv-python scipy pillow
-./examples/06_custom_robot/run.sh              # or: python examples/06_custom_robot/run.py
+python -m pip install -e .
+python examples/install_dependencies.py --policy act --env aloha_sim
+python examples/06_custom_robot/run.py
 ```
+
+See the [environment guide](../../docs/environments.md) for pip/uv setup.
+The keyboard and slider modes need Tkinter and a desktop display. You can edit
+`run.py` to change the device wiring, or use `vla.collect(...)` in your own file
+when you want to record demonstrations as well as control the robot.
 
 `run.py` is written to be read — it shows the whole flow with the public
 building blocks, in order:

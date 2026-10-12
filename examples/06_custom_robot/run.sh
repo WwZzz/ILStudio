@@ -4,4 +4,4 @@
 #   ./run.sh camera   -> live camera only
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
-./.venv/bin/python examples/06_custom_robot/run.py "${1:-teleop}"
+python examples/06_custom_robot/run.py "${1:-teleop}"

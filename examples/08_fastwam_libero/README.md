@@ -3,16 +3,27 @@
 Linux, Python 3.10 and an NVIDIA GPU with EGL support. From the repository root:
 
 ```bash
-bash examples/08_fastwam_libero/setup.sh
-source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/activate.sh"
+python -m pip install uv
+python -m uv venv --python 3.10 --seed "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08"
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/bin/activate"
+python -m pip install -e .
+python examples/install_dependencies.py --runtime-manifest examples/08_fastwam_libero/runtime.yaml
+python examples/08_fastwam_libero/setup.py
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/fastwam/env.sh"
 python examples/08_fastwam_libero/evaluate.py
 ```
 
 The evaluation command uses the official FastWAM Base checkpoint by default. Cache: `VLASTUDIO_CACHE`
-(default `~/.cache/vlastudio`). Setup accepts `-i URL`. Evaluation accepts
+(default `~/.cache/vlastudio`). Pass `-i URL` to `examples/install_dependencies.py`
+to select a package index. Python setup accepts `--root` and `--assets` to reuse
+the pinned LIBERO source and assets. Evaluation accepts
 `--suite spatial|object|goal|10`, `--checkpoint PATH`, `--device cuda:0`,
 and `--output-dir PATH`.
 Use fresh outputs. Configuration files are in `config/`.
+
+Native dependencies are Git, a C/C++ build toolchain, Python development headers,
+ImageMagick Wand, OpenGL, and EGL. The optional [setup.sh](setup.sh) installs the
+Ubuntu packages and runs the Python setup for you.
 
 On multi-GPU hosts affected by NVIDIA EGL aborts, keep rendering and inference
 on separate GPUs (validated on H100):
@@ -49,8 +60,10 @@ Sources: [paper, Table 2](https://arxiv.org/html/2603.16666v1),
 ## Train through VLAStudio
 
 ```bash
-bash examples/08_fastwam_libero/setup.sh --training
-source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/activate.sh"
+# Reuse the environment prepared above
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/bin/activate"
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/fastwam/env.sh"
+python -m pip install deepspeed==0.18.7 pyarrow==24.0.0 ninja tensorboard
 python examples/08_fastwam_libero/prepare_data.py --text-device cuda
 python examples/08_fastwam_libero/prepare_weights.py
 python -m torch.distributed.run --standalone --nproc_per_node=4 examples/08_fastwam_libero/train.py

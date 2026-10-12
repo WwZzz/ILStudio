@@ -31,6 +31,7 @@ gyx/*
 wyb/*
 num2words/
 .venv/
+.venv-*/
 checkpoints/*
 configs/policy/*gc*
 configs/action_manager/so101*
