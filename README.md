@@ -52,6 +52,14 @@ VLAStudio is a Python library for robot learning. Write your own `run.py` to loa
 
 ### Install the default environment
 
+With Python 3.10–3.12 in an activated environment:
+
+```bash
+python -m pip install vlastudio
+```
+
+For development or to run the repository examples:
+
 Clone the main branch, then install with pip in a uv virtual environment:
 
 ```bash

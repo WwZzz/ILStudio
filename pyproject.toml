@@ -1,14 +1,24 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
 name = "vlastudio"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Extensible robotics policy training and deployment"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
+authors = [{name = "VLAStudio contributors"}]
+keywords = ["robotics", "imitation-learning", "vision-language-action"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "PyYAML>=6,<7", "platformdirs>=4,<5", "filelock>=3.16,<4",
     "loguru>=0.7,<1", "packaging>=24", "tomli>=2; python_version < '3.11'",
@@ -29,6 +39,12 @@ dependencies = [
 [project.scripts]
 vlastudio = "vlastudio.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/WwZzz/VLAStudio"
+Documentation = "https://github.com/WwZzz/VLAStudio#readme"
+Repository = "https://github.com/WwZzz/VLAStudio"
+Issues = "https://github.com/WwZzz/VLAStudio/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "build>=1", "hatchling"]
 act = []
@@ -43,5 +59,5 @@ dev-mode-exact = true
 exclude = ["**/.venv/**", "**/__pycache__/**", "**/.git/**", "**/.ipynb_checkpoints/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/README.md", "/README.legacy.md", "/LICENSE", "/pyproject.toml", "/examples", "/tests", "/docs/package_runtime.md", "/docs/environments.md", "/docs/package_validation.md", "/docs/gpu_validation.json", "/requirements", "/requirements-legacy.txt", "/uv.lock"]
-exclude = ["**/.venv/**", "**/__pycache__/**", "**/.git/**"]
+include = ["/src", "/README.md", "/LICENSE", "/pyproject.toml", "/examples", "/docs", "/requirements", "/uv.lock"]
+exclude = ["**/.venv/**", "**/__pycache__/**", "**/.git/**", "**/.ipynb_checkpoints/**", "**/checkpoints/**", "**/results/**", "**/final-results/**", "**/tests/**"]
