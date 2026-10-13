@@ -10,6 +10,6 @@ python -m pip install -e .
 python examples/01_train_and_eval_act_on_aloha/train_and_evaluate.py
 ```
 
-Prepare the demonstrations at `data/sim_transfer_cube_scripted`, or update
-the task YAML's `dataset_path_list` to your own data path. The script trains ACT
-and evaluates the resulting checkpoint on ALOHA-Sim.
+The script uses `training_config.yaml` for ACT and requires all 50 transfer-cube
+demonstrations before training. It saves a fresh checkpoint under
+`checkpoints/act_aloha_full` and evaluates it on ALOHA-Sim.
