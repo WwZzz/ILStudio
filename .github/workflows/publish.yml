@@ -22,6 +22,9 @@ jobs:
           version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
           assert os.environ['RELEASE_TAG'] == 'v' + version
           PY
+      - name: Install Linux graphics libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check --strict dist/*
