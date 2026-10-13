@@ -1,11 +1,12 @@
 # Environments
 
-Explicit `env` commands install dependencies. Imports and workflow API calls never
-modify environments.
+`pip install vlastudio` includes base dependencies for ACT, DP and ALOHA-Sim.
+Run your Python script directly. Explicit `env` commands manage additional
+components or isolated environments; imports and workflow API calls never modify environments.
 
 ```bash
 pip install vlastudio
-vlastudio env install                         # current interpreter, registered as base
+python run.py                                # base is already installed
 vlastudio env create                          # isolated base: ACT, DP, ALOHA-Sim
 vlastudio env create -n pi05 --policy openpi
 vlastudio env create -n smol --policy smolvla --env libero
@@ -111,6 +112,7 @@ Recipes support `extends`, `overrides`, `overlays`, platform constraints and nam
 native `installers`. Peer constraints are kept together so conflicts are reported.
 Use separate model and simulator environments with remote inference when needed.
 
-`pip install "vlastudio[base]"` is available for users managing their own venvs.
+`vlastudio[base]` remains a compatibility alias for the default installation.
+`vlastudio env install` is still available to repair or register an existing base environment.
 OpenPI needs pinned source dependencies, overrides and a Transformers patch;
 `env create --policy openpi` performs these steps explicitly during installation.

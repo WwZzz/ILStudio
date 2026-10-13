@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vlastudio"
-version = "0.2.1"
+version = "0.2.2"
 description = "Extensible robotics policy training and deployment"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -24,6 +24,17 @@ dependencies = [
     "loguru>=0.7,<1", "packaging>=24", "tomli>=2; python_version < '3.11'",
     "editables>=0.3,<1",
     "uv>=0.8,<1",
+    "torch>=2.4,<2.8", "torchvision>=0.19,<0.23", "numpy==1.26.4",
+    "transformers>=4.40.1,<=4.53.2", "accelerate>=1.0.1,<=1.12.0",
+    "h5py==3.12.1", "pillow>=11,<13", "opencv-python>=4.9,<=4.10.0.84",
+    "einops==0.8.1", "scipy>=1.10.1,<=1.14.1", "timm>=0.9.16,<=1.0.15",
+    "torchdata==0.9.0", "matplotlib==3.9.4", "imageio>=2.34.2,<=2.37.0",
+    "imageio-ffmpeg==0.6.0", "websockets>=13.1,<16", "psutil==6.1.1",
+    "tensorboardX==2.6.4", "protobuf==5.29.6", "tqdm>=4.67,<5",
+    "pyarrow>=14,<22", "av>=12,<16", "huggingface-hub>=0.25,<1",
+    "diffusers>=0.30.3,<=0.35.1",
+    "dm-control>=1.0.21,<=1.0.34", "mujoco>=3.2.0,<=3.3.6",
+    "requests==2.32.5",
 
 ]
 
@@ -38,19 +49,8 @@ Issues = "https://github.com/WwZzz/VLAStudio/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "build>=1", "hatchling"]
-base = [
-    "torch>=2.4,<2.8", "torchvision>=0.19,<0.23", "numpy==1.26.4",
-    "transformers>=4.40.1,<=4.53.2", "accelerate>=1.0.1,<=1.12.0",
-    "h5py==3.12.1", "pillow>=11.3,<13", "opencv-python>=4.9,<=4.10.0.84",
-    "einops==0.8.1", "scipy==1.14.1", "timm>=0.9.16,<=1.0.15",
-    "torchdata==0.9.0", "matplotlib==3.9.4", "imageio==2.37.0",
-    "imageio-ffmpeg==0.6.0", "websockets==13.1", "psutil==6.1.1",
-    "tensorboardX==2.6.4", "protobuf==5.29.6", "tqdm>=4.67,<5",
-    "pyarrow>=14,<22", "av>=12,<16", "huggingface-hub>=0.29,<1",
-    "diffusers>=0.30.3,<=0.35.1",
-    "dm-control>=1.0.21,<=1.0.34", "mujoco>=3.2.0,<=3.3.6",
-    "requests==2.32.5",
-]
+# Compatibility aliases: base dependencies are installed by default.
+base = []
 act = ["vlastudio[base]"]
 aloha = ["vlastudio[base]"]
 remote-eval = ["vlastudio[base]"]

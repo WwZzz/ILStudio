@@ -1,6 +1,6 @@
 # Install externally with pip/uv. Matches the named dependency profile.
 pyarrow>=14,<22
-websockets==13.1
+websockets>=13.1,<16
 protobuf==5.29.6
 torch==2.7.1
 torchvision==0.22.1

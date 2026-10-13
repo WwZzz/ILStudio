@@ -50,16 +50,15 @@ VLAStudio is a Python library for robot learning. Write your own `run.py` to loa
 
 ## 🛠️ Installation
 
-Install the library, then install ACT / DP / ALOHA-Sim into your current environment:
+Install VLAStudio with base dependencies for ACT / DP / ALOHA-Sim:
 
 ```bash
 python -m pip install vlastudio
-vlastudio env install
 python run.py
 ```
 
-For development, use `pip install -e .` before `vlastudio env install`.
-Alternatively, `pip install "vlastudio[base]"` installs the base Python dependencies.
+For development, use `pip install -e .`. Base dependencies are included; no
+additional environment installation command is needed.
 
 Create a separate model or simulator environment:
 
