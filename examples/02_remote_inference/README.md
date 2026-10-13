@@ -1,4 +1,4 @@
-# Remote inference with separate environments
+# Remote inference
 
 This example uses `vla.serve`, `vla.connect_policy`, and `Environment.evaluate`.
 The Python files can be edited or copied into your own application. First train
@@ -6,10 +6,9 @@ the checkpoint in [Example 01](../01_train_and_eval_act_on_aloha).
 
 ## Policy server
 
-Activate a Python 3.10 model environment. From the repository root:
+Use your existing VLAStudio base environment. From the repository root:
 
 ```bash
-python -m pip install -e ".[base]"
 python examples/02_remote_inference/serve.py
 ```
 
@@ -17,17 +16,17 @@ Wait for the server to listen on port 5000. Leave this terminal running.
 
 ## Simulation client
 
-Activate a separate Python 3.10 environment in another terminal:
+Open another terminal and activate the same base environment:
 
 ```bash
-python -m pip install -e ".[base]"
 python examples/02_remote_inference/evaluate.py
 ```
 
 Change the server address inside `evaluate.py` to connect across machines.
-Only the server needs any optional policy-specific model packages. The default
-ACT/DP base is installed in both environments. The two processes can use
-different versions of Torch or other libraries.
+The default ACT + ALOHA example needs no extra installation. Both processes
+can share base. For a policy or simulator with conflicting dependencies, use
+separate prepared environments; the Python commands stay the same.
+See [setup](../README.md).
 
 ## Supported transports
 
@@ -41,7 +40,7 @@ different versions of Torch or other libraries.
 HTTP/HTTPS servers need additional dependencies installed in the server environment:
 
 ```bash
-python -m pip install -e ".[base,serve-http]"
+python -m pip install "vlastudio[serve-http]>=0.2.2"
 ```
 
 Update the address in both scripts. For HTTPS, set `ILSTD_SSL_KEYFILE` and

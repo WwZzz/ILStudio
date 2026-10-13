@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Optional wrapper for the two ordinary venvs prepared in README.md.
+# Optional wrapper for the prepared environments in README.md.
 set -euo pipefail
-source .venv-pi05/bin/activate
-python examples/05_finetune_vla_pi05/train.py
-python examples/05_finetune_vla_pi05/serve.py &
-source .venv-sim/bin/activate
+policy_python="${POLICY_PYTHON:-$(vlastudio env path pi05)}"
+sim_python="${SIM_PYTHON:-python}"
+"$policy_python" examples/05_finetune_vla_pi05/train.py
+"$policy_python" examples/05_finetune_vla_pi05/serve.py &
 export MUJOCO_GL=egl
-python examples/05_finetune_vla_pi05/evaluate.py
+"$sim_python" examples/05_finetune_vla_pi05/evaluate.py

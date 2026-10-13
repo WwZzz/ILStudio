@@ -1,12 +1,21 @@
 # Multitask SmolVLA on LIBERO
 
-Activate a Python 3.10 virtual environment and run from the repository root.
-See the [environment guide](../../docs/environments.md) to create an environment
-with pip or uv. Installation is separate from the workload; you can edit the
-Python script or copy its API calls into your own `run.py`.
+Base does not include SmolVLA or LIBERO. Prepare their additions once:
 
 ```bash
-python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.txt
+vlastudio env create -n smolvla --policy smolvla --env libero
+vlastudio env activate smolvla
+python examples/04_multitask_policy/train_and_evaluate.py
+```
+
+Skip `env create` when that environment is ready. If you already prepared
+[Example 07](../07_custom_sim_env_libero_plus), reuse its Python environment
+instead of creating another one. Select standard LIBERO's sources and assets:
+
+```bash
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example07/bin/activate"
+python examples/07_custom_sim_env_libero_plus/setup.py --backend standard
+source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/libero-standard/env.sh"
 python examples/04_multitask_policy/train_and_evaluate.py
 ```
 

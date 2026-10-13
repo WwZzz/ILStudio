@@ -85,15 +85,14 @@ One `key_mappings` entry = one action dimension; positive/negative keys map to
 
 ## 4. Run it (pure Python)
 
-Activate a Python 3.10 virtual environment and install the shared deployment
-and simulator dependencies, then run the Python file directly:
+Use your existing VLAStudio base environment and run from the repository root.
+No additional Python packages or virtual environment are needed:
 
 ```bash
-python -m pip install -e ".[base]"
 python examples/06_custom_robot/run.py
 ```
 
-See the [environment guide](../../docs/environments.md) for pip/uv setup.
+See [setup](../README.md) for the one-time base installation.
 The keyboard and slider modes need Tkinter and a desktop display. You can edit
 `run.py` to change the device wiring, or use `vla.collect(...)` in your own file
 when you want to record demonstrations as well as control the robot.
