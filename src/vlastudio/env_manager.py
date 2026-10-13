@@ -80,6 +80,10 @@ class Manager:
         if (executable.parent.parent / 'pyvenv.cfg').is_file():
             env['VIRTUAL_ENV'] = str(executable.parent.parent)
         for key, value in entry.get('variables', {}).items():
+            if key == 'LD_LIBRARY_PATH' and env.get(key):
+                # Keep native runtime paths and the current host's graphics paths.
+                paths = value.split(os.pathsep) + env[key].split(os.pathsep)
+                value = os.pathsep.join(dict.fromkeys(path for path in paths if path))
             env[key] = value
         return env
 
@@ -222,7 +226,8 @@ class Manager:
             with log_path.open('w', encoding='utf-8') as log:
                 process = subprocess.Popen(command, env=self.environment(entry), stdout=log, stderr=subprocess.STDOUT,
                                            start_new_session=os.name != 'nt')
-                code = process.wait(timeout=600 if smoke else 180)
+                timeout = 1200 if 'behavior1k' in profile.get('checks', []) else 600
+                code = process.wait(timeout=timeout if smoke else 180)
         except subprocess.TimeoutExpired:
             if os.name != 'nt':
                 os.killpg(process.pid, signal.SIGKILL)

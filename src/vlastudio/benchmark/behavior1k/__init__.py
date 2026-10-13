@@ -12,10 +12,14 @@ import sys
 import os
 
 # Add BEHAVIOR-1K packages to path BEFORE any imports
-BEHAVIOR_1K_PATH = os.path.join(os.path.dirname(__file__), 'BEHAVIOR-1K')
-sys.path.insert(0, os.path.join(BEHAVIOR_1K_PATH, 'bddl3'))
-sys.path.insert(0, os.path.join(BEHAVIOR_1K_PATH, 'OmniGibson'))
-sys.path.insert(0, os.path.join(BEHAVIOR_1K_PATH, 'joylo'))
+BEHAVIOR_1K_PATH = os.environ.get(
+    'VLASTUDIO_RUNTIME_BEHAVIOR_ROOT',
+    os.path.join(os.path.dirname(__file__), 'BEHAVIOR-1K'),
+)
+for package_dir in ('bddl3', 'OmniGibson', 'joylo'):
+    package_path = os.path.join(BEHAVIOR_1K_PATH, package_dir)
+    if os.path.isdir(package_path) and package_path not in sys.path:
+        sys.path.insert(0, package_path)
 
 # Set OmniGibson environment variables BEFORE importing omnigibson
 os.environ.setdefault("OMNIGIBSON_HEADLESS", "True")
@@ -187,6 +191,9 @@ class Behavior1kEnv(MetaEnv):
                     # Update observation modalities
                     robot_config["obs_modalities"] = ["proprio", "rgb"]
                     robot_config["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
+                    sensor = robot_config.setdefault("sensor_config", {}).setdefault("VisionSensor", {})
+                    camera = sensor.setdefault("sensor_kwargs", {})
+                    camera.update(image_height=self.image_size[0], image_width=self.image_size[1])
                     
                     cfg["robots"] = [robot_config]
                     

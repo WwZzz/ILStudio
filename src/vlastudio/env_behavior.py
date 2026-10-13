@@ -15,6 +15,7 @@ REVISION = '9f0d57d465726976ed98138d3f8b8ca3e2186775'
 RESOURCES = {
     'omnigibson-robot-assets': ('omnigibson-robot-assets.zip', 501401227, '5e9fe726172c8b4beb4ba4e12dbf5cf6c5791553a05c52be661eb2d6a3d241b8'),
     'behavior-1k-assets': ('behavior-1k-assets-3.7.2rc1.zip', 31280662307, '3bd7cdc1a8c5621768c2aaaf57c12a024560ab4f49d0162e540e769d8b165e8b'),
+    '2025-challenge-task-instances': ('2025-challenge-task-instances.zip', 105293007, '6262a496c82a534f42166ca1569ef28dc4cd9e53ffd0f9f8b0e7ecb8c62acde3'),
 }
 
 
@@ -54,4 +55,11 @@ def assets(*, accept_license=False):
 
 if __name__ == '__main__':
     import sys
-    assets(accept_license='--accept-license' in sys.argv)
+    import traceback
+    try:
+        assets(accept_license='--accept-license' in sys.argv)
+    except Exception:
+        # OmniGibson's exit handler can replace a failed download's exit status.
+        traceback.print_exc()
+        sys.stderr.flush()
+        os._exit(1)

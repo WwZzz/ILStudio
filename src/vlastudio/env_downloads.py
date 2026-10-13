@@ -40,8 +40,12 @@ def download(url, path, size, digest, *, offline=False):
                 return
             for attempt in range(4):
                 try:
-                    request = urllib.request.Request(url + ('&' if '?' in url else '?') + f'vlastudio_range={start}-{stop - 1}',
-                                                     headers={'Range': f'bytes={start}-{stop - 1}'})
+                    # A resumed request must not reuse an expired cached CDN redirect.
+                    query = f'vlastudio_range={start}-{stop - 1}&vlastudio_attempt={time.time_ns()}'
+                    request = urllib.request.Request(
+                        url + ('&' if '?' in url else '?') + query,
+                        headers={'Range': f'bytes={start}-{stop - 1}'},
+                    )
                     with urllib.request.urlopen(request, timeout=30) as response:
                         if response.status != 206 or response.headers.get('Content-Range') != f'bytes {start}-{stop - 1}/{size}':
                             raise ValueError('Server did not return the requested resource range')

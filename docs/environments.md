@@ -33,7 +33,7 @@ Review the upstream licenses before using acceptance flags:
 
 ```bash
 vlastudio env create -n rlbench --env rlbench --accept-license coppeliasim-edu
-vlastudio env create -n behavior --env behavior --accept-license nvidia-isaac-sim
+vlastudio env create -n behavior --env behavior --assets --accept-license nvidia-isaac-sim --accept-license behavior-dataset
 vlastudio env create -n robotwin --env robotwin --assets
 vlastudio env run rlbench -- xvfb-run -a python evaluate.py
 ```
@@ -43,10 +43,16 @@ C compiler and OpenGL/Qt libraries; headless hosts also need Xvfb and xauth.
 [CoppeliaSim licensing](https://www.coppeliarobotics.com/licensing).
 
 BEHAVIOR installs OmniGibson 3.7.2 and Isaac Sim 4.5.0. It requires Linux, Python
-3.10, glibc >= 2.34 and a compatible NVIDIA graphics driver. Add `--assets` and
-`--accept-license behavior-dataset` to download datasets (a large download).
+3.10, glibc >= 2.34 and a compatible NVIDIA graphics driver. `--assets` installs
+hash-verified robot assets, scene assets and official task instances (about 32 GB).
 [Isaac Sim license](https://docs.omniverse.nvidia.com/isaacsim/latest/common/licenses.html),
 [BEHAVIOR dataset license](https://behavior.stanford.edu/behavior-1k-dataset-license.html).
+
+Containers must expose NVIDIA `compute,utility,graphics` capabilities at creation;
+CUDA access alone does not provide Vulkan/EGL rendering. See the
+[NVIDIA container configuration](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html#driver-capabilities).
+The BEHAVIOR runtime was verified with driver 550.163.01 and matching graphics
+libraries. First initialization may take several minutes.
 
 Host drivers are not installed automatically. On an apt-based host, explicitly
 add `--system-packages` as root to install the required OS libraries. Otherwise
@@ -78,7 +84,7 @@ Validated on Linux with an RTX 4090 (2026-10-13):
 | LIBERO, MetaWorld | Simulator render/reset/step |
 | RLBench | ReachTarget render/reset/step |
 | RoboTwin | adjust_bottle render/reset/step with both cuRobo planners; PyTorch3D and Warp GPU kernels |
-| BEHAVIOR | Installation/imports passed; simulator verification pending (native Isaac Sim also crashes on the test host) |
+| BEHAVIOR | Robot smoke and official assembling_gift_baskets instance 0: reset, 10 action steps, three nonempty 128x128 RGB cameras and clean shutdown |
 
 RoboTwin's task check uses `demo_clean`; it does not validate every task or
 randomized-background configuration. Large resource downloads resume completed

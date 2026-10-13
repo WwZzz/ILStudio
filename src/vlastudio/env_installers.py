@@ -21,7 +21,7 @@ REQUIRED = {'rlbench': ['coppeliasim-edu'], 'behavior1k': ['nvidia-isaac-sim']}
 SYSTEM_PACKAGES = {
     'robotwin': ['build-essential', 'libvulkan1', 'libgl1', 'libegl1', 'libglib2.0-0'],
     'rlbench': ['build-essential', 'xvfb', 'xauth', 'libgl1', 'libglu1-mesa', 'libxkbcommon-x11-0', 'libxcb-xinerama0'],
-    'behavior1k': ['libgl1', 'libegl1', 'libglu1-mesa', 'libxrender1', 'libsm6'],
+    'behavior1k': ['libgl1', 'libegl1', 'libglu1-mesa', 'libxrender1', 'libsm6', 'libice6', 'libxt6', 'libvulkan1'],
 }
 COPPELIA = 'https://downloads.coppeliarobotics.com/V4_1_0/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.xz'
 

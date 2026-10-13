@@ -143,7 +143,9 @@ def main():
         simulation = [name for name in checks if name in ('aloha', 'libero', 'metaworld', 'rlbench', 'behavior1k', 'robotwin')]
         import subprocess
         for name in simulation:
-            result = subprocess.run([sys.executable, '-c', f'from vlastudio.env_probe import smoke; smoke({name!r})'], capture_output=True, text=True, timeout=300)
+            # First Isaac startup can take several minutes to initialize rendering.
+            timeout = 900 if name == 'behavior1k' else 300
+            result = subprocess.run([sys.executable, '-c', f'from vlastudio.env_probe import smoke; smoke({name!r})'], capture_output=True, text=True, timeout=timeout)
             print(result.stdout, end='', flush=True)
             print(result.stderr, end='', file=sys.stderr, flush=True)
             result.check_returncode()

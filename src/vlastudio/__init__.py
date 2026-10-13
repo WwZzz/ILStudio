@@ -6,7 +6,7 @@ from .api import (load_dataset, load_policy, load_env, connect_policy, train, se
                   Dataset, Policy, RemotePolicy, Environment, TrainingResult,
                   EvaluationResult, TaskError)
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __all__ = ["register", "resolve", "create", "load_dataset", "load_policy", "load_env",
            "connect_policy", "train", "serve", "show_camera", "collect", "infer",
            "Dataset", "Policy", "RemotePolicy", "Environment", "TrainingResult",
