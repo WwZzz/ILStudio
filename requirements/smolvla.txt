@@ -1,6 +1,6 @@
 # Install externally with pip/uv. Matches the named dependency profile.
 tqdm>=4.67,<5
-pyarrow>=14
+pyarrow>=14,<22
 av>=12,<16
 huggingface-hub>=0.29,<1
 einops==0.8.1

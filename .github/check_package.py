@@ -29,3 +29,8 @@ print('Installed package, version, aliases, assets and remote policy: PASS')
 '''], cwd=workdir, check=True)
     subprocess.run([sys.executable, '-I', '-m', 'vlastudio', '--help'],
                    cwd=workdir, check=True)
+    subprocess.run([sys.executable, '-I', '-m', 'vlastudio', 'env', 'create',
+                    '--policy', 'openpi', '-n', 'pi05', '--dry-run'], cwd=workdir, check=True)
+    subprocess.run([sys.executable, '-I', '-m', 'vlastudio', 'env', 'run', 'base',
+                    '--cache-dir', workdir, '--', 'python', '-c',
+                    'import vlastudio,sys; assert "torch" not in sys.modules'], cwd=workdir, check=True)

@@ -6,7 +6,7 @@ with pip or uv. Installation is separate from the workload; you can edit the
 Python script or copy its API calls into your own `run.py`.
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[base]"
 python examples/03_customize_policy/train_and_evaluate.py
 ```
 

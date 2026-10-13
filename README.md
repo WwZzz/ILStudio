@@ -46,83 +46,38 @@ VLAStudio is a Python library for robot learning. Write your own `run.py` to loa
 - **Combine data sources** through HDF5, LeRobot, and RLDS loaders and shared data processing.
 - **Evaluate and deploy** locally or through a policy server, with simulation benchmarks and real robot integrations.
 - **Extend the library** with your own policy, dataset, simulator, or robot without rewriting the pipeline.
-- **Choose your own Python environment.** Install ACT, Diffusion Policy and ALOHA-Sim with pip; use uv virtual environments and requirements files for other models.
+- **Choose your own Python environment.** Use `vlastudio env` to install and select model or simulator runtimes.
 
 ## 🛠️ Installation
 
-### Install the default environment
-
-With Python 3.10–3.12 in an activated environment:
+Install the library, then install ACT / DP / ALOHA-Sim into your current environment:
 
 ```bash
 python -m pip install vlastudio
+vlastudio env install
+python run.py
 ```
 
-For development or to run the repository examples:
+For development, use `pip install -e .` before `vlastudio env install`.
+Alternatively, `pip install "vlastudio[base]"` installs the base Python dependencies.
 
-Clone the main branch, then install with pip in a uv virtual environment:
+Create a separate model or simulator environment:
 
 ```bash
-git clone https://github.com/WwZzz/VLAStudio.git
-cd VLAStudio
-python -m pip install uv
-python -m uv venv --python 3.10 --seed .venv
-source .venv/bin/activate
-python -m pip install -e .
+vlastudio env create -n pi05 --policy openpi
+vlastudio env run pi05 -- python train.py
+vlastudio env create -n sim --env libero
+vlastudio env run sim -- python evaluate.py
+vlastudio env list
 ```
 
-That is the complete Python dependency installation for **ACT, Diffusion Policy,
-shared HDF5/LeRobot parquet and video processing, and ALOHA-Sim**. No additional
-model or simulator package installation is needed for the ACT/DP ALOHA examples.
-Provide demonstrations before training; the policies may download pretrained
-ResNet weights on first use. GPU execution needs a compatible NVIDIA driver,
-and headless rendering needs the host's OpenGL/EGL libraries.
+Selectors accept built-in names or config paths. Use `-i URL` for a custom index;
+otherwise existing uv settings and pip index environment variables apply. Cache location defaults to
+`~/.cache/vlastudio`; override it with `VLASTUDIO_CACHE`.
+See the [environment guide](docs/environments.md) for RLBench, BEHAVIOR, RoboTwin and validation.
 
-On Windows, activate with `.venv\Scripts\Activate.ps1`. Use `python -m pip install .`
-for a non-editable installation. Without a checkout, install the main branch:
-
-```bash
-python -m pip install "git+https://github.com/WwZzz/VLAStudio.git@main"
-```
-
-`import vlastudio` itself loads only Python's standard library. It never imports
-Torch, starts a simulator, creates an environment, or installs packages.
-
-### Other models: a separate environment and a requirements file
-
-For example, install SmolVLA and LIBERO in a separate environment:
-
-```bash
-deactivate
-python -m uv venv --python 3.10 --seed .venv-smolvla
-source .venv-smolvla/bin/activate
-python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.txt
-```
-
-Install the project and selected requirements in the **same pip invocation** so
-the resolver considers their versions together. The model files share a base
-and select model-specific versions. Simulator assets are prepared separately;
-follow the corresponding example before evaluation.
-
-The checkout also supports `python -m uv sync --python 3.10` after installing uv
-in the environment; its lock includes the default ACT/DP/ALOHA packages. Use
-ordinary `python run.py` after activation. For optional models, follow their
-requirements-file instructions instead of syncing the default lock.
-
-`load_policy`, `load_dataset`, and `load_env` report missing or incompatible
-dependencies and print an external pip installation command. For a read-only check:
-
-```python
-import vlastudio as vla
-
-plan = vla.environment_plan(policy="act", environment="aloha_sim")
-print(plan["issues"])
-print(plan["commands"]["install_current"])
-```
-
-See the [environment guide](docs/environments.md) for other models, Python versions,
-CUDA wheels, and custom dependency metadata. Installation is performed only by
-your terminal's pip/uv commands; workflow code uses the installed environment.
+`import vlastudio` stays lightweight and never installs dependencies. Ordinary
+Python scripts use their own interpreter; `env run` explicitly selects one.
 
 ## 🚀 Write Your Own run.py
 

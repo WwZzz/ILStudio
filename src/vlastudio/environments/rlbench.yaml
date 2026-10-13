@@ -1,0 +1,14 @@
+extends: data.yaml
+python: '3.10'
+platforms: [linux]
+min_glibc: '2.31'
+description: RLBench with CoppeliaSim EDU 4.1.0 and pinned PyRep.
+installers: [rlbench]
+checks: [rlbench]
+requirements:
+- gymnasium==0.29.1
+- rlbench @ git+https://github.com/stepjam/RLBench.git@02720bba4c73fe02eb75df946b8791b806028a9d
+overrides:
+- pyrep @ git+https://github.com/stepjam/PyRep.git@8f420be8064b1970aae18a9cfbc978dfb15747ef
+notes:
+- Headless rendering needs an X server; use xvfb-run on a host with Xvfb and xauth.

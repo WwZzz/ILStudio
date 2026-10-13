@@ -9,3 +9,5 @@ requirements:
 - sentencepiece==0.2.0
 - draccus==0.10.0
 - rich==13.9.4
+
+checks: [openvla]

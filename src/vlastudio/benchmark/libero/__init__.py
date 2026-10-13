@@ -69,6 +69,16 @@ from loguru import logger
 
 benchmark_dict = libero_bench.get_benchmark_dict()
 
+def load_task_init_states(task_suite, task_id):
+    """Read NumPy initial states under PyTorch's restricted checkpoint loader."""
+    import torch
+    allowed = [np.core.multiarray._reconstruct, np.ndarray, np.dtype,
+               type(np.dtype('float64')), type(np.dtype('float32'))]
+    task = task_suite.get_task(task_id)
+    path = Path(get_libero_path('init_states')) / task.problem_folder / task.init_states_file
+    with torch.serialization.safe_globals(allowed):
+        return torch.load(path, weights_only=True)
+
 def create_env(config):
     return LiberoEnv(config)
 
@@ -91,7 +101,7 @@ class LiberoEnv(MetaEnv):
         task_id = int(task_info[-1])
         ctrl_space = "OSC_POSE" if self.ctrl_space=='ee' else "JOINT_POSITION"  # ee or joint
         task_suite = benchmark_dict[task_name]()
-        init_states = task_suite.get_task_init_states(task_id)
+        init_states = load_task_init_states(task_suite, task_id)
         task = task_suite.get_task(task_id)
         self.raw_lang =  task.language
         self.task_name = task.name

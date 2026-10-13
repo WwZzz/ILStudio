@@ -1,5 +1,5 @@
 # Install externally with pip/uv. Matches the named dependency profile.
-pyarrow>=14
+pyarrow>=14,<22
 websockets==13.1
 protobuf==5.29.6
 torch==2.7.1

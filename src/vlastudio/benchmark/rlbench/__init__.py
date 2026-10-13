@@ -160,6 +160,9 @@ class RLBenchEnv(MetaEnv):
             headless=self.headless,
             shaped_rewards=False
         )
+        # Imports such as OpenCV can replace the Qt plugin path during startup.
+        if 'COPPELIASIM_ROOT' in os.environ:
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.environ['COPPELIASIM_ROOT']
         env.launch()
         
         # Get action bounds from action mode

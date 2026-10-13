@@ -89,7 +89,7 @@ Activate a Python 3.10 virtual environment and install the shared deployment
 and simulator dependencies, then run the Python file directly:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[base]"
 python examples/06_custom_robot/run.py
 ```
 

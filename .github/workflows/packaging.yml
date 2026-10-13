@@ -2,7 +2,7 @@ name: Package validation
 on:
   pull_request:
   push:
-    branches: [main, codex/pypi-release]
+    branches: [main, codex/pypi-release, codex/environment-installers]
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,5 @@ jobs:
       - name: Install built wheel without ML dependencies
         shell: bash
         run: |
-          python -m pip install --no-deps dist/*.whl
-          python -m pip install PyYAML platformdirs packaging
+          python -m pip install dist/*.whl
       - run: python .github/check_package.py

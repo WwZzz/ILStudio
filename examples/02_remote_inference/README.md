@@ -9,7 +9,7 @@ the checkpoint in [Example 01](../01_train_and_eval_act_on_aloha).
 Activate a Python 3.10 model environment. From the repository root:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[base]"
 python examples/02_remote_inference/serve.py
 ```
 
@@ -20,7 +20,7 @@ Wait for the server to listen on port 5000. Leave this terminal running.
 Activate a separate Python 3.10 environment in another terminal:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[base]"
 python examples/02_remote_inference/evaluate.py
 ```
 
@@ -41,7 +41,7 @@ different versions of Torch or other libraries.
 HTTP/HTTPS servers need additional dependencies installed in the server environment:
 
 ```bash
-python -m pip install -e ".[serve-http]"
+python -m pip install -e ".[base,serve-http]"
 ```
 
 Update the address in both scripts. For HTTPS, set `ILSTD_SSL_KEYFILE` and
