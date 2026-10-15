@@ -1,6 +1,7 @@
 {
   "status": "pending_bicycle_compatibility_protocol_decision",
   "implementation_commit": "0bcf4c7",
+  "candidate_implementation_commit": "3492d28",
   "training": {
     "planner_type": "merge_ctrl_traj",
     "initialization": "official TCP",
