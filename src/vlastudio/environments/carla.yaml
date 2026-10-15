@@ -1,5 +1,7 @@
 extends: remote.yaml
+requires_python: '>=3.10,<3.11'
 platforms: [linux]
+min_glibc: '2.27'
 description: CARLA 0.9.15 and official Bench2Drive 0.0.4 closed-loop scenarios.
 requirements:
 - carla==0.9.15

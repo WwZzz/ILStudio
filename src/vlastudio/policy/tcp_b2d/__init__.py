@@ -12,10 +12,10 @@ from transformers import PretrainedConfig, PreTrainedModel
 class TCPConfig(PretrainedConfig):
     model_type = 'tcp_b2d'
 
-    def __init__(self, planner_type='only_traj', download=True, freeze_batch_norm=True, **kwargs):
+    def __init__(self, planner_type='merge_ctrl_traj', download=True, freeze_batch_norm=True, **kwargs):
         super().__init__(**kwargs)
-        if planner_type not in ['only_traj', 'only_ctrl']:
-            raise ValueError('planner_type must be only_traj or only_ctrl')
+        if planner_type not in ['only_traj', 'only_ctrl', 'merge_ctrl_traj']:
+            raise ValueError('planner_type must be only_traj, only_ctrl or merge_ctrl_traj')
         self.planner_type, self.download = planner_type, download
         self.freeze_batch_norm = freeze_batch_norm
         self.ctrl_space, self.ctrl_type = 'vehicle', 'control'
@@ -101,13 +101,20 @@ class TCPPolicy(PreTrainedModel):
                 self.controllers[index] = (module.PIDController(cfg.turn_KP, cfg.turn_KI, cfg.turn_KD, cfg.turn_n),
                                            module.PIDController(cfg.speed_KP, cfg.speed_KI, cfg.speed_KD, cfg.speed_n))
             self.navigator.turn_controller, self.navigator.speed_controller = self.controllers[index]
-            if self.config.planner_type == 'only_traj':
+            planner = self.config.planner_type
+            if planner != 'only_ctrl':
                 reverse = False
                 steer, throttle, brake, _ = self.navigator.control_pid(
                     prediction['pred_wp'][index:index+1].clone(), state[index:index+1, 0], state[index:index+1, 1:3].clone())
-            else:
+            if planner != 'only_traj':
                 action = prediction['action_index'][index].argmax().item()
-                throttle, steer, brake, reverse = module.Discrete_Actions_DICT[action]
+                ctrl_throttle, ctrl_steer, ctrl_brake, ctrl_reverse = module.Discrete_Actions_DICT[action]
+                if planner == 'merge_ctrl_traj':
+                    steer = .5*steer+.5*ctrl_steer
+                    throttle = .5*throttle+.5*ctrl_throttle
+                    brake = max(brake, ctrl_brake)
+                else:
+                    throttle, steer, brake, reverse = ctrl_throttle, ctrl_steer, ctrl_brake, ctrl_reverse
             speed_threshold = 1. if abs(steer) > .07 else 1.5
             throttle = np.clip(throttle, 0., .05 if float(state[index, 0]) > speed_threshold else .5)
             brake = float(brake > 0)
@@ -134,7 +141,7 @@ def load_model(args):
         reference = getattr(args, 'pretrained_weight_path', None)
     else:
         reference = args.model_name_or_path
-    config = TCPConfig(planner_type=getattr(args, 'planner_type', 'only_traj'), download=getattr(args, 'download', True),
+    config = TCPConfig(planner_type=getattr(args, 'planner_type', 'merge_ctrl_traj'), download=getattr(args, 'download', True),
                        freeze_batch_norm=getattr(args, 'freeze_batch_norm', True))
     if reference == 'official':
         model = official_model(config)

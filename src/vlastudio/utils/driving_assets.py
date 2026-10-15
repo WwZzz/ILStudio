@@ -100,6 +100,16 @@ def source(name, download=True):
 
 def hf_asset(repository, filename, revision, *, dataset=False, download=True):
     from huggingface_hub import hf_hub_download
-    return Path(hf_hub_download(repository, filename, revision=revision,
-        repo_type='dataset' if dataset else 'model',
-        cache_dir=str(cache_root()/'huggingface'), local_files_only=not download))
+    import requests
+    import time
+    for attempt in range(6):
+        try:
+            return Path(hf_hub_download(repository, filename, revision=revision,
+                repo_type='dataset' if dataset else 'model',
+                cache_dir=str(cache_root()/'huggingface'), local_files_only=not download))
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError):
+            if not download or attempt == 5:
+                raise
+            # The Hub resumes its existing partial file. Do not discard cached
+            # bytes or retry authentication / missing-file errors.
+            time.sleep(min(2**attempt, 30))

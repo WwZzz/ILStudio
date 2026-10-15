@@ -27,8 +27,8 @@ Evaluation resumes from its completed-route journal with the same command.
 
 Observation: one RGB panorama `(1,3,256,900)`, speed in m/s, ego-frame next route
 point and six route-command indicators. Action: `[steer, throttle, brake, reverse]`,
-with ranges `[-1,1], [0,1], [0,1], {0,1}`. The default policy predicts waypoints
-and uses the authors' PID controller to produce these controls.
+with ranges `[-1,1], [0,1], [0,1], {0,1}`. The default `merge_ctrl_traj` policy
+uses the authors' 50/50 fusion of waypoint PID and learned control predictions.
 
 The ordinary environment API also works with a saved checkpoint:
 

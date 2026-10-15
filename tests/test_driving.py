@@ -111,6 +111,40 @@ def test_batchnorm_freeze_keeps_training_gradients_and_checkpoint_contract(tmp_p
     assert json.loads((tmp_path/'normalize.json').read_text())['action']['bench2drive'] == 'identity'
 
 
+def test_official_fused_controls_and_braking_preserve_input_state(monkeypatch):
+    from torch import nn
+    from vlastudio.policy.tcp_b2d import TCPConfig, TCPPolicy, upstream
+    class Navigator(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.zeros(1))
+            self.config = SimpleNamespace(**{name: 1 for name in ['turn_KP', 'turn_KI', 'turn_KD', 'turn_n',
+                'speed_KP', 'speed_KI', 'speed_KD', 'speed_n']})
+        def control_pid(self, waypoints, speed, target):
+            target.zero_()  # The upstream PID mutates its target argument.
+            return .4, .6, False, {}
+    monkeypatch.setattr(upstream, 'network', lambda download: Navigator())
+    module = SimpleNamespace(PIDController=lambda *args: object(), Discrete_Actions_DICT=action_table())
+    monkeypatch.setattr(upstream, 'modules', lambda download: (module, None))
+    model = TCPPolicy(TCPConfig(download=False)).eval()
+    chosen = [1]
+    def predict(image, state):
+        logits = torch.zeros(1, 39)
+        logits[:, chosen[0]] = 1
+        return {'pred_wp': torch.zeros(1, 4, 2), 'action_index': logits}
+    monkeypatch.setattr(model, 'predict', predict)
+    state = torch.tensor([[.2, 3, 4, 0, 0, 0, 1, 0, 0]])
+    original = state.clone()
+    observation = {'state': state, 'image': torch.zeros(1), 'timestamp': torch.tensor([0])}
+    np.testing.assert_allclose(model.select_action(observation).numpy(), [[[-.05, .5, 0, 0]]], atol=1e-6)
+    assert torch.equal(state, original)
+    chosen[0] = 0
+    np.testing.assert_allclose(model.select_action(observation).numpy(), [[[.2, 0, 1, 0]]], atol=1e-6)
+    chosen[0] = 38
+    model.config.planner_type = 'only_ctrl'
+    np.testing.assert_allclose(model.select_action(observation).numpy(), [[[.5, .5, 0, 1]]], atol=1e-6)
+
+
 @pytest.mark.parametrize('name,link', [('../escape', None), ('link', '../../escape')])
 def test_asset_extraction_rejects_escaping_members(tmp_path, name, link):
     from vlastudio.utils.driving_assets import extract
@@ -135,6 +169,9 @@ def test_carla_recipe_declares_native_installation():
     config, path = read_config('carla.bench2drive', 'env')
     profile = environment_for(config, path, check_platform=False)
     assert profile['installers'] == ['carla'] and 'carla' in profile['checks']
+    from packaging.specifiers import SpecifierSet
+    assert '3.10.16' in SpecifierSet(profile['requires_python'])
+    assert '3.11.0' not in SpecifierSet(profile['requires_python'])
     preflight(profile)
 
 
@@ -157,3 +194,26 @@ def test_unwrapped_runtime_archive_remains_traversable(tmp_path):
     target = extract(archive, tmp_path/'runtime')
     if __import__('os').name != 'nt':
         assert target.stat().st_mode & 0o777 == 0o755
+
+
+def test_interrupted_hub_transfers_resume_without_changing_revision(tmp_path, monkeypatch):
+    import huggingface_hub
+    import requests
+    import time
+    from vlastudio.utils import driving_assets
+    monkeypatch.setattr(driving_assets, 'cache_root', lambda: tmp_path)
+    calls, delays = [], []
+    def download(repository, filename, **options):
+        calls.append((repository, filename, options))
+        if len(calls) < 3:
+            raise requests.exceptions.ChunkedEncodingError('interrupted fixture transfer')
+        return str(tmp_path/'cached-shard')
+    monkeypatch.setattr(huggingface_hub, 'hf_hub_download', download)
+    monkeypatch.setattr(time, 'sleep', delays.append)
+    assert driving_assets.hf_asset('fixture', 'route.tar.gz', 'pinned-revision', dataset=True) == tmp_path/'cached-shard'
+    assert len(calls) == 3 and calls[0] == calls[1] == calls[2] and delays == [1, 2]
+    calls.clear()
+    delays.clear()
+    with pytest.raises(requests.exceptions.ChunkedEncodingError):
+        driving_assets.hf_asset('fixture', 'route.tar.gz', 'pinned-revision', dataset=True, download=False)
+    assert len(calls) == 1 and not delays

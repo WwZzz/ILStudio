@@ -16,7 +16,8 @@ def prepare_sources(carla_root):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     os.environ['IS_BENCH2DRIVE'] = 'True'
-    os.environ['PLANNER_TYPE'] = 'only_traj'
+    # The sensor bridge delegates controls to the configured VLAStudio policy.
+    os.environ.pop('PLANNER_TYPE', None)
     os.environ['SCENARIO_RUNNER_ROOT'] = str(b2d/'scenario_runner')
     os.environ['LEADERBOARD_ROOT'] = str(b2d/'leaderboard')
     os.environ['CARLA_ROOT'] = str(carla_root)

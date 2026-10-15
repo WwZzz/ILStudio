@@ -59,9 +59,12 @@ it is not a free-form language-conditioned VLA model.
 
 The environment declares `ctrl_space: vehicle`, `ctrl_type: control` and
 `action_order: [steer, throttle, brake, reverse]`. Controls have ranges
-`[-1,1], [0,1], [0,1], {0,1}`. TCP's default `only_traj` planner predicts four
-waypoints and applies its PID controller. `only_ctrl` selects a control from the
-39 expert classes. Controllers are private to each episode/batch slot.
+`[-1,1], [0,1], [0,1], {0,1}`. TCP's default `merge_ctrl_traj` planner follows
+the authors' full-evaluation launcher: steering/throttle blend waypoint PID and
+the learned control head equally, and braking uses their maximum. `only_traj`
+uses waypoint PID alone; `only_ctrl` selects one of the 39 expert control classes.
+The policy configuration/checkpoint declares this choice. Controllers are private
+to each episode/batch slot.
 
 TCP initializes from the authors' complete released checkpoint without an
 additional ImageNet download. VLAStudio saves ordinary HF-compatible model

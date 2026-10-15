@@ -4,7 +4,7 @@ trainer_class: Trainer
 args:
   device: cuda
   pretrained_weight_path: official
-  planner_type: only_traj
+  planner_type: merge_ctrl_traj
   freeze_batch_norm: true
   download: true
   chunk_size: 1

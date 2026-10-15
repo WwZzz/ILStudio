@@ -42,14 +42,16 @@ def main(default_config=None):
     model_digest = sha256(checkpoint) if checkpoint.is_file() else 'e6573ff1f8ea910b9a53eddfb68f69cac469bf5bfa253a516578f6126110b4fe' if args.model == 'official' else None
     if model_digest is None:
         raise FileNotFoundError('Evaluation requires official weights or a local saved TCP checkpoint')
+    planner_type = json.loads((checkpoint.parent/'config.json').read_text())['planner_type'] if checkpoint.is_file() else 'merge_ctrl_traj'
     package = Path(__file__).resolve().parents[2]
     adapter_digest = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob('*.py'))+[package/'utils/driving.py', package/'policy/tcp_b2d/__init__.py', package/'policy/tcp_b2d/upstream.py']:
         adapter_digest.update(str(path.relative_to(package)).encode())
         adapter_digest.update(path.read_bytes())
     manifest = {'model_sha256': model_digest, 'config_sha256': config_digest,
+                'planner_type': planner_type,
                 'adapter_sha256': adapter_digest.hexdigest(),
-                'model_config_sha256': sha256(checkpoint.parent/'config.json') if checkpoint.is_file() else hashlib.sha256(b'official:only_traj').hexdigest(),
+                'model_config_sha256': sha256(checkpoint.parent/'config.json') if checkpoint.is_file() else hashlib.sha256(b'official:merge_ctrl_traj').hexdigest(),
                 'benchmark_revision': B2D_REVISION, 'model_code_revision': TCP_REVISION,
                 'training_data_revision': B2D_DATA_REVISION,
                 'routes_sha256': sha256(Path(config.get('routes') or source('bench2drive')/'leaderboard/data/bench2drive_0.0.4_val.xml'))}
@@ -73,7 +75,7 @@ def main(default_config=None):
             config.pop('max_routes', None)
             env = Bench2DriveEnv(SimpleNamespace(**config))
     model = load_model(SimpleNamespace(is_training=False, model_name_or_path=args.model,
-        download=True, planner_type='only_traj'))['model'].to(args.device).eval()
+        download=True, planner_type='merge_ctrl_traj'))['model'].to(args.device).eval()
     started = time.monotonic()
     try:
         for route in expected[len(completed):]:
