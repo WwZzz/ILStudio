@@ -51,6 +51,16 @@ def test_driving_coordinates_and_commands():
     assert len(action_table()) == 39 and action_table()[-1][3]
 
 
+def test_parallel_camera_conversion_preserves_exact_policy_pixels():
+    pytest.importorskip('cv2')
+    from vlastudio.utils.driving import compose_images
+    generator = np.random.default_rng(7)
+    images = [generator.integers(0, 256, (50, 1600, 3), dtype=np.uint8) for _ in range(3)]
+    sequential = compose_images(images, jpeg=True, jpeg_workers=1)
+    parallel = compose_images(images, jpeg=True, jpeg_workers=3)
+    np.testing.assert_array_equal(sequential, parallel)
+
+
 def test_terminal_observation_and_negative_warmup_have_no_training_actions(tmp_path):
     from PIL import Image
     from vlastudio.data_utils.datasets.bench2drive import Bench2DriveDataset

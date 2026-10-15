@@ -18,7 +18,8 @@ python examples/10_autonomous_driving/carla/train.py
 python examples/10_autonomous_driving/carla/evaluate.py --model checkpoints/example10/tcp --output results/example10/tcp
 ```
 
-`config/task.yaml` selects ten scenario-diverse training routes. Set
+The default run performs 100 fine-tuning updates. `config/task.yaml` selects ten
+scenario-diverse training routes. Set
 `max_trajectories: null` to use all 1,100 official training routes (a large download).
 `train.py --steps 100` limits a development run. `config/val.yaml` evaluates all
 220 official validation routes; `--max-routes 1` is a small interface check only.

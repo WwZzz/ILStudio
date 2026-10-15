@@ -11,7 +11,7 @@ establish that result. The fixed protocol is in [protocol.json](protocol.json).
 | Dataset | 180 valid windows from one official training route; route ID disjoint from validation |
 | Standard training interface | Two optimizer updates, frozen BatchNorm configuration; saved HF checkpoint |
 | Standard `env.evaluate` | Trained two-step checkpoint; official route 24721; 1/1 success, DS 100, completion 100 |
-| Regression checks | 116 passed, 2 optional-dependency skips |
+| Regression checks | 117 passed, 2 optional-dependency skips |
 
 [Native runtime](interface/native-server.json) ·
 [Installed maps](interface/native-install.json) ·

@@ -36,18 +36,23 @@ def observation_state(speed, target, command):
     return np.concatenate([[speed], target, one_hot]).astype(np.float32)
 
 
-def compose_images(images, *, jpeg=False):
+def compose_images(images, *, jpeg=False, jpeg_workers=3):
     """Reproduce the authors' left/front/right crop and 256x900 panorama."""
     import torch
     left, front, right = images
     if jpeg:
         import cv2
-        compressed = []
-        for image in [left, front, right]:
+        from concurrent.futures import ThreadPoolExecutor
+        def compress(image):
             ok, encoded = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 20])
             if not ok:
                 raise RuntimeError('CARLA sensor JPEG conversion failed')
-            compressed.append(cv2.imdecode(encoded, cv2.IMREAD_COLOR))
+            return cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if jpeg_workers == 1:
+            compressed = list(map(compress, [left, front, right]))
+        else:
+            with ThreadPoolExecutor(max_workers=jpeg_workers) as workers:
+                compressed = list(workers.map(compress, [left, front, right]))
         left, front, right = compressed
     joined = np.concatenate([left[:, :1400], front[:, 200:1400], right[:, 200:]], axis=1)
     tensor = torch.as_tensor(joined.copy()).permute(2, 0, 1)[None].float()
