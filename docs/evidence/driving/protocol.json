@@ -1,6 +1,6 @@
 {
   "status": "pending_full_validation",
-  "implementation_commit": "33e611e",
+  "implementation_commit": "0bcf4c7",
   "training": {
     "planner_type": "merge_ctrl_traj",
     "initialization": "official TCP",
