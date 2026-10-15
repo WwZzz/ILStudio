@@ -36,3 +36,5 @@ requirements:
 notes:
 - Python packages only. Use bash examples/08_fastwam_libero/setup.sh for the pinned
   upstream source, weights and LIBERO setup; add --training for training dependencies.
+
+checks: [fastwam]

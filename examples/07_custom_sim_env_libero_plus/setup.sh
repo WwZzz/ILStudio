@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the example into a regular Python virtual environment.
+# Reuse a cached model environment, or add requirements to the current interpreter.
 set -euo pipefail
 
 example_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +10,7 @@ venv_dir="${VENV_DIR:-$VLASTUDIO_CACHE/envs/example07}"
 pip_args=()
 setup_args=()
 install_system=1
+use_current=0
 download_assets=1
 while (($#)); do
     case "$1" in
@@ -20,6 +21,7 @@ Usage: bash examples/07_custom_sim_env_libero_plus/setup.sh [options]
   --root PATH         Reuse an existing LIBERO-Plus checkout.
   --assets PATH       Reuse extracted assets instead of downloading them.
   --skip-system       Skip apt packages when native dependencies are installed.
+  --current           Reuse the active Python 3.10 environment; do not create a venv.
 Environment: PYTHON (Python 3.10), VLASTUDIO_CACHE, VENV_DIR.
 HELP
             exit 0 ;;
@@ -32,6 +34,7 @@ HELP
             esac
             shift 2 ;;
         --skip-system) install_system=0; shift ;;
+        --current) use_current=1; shift ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -39,6 +42,11 @@ done
 if [[ "$(uname -s)" != Linux ]]; then
     echo "This example requires Linux and an NVIDIA GPU." >&2
     exit 1
+fi
+if ((use_current)); then
+    python_bin="${PYTHON:-python}"
+elif [[ -x "$venv_dir/bin/python" ]]; then
+    python_bin="$venv_dir/bin/python"
 fi
 "$python_bin" -c 'import sys; assert sys.version_info[:2] == (3, 10), "Set PYTHON to a Python 3.10 interpreter"'
 if ((install_system)); then
@@ -54,27 +62,39 @@ if ((install_system)); then
 fi
 mkdir -p "$VLASTUDIO_CACHE" "$(dirname -- "$venv_dir")"
 export VLASTUDIO_CACHE="$(cd -- "$VLASTUDIO_CACHE" && pwd)"
-if [[ ! -f "$venv_dir/pyvenv.cfg" ]]; then
-    if [[ -e "$venv_dir" ]]; then
-        echo "Refusing to overwrite a directory that is not a venv: $venv_dir" >&2
-        exit 1
+if ((use_current)); then
+    python="$python_bin"
+    activation_file="$VLASTUDIO_CACHE/example07/activate-current.sh"
+    mkdir -p "$(dirname -- "$activation_file")"
+else
+    if [[ ! -f "$venv_dir/pyvenv.cfg" ]]; then
+        if [[ -e "$venv_dir" ]]; then
+            echo "Refusing to overwrite a directory that is not a venv: $venv_dir" >&2
+            exit 1
+        fi
+        "$python_bin" -m venv "$venv_dir"
     fi
-    "$python_bin" -m venv "$venv_dir"
+    venv_dir="$(cd -- "$venv_dir" && pwd)"
+    python="$venv_dir/bin/python"
+    activation_file="$venv_dir/activate.sh"
 fi
-venv_dir="$(cd -- "$venv_dir" && pwd)"
-python="$venv_dir/bin/python"
-"$python" -c 'import sys; assert sys.version_info[:2] == (3, 10), "The existing venv must use Python 3.10"'
-"$python" -m pip install "${pip_args[@]}" -e "$repo_root" -r "$example_dir/requirements.txt"
+"$python" -c 'import sys; assert sys.version_info[:2] == (3, 10), "Use Python 3.10 for this example"'
+# Keep an installed VLAStudio; pip adds only missing or incompatible requirements.
+package_args=()
+if ! "$python" -c 'from importlib.metadata import version; from packaging.version import Version; assert Version(version("vlastudio")) >= Version("0.2.2")' 2>/dev/null; then
+    package_args=(-e "$repo_root")
+fi
+"$python" -m pip install "${pip_args[@]}" "${package_args[@]}" -r "$example_dir/requirements.txt"
 
 if ((download_assets)); then setup_args+=(--download-assets); fi
 "$python" "$example_dir/setup.py" "${setup_args[@]}"
 
 # One activation command selects Python and the simulator configuration.
 {
-    printf 'source %q\n' "$venv_dir/bin/activate"
+    if ((!use_current)); then printf 'source %q\n' "$venv_dir/bin/activate"; fi
     printf 'export VLASTUDIO_CACHE=%q\n' "$VLASTUDIO_CACHE"
     printf 'source %q\n' "$VLASTUDIO_CACHE/libero-plus/env.sh"
-} > "$venv_dir/activate.sh"
+} > "$activation_file"
 printf '\nSetup complete. Run from the repository root:\n'
-printf 'source %q\n' "$venv_dir/activate.sh"
+printf 'source %q\n' "$activation_file"
 printf 'python examples/07_custom_sim_env_libero_plus/train_and_evaluate.py\n'

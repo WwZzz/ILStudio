@@ -1,9 +1,19 @@
 python: '3.10'
+installers: [robotwin]
 platforms:
 - linux
 requirements:
 - torch==2.4.1
-- torchvision
+- torchvision==0.19.1
+- numpy<2
+- setuptools<76
+- setuptools-scm
+- wheel
+- ninja
+- toppra
+- warp-lang==1.7.1
+- opencv-python==4.10.0.84
+- einops
 - transforms3d==0.4.2
 - sapien==3.0.0b1
 - scipy==1.10.1
@@ -13,7 +23,7 @@ requirements:
 - open3d==0.18.0
 - imageio==2.34.2
 - pydantic
-- zarr
+- zarr<3
 - openai
 - huggingface_hub==0.25.0
 - h5py
@@ -30,4 +40,6 @@ requirements:
 - imageio-ffmpeg==0.6.0
 - tianshou==0.2.0
 - loguru
-- transformers
+- transformers==4.44.2
+
+checks: [robotwin]

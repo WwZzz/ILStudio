@@ -67,11 +67,17 @@ def environment_plan(*, policy=None, environment=None, dataset=None, manifest=No
     arguments = ', '.join(selectors)
     requirements = [p["requirement"] for p in packages]
     install = _command(["python", "-m", "pip", "install", *requirements])
+    env_selectors = []
+    for flag, value in (('--policy', policy), ('--env', environment), ('--dataset', dataset), ('--runtime-manifest', manifest)):
+        if value:
+            env_selectors += [flag, str(value)]
+    if remote:
+        env_selectors.append('--remote')
     return {"environment": kind, "selection": arguments, "python": sys.executable, "required_python": profile["python"],
             "profile": profile, "issues": issues, "packages": packages,
             "commands": {
-                "create": _command(["python", "-m", "uv", "venv", "--python", profile["python"], "--seed", ".venv"]),
-                "install_current": install,
+                "create": _command(["vlastudio", "env", "create", *env_selectors]),
+                "install_current": _command(["vlastudio", "env", "install", *env_selectors]),
                 "run": "python run.py",
                 "check": _command(["python", "-c", f"import vlastudio as vla; print(vla.environment_plan({arguments}))"]),
             }}
@@ -87,14 +93,16 @@ def format_plan(plan):
         lines.extend('  - ' + issue for issue in plan['issues'])
     else:
         lines.append('Declared package versions are installed (metadata check only).')
-    lines.extend(['Create and activate a compatible virtual environment:',
+    lines.extend(['Create an isolated environment:',
                   '  ' + plan['commands']['create'],
-                  '  Activate .venv and install VLAStudio with python -m pip install -e . from its checkout.',
-                  'Install the declared requirements externally:',
+                  'Or install into the calling interpreter:',
                   '  ' + plan['commands']['install_current'],
                   'Then run your own workflow:', '  ' + plan['commands']['run'],
-                  'VLAStudio never installs packages or creates Python environments.'])
+                  'Installation runs only through explicit env commands; Python imports never install packages.'])
     lines.extend('Note: ' + note for note in plan['profile'].get('notes', []))
+    for step in plan.get('native', []):
+        for key, url in step['licenses'].items():
+            lines.append(f'Native license: {url}; explicitly accept with --accept-license {key}')
     lines.append('Checks do not verify CUDA, native libraries, assets, import health, extras or VCS revisions.')
     return '\n'.join(lines)
 

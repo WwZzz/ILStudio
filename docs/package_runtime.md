@@ -1,7 +1,7 @@
 # Python library and worker internals
 
 Install dependencies following the [environment guide](environments.md). The
-default installation includes ACT, DP, shared data processing and ALOHA-Sim.
+base environment includes ACT, DP, shared data processing and ALOHA-Sim.
 The [homepage](../README.md) shows workflows written as ordinary Python files.
 
 `import vlastudio` uses only the standard library. Configurations, policies,
@@ -45,7 +45,8 @@ requirements files are committed for pip/uv to consume externally.
 
 `runtime_manifest` selects dependency metadata and an optional custom worker
 entrypoint. It does not select another interpreter or install anything.
-`runtime="managed"`, environment creation and installation APIs have been removed.
+`runtime="managed"` is unsupported by workflow APIs. Explicit `vlastudio env`
+commands create/install environments; `env run` selects an interpreter.
 Historical console task aliases dispatch into the current interpreter only;
 new usage examples use library calls from user-authored Python files.
 

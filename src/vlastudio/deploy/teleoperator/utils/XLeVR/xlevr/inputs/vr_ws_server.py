@@ -7,6 +7,7 @@ import asyncio
 import json
 import ssl
 import websockets
+from websockets.legacy.server import serve
 import numpy as np
 import math
 import logging
@@ -117,7 +118,7 @@ class VRWebSocketServer(BaseInputProvider):
         port = self.config.websocket_port
         
         try:
-            self.server = await websockets.serve(
+            self.server = await serve(
                 self.websocket_handler, 
                 host, 
                 port, 

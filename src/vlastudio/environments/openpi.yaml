@@ -17,6 +17,7 @@ requirements:
 - tyro==1.0.3
 - pytest==8.3.5
 - chex==0.1.89
+- zarr<3
 overrides:
 - ml-dtypes==0.4.1
 - tensorstore==0.1.74
@@ -24,3 +25,5 @@ overlays:
 - source_module: openpi
   source: models_pytorch/transformers_replace
   target_module: transformers
+
+checks: [openpi]

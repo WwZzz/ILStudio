@@ -2,12 +2,17 @@
 
 Run from the repository root on Linux with Python 3.10 and NVIDIA GPUs.
 
-## Setup
+## Setup (once)
 
 ```bash
 bash examples/08_fastwam_libero/setup.sh --training
 source "${VLASTUDIO_CACHE:-$HOME/.cache/vlastudio}/envs/example08/activate.sh"
 ```
+
+For later runs, only source `activate.sh`; no reinstall is needed. Setup reuses
+the cached environment and keeps an installed VLAStudio. Use `--current` to add
+FastWAM requirements to a prepared Python 3.10 environment, then source the path
+it prints. Use `--skip-system` when native dependencies are installed.
 
 ## Evaluate released weights
 

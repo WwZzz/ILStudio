@@ -18,10 +18,12 @@ POLICY_PROFILES = {
     'vlnce_cma': 'vlnce_cma', 'recurrent_vlnbert': 'base',
 }
 ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld',
-                'tabletop_sim': 'tabletop_sim', 'habitat': 'habitat',
-                'matterport3d': 'matterport3d'}
+                'tabletop_sim': 'tabletop_sim', 'rlbench': 'rlbench',
+                'robotwin': 'robotwin', 'behavior1k': 'behavior1k',
+                'habitat': 'habitat', 'matterport3d': 'matterport3d'}
 FIELDS = {'extends', 'python', 'requires_python', 'requirements', 'lockfile', 'lock', 'entrypoint',
-          'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes'}
+          'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes',
+          'installers', 'checks'}
 
 
 def recipe(name):
@@ -42,7 +44,7 @@ def _inherit(parent, child):
     if 'python' in child and 'requires_python' not in child:
         result.pop('requires_python', None)
     result['requirements'] = _requirements(parent.get('requirements', []), child.get('requirements', []))
-    for field in ('overrides', 'overlays', 'notes'):
+    for field in ('overrides', 'overlays', 'notes', 'installers', 'checks'):
         if field in parent or field in child:
             if not isinstance(child.get(field, []), list):
                 raise ValueError(f'runtime.{field} must be a list')
@@ -161,7 +163,7 @@ def combine_profiles(profile, extra):
     result = copy.deepcopy(profile)
     if result.get('lock') and extra['requirements']:
         result['requirements'] = [line for line in result.pop('lock').splitlines() if line.strip() and not line.lstrip().startswith('#')]
-    for field in ('requirements', 'overrides', 'overlays', 'notes'):
+    for field in ('requirements', 'overrides', 'overlays', 'notes', 'installers', 'checks'):
         if field in result or field in extra:
             result.setdefault(field, [])
             result[field].extend(v for v in extra.get(field, []) if v not in result[field])

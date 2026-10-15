@@ -1,6 +1,6 @@
 # Install externally with pip/uv. Matches the named dependency profile.
 tqdm>=4.67,<5
-pyarrow>=14
+pyarrow>=14,<22
 av>=12,<16
 huggingface-hub>=0.29,<1
 torch>=2.4,<2.8
@@ -10,7 +10,7 @@ einops==0.8.1
 torchdata==0.9.0
 tensorboardX==2.6.4
 matplotlib==3.9.4
-websockets==13.1
+websockets>=13.1,<16
 psutil==6.1.1
 protobuf==5.29.6
 numpy==1.26.4

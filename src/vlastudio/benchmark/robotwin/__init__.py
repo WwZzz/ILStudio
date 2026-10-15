@@ -14,7 +14,7 @@ import cv2
 from pathlib import Path
 from loguru import logger
 # Add RoboTwin to path
-ROBOTWIN_ROOT = os.path.join(os.path.dirname(__file__), 'RoboTwin')
+ROBOTWIN_ROOT = os.environ.get('VLASTUDIO_RUNTIME_ROBOTWIN_ROOT', os.path.join(os.path.dirname(__file__), 'RoboTwin'))
 ROBOTWIN_ROOT = os.path.abspath(ROBOTWIN_ROOT)
 GLOBAL_EPISODE_NUM = 0
 # Change to RoboTwin directory for relative path resolution
