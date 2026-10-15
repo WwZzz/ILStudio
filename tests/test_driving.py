@@ -217,3 +217,58 @@ def test_interrupted_hub_transfers_resume_without_changing_revision(tmp_path, mo
     with pytest.raises(requests.exceptions.ChunkedEncodingError):
         driving_assets.hf_asset('fixture', 'route.tar.gz', 'pinned-revision', dataset=True, download=False)
     assert len(calls) == 1 and not delays
+
+
+def test_parked_catalog_is_fresh_for_every_route():
+    from vlastudio.benchmark.carla.parking import ParkingCatalog
+    module = SimpleNamespace(Town15=[{'location': [1, 2, 3]}, {'location': [4, 5, 6]}])
+    catalog = ParkingCatalog(module)
+    module.Town15.pop()
+    module.Town15[0]['location'][0] = 99
+    catalog.reset('Town15')
+    assert module.Town15 == [{'location': [1, 2, 3]}, {'location': [4, 5, 6]}]
+    module.Town15.clear()
+    catalog.reset('Town15')
+    assert len(module.Town15) == 2
+
+
+def test_only_duplicate_stock_parking_is_disabled():
+    from vlastudio.benchmark.carla.parking import configure_parking
+    class World:
+        def __init__(self): self.disabled, self.ticks, self.queries = None, 0, 0
+        def get_environment_objects(self, label):
+            self.queries += 1
+            return [SimpleNamespace(id=label, name='BP_ParkCars70_SM_0'),
+                    SimpleNamespace(id=99, name='Unrelated_static_car')]
+        def enable_environment_objects(self, identifiers, enabled):
+            assert enabled is False
+            self.disabled = identifiers
+        def tick(self): self.ticks += 1
+    world = World()
+    report = configure_parking(world, labels=[1, 2, 1])
+    assert world.disabled == {1, 2} and world.ticks == 1
+    assert report['disabled_stock_parked_objects'] == 2
+    original = World()
+    assert configure_parking(original, False, labels=[1])['disabled_stock_parked_objects'] == 0
+    assert original.queries == 0 and original.ticks == 0
+
+
+def test_scenario_builder_rejects_swallowed_initialization_failures():
+    from vlastudio.benchmark.carla.parking import audited_builder
+    requested = SimpleNamespace(name='ParkingExit_1')
+    scene = SimpleNamespace(scenario_configurations=[requested], missing_scenario_configurations=[requested],
+                            list_scenarios=[], _parked_ids=[])
+    def failed(value, ego):
+        value.missing_scenario_configurations.clear()  # Upstream swallows the exception and removes it.
+    trace = {}
+    with pytest.raises(RuntimeError, match='ParkingExit_1'):
+        audited_builder(failed, trace)(scene, None)
+    assert trace['errors'] == ['ParkingExit_1']
+    def successful(value, ego):
+        value.list_scenarios = [SimpleNamespace(config=requested, other_actors=[1, 2, 3])]
+        value.missing_scenario_configurations.clear()
+        return 'original result'
+    scene.missing_scenario_configurations = [requested]
+    trace = {}
+    assert audited_builder(successful, trace)(scene, None) == 'original result'
+    assert trace['initialized'] == {'ParkingExit_1'} and trace['actors']['ParkingExit_1'] == 3

@@ -2,6 +2,7 @@
   "status": "pending_full_validation",
   "implementation_commit": "33e611e",
   "training": {
+    "planner_type": "merge_ctrl_traj",
     "initialization": "official TCP",
     "routes": 10,
     "optimizer_steps": 100,
@@ -14,6 +15,8 @@
     "benchmark": "Bench2Drive 0.0.4 val",
     "routes": 220,
     "traffic_manager_seed": 0,
+    "planner_type": "merge_ctrl_traj",
+    "remove_map_parked_vehicles": true,
     "minimum_success_rate": 0.2,
     "minimum_driving_score": 40
   }

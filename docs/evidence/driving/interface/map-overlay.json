@@ -1,0 +1,8 @@
+{
+  "newer_base_files": [],
+  "town15_base_files": [
+    "CarlaUE4/Content/Carla/Config/Town15.Package.json"
+  ],
+  "overlap_count": 11447,
+  "elapsed_seconds": 117.70278509985656
+}

@@ -22,7 +22,13 @@ def install(prefix=None, *, download=True, additional_maps=True):
         unpacked = extract(archive, root.parent/'carla-0.9.15-additional-maps')
         import shutil
         # Upstream maps extend the package's CarlaUE4/Content hierarchy.
-        shutil.copytree(unpacked, root, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.vlastudio-asset.json'))
+        def keep_newer(source, target):
+            target = Path(target)
+            if target.is_file() and target.stat().st_mtime >= Path(source).stat().st_mtime:
+                return str(target)
+            return shutil.copy2(source, target)
+        shutil.copytree(unpacked, root, dirs_exist_ok=True, copy_function=keep_newer,
+                        ignore=shutil.ignore_patterns('.vlastudio-asset.json'))
         (root/'.vlastudio-maps.json').write_text(json.dumps({'archive_sha256': sha256(archive)}, indent=2)+'\n')
     if additional_maps and json.loads((root/'.vlastudio-maps.json').read_text())['archive_sha256'] != MAPS_SHA256:
         raise ValueError('CARLA maps receipt differs from the pinned archive')

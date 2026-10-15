@@ -83,6 +83,17 @@ Only the unused debugging BEV camera is omitted from the SENSORS track.
 Scenario setup errors invalidate a run rather than silently skipping a scenario.
 Cleanup targets only the server launched by this adapter.
 
+`remove_map_parked_vehicles: true` selects Bench2Drive's managed parking rather
+than duplicating it with CARLA's stock `BP_ParkCars` layer. Stock parked cars
+otherwise block the required ParkingExit actors in the public Town15 map. Only
+that stock parking layer is disabled; the original scenario actors and the
+benchmark's background parking catalog remain active. Each route receives a fresh
+copy of that catalog, matching the upstream launcher that runs routes in separate
+processes. This initialization compatibility fix is recorded with each episode;
+it does not alter waypoints, requested scenario actors, controls or scoring.
+Set the flag to false to inspect the original map behavior. Missing requested
+scenarios invalidate an attempt and preserve its diagnostics/native record.
+
 `evaluate.py` preserves native per-route records in `episodes.jsonl`, writes
 source/model/config hashes to `run.json`, and writes aggregate results only
 after every selected route completes. Resuming requires the same manifest and

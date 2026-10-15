@@ -4,6 +4,7 @@ task: bench2drive
 ctrl_space: vehicle
 ctrl_type: control
 action_order: [steer, throttle, brake, reverse]
+remove_map_parked_vehicles: true  # Avoid duplicating the benchmark's managed parking.
 max_timesteps: 200010  # Let the official scenario manager terminate each route.
 reuse_env: true
 record_video: false

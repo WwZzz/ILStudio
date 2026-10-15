@@ -30,6 +30,8 @@ class Bench2DriveEnv(MetaEnv):
         if list(getattr(config, 'action_order', ['steer', 'throttle', 'brake', 'reverse'])) != ['steer', 'throttle', 'brake', 'reverse']:
             raise ValueError('action_order must be [steer, throttle, brake, reverse]')
         self.config = config
+        if not isinstance(getattr(config, 'remove_map_parked_vehicles', True), bool):
+            raise ValueError('remove_map_parked_vehicles must be a boolean')
         original = Path(getattr(config, 'routes', '') or source('bench2drive')/'leaderboard/data/bench2drive_0.0.4_val.xml')
         tree = ET.parse(original)
         routes = list(tree.getroot().findall('route'))
@@ -54,7 +56,7 @@ class Bench2DriveEnv(MetaEnv):
         selected = self.work_dir/'routes.xml'
         ET.ElementTree(root).write(selected, encoding='utf-8', xml_declaration=True)
         self.worker_config = {key: getattr(config, key) for key in ['carla_root', 'graphics_runtime', 'gpu',
-            'startup_timeout', 'step_timeout', 'seed'] if hasattr(config, key)}
+            'startup_timeout', 'step_timeout', 'seed', 'remove_map_parked_vehicles'] if hasattr(config, key)}
         self.worker_config.update(routes=str(selected), work_dir=str(self.work_dir))
         self.process = self.pipe = None
         self.done, self.completed = True, 0
@@ -121,7 +123,8 @@ class Bench2DriveEnv(MetaEnv):
             self.done = True
             source_id = self.catalog[self.completed]['route_id']
             self.completed += 1
-            self.last_info = {**route_metrics(value), 'source_route_id': source_id, 'steps': self.steps}
+            self.last_info = {**route_metrics(value['record']), 'initialization': value['initialization'],
+                              'source_route_id': source_id, 'steps': self.steps}
         else:
             raise RuntimeError(f'Unexpected driving worker message: {kind}')
         return asdict(self.prev_obs), float(self.last_info['success']), self.done, dict(self.last_info)

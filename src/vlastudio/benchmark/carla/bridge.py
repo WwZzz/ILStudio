@@ -1,5 +1,6 @@
 """Step the official Bench2Drive scenario manager through a private process pipe."""
 import contextlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -60,6 +61,12 @@ def worker(pipe, config):
             from leaderboard.leaderboard_evaluator import LeaderboardEvaluator
             from leaderboard.utils.statistics_manager import StatisticsManager
             from leaderboard.utils.route_indexer import RouteIndexer
+            from leaderboard.scenarios.route_scenario import RouteScenario
+            from leaderboard.utils import parked_vehicles
+            from .parking import ParkingCatalog, configure_parking, audited_builder
+            parking_catalog = ParkingCatalog(parked_vehicles)
+            trace = {}
+            RouteScenario.build_scenarios = audited_builder(RouteScenario.build_scenarios, trace)
 
             class OwnedEvaluator(LeaderboardEvaluator):
                 def _setup_simulation(self, args):
@@ -78,6 +85,13 @@ def worker(pipe, config):
                     traffic.set_hybrid_physics_mode(True)
                     return client, args.timeout, traffic
 
+                def _load_and_wait_for_world(self, args, town):
+                    self.initialization_report = {}
+                    super()._load_and_wait_for_world(args, town)
+                    parking_catalog.reset(town)
+                    self.initialization_report = configure_parking(self.world,
+                        config.get('remove_map_parked_vehicles', True))
+
             args = SimpleNamespace(host='127.0.0.1', port=server.port,
                 traffic_manager_port=0, traffic_manager_seed=config.get('seed', 0),
                 debug=0, record='', timeout=config.get('step_timeout', 600.),
@@ -94,6 +108,7 @@ def worker(pipe, config):
             statistics.write_statistics()
             while indexer.peek():
                 route = indexer.get_next_config()
+                trace.clear()
                 log.flush()
                 log_start = log.tell()
                 crashed = evaluator._load_and_run_scenario(args, route)
@@ -101,17 +116,28 @@ def worker(pipe, config):
                 with (work/'scenario.log').open('rb') as recorded:
                     recorded.seek(log_start)
                     text = recorded.read().decode(errors='replace')
-                if 'Skipping scenario ' in text:
-                    raise RuntimeError('Official scenario setup failed; this route cannot be reported as a valid benchmark run')
                 statistics.save_progress(indexer.index, indexer.total)
                 statistics.write_statistics()
                 records = statistics._results.to_json()['_checkpoint']['records']
+                requested = {value.name for value in route.scenario_configs}
+                initialized = trace.get('initialized', set())
+                report = {**getattr(evaluator, 'initialization_report', {}),
+                    'requested_scenarios': sorted(requested), 'initialized_scenarios': sorted(initialized),
+                    'scenario_actor_counts': trace.get('actors', {}),
+                    'background_parked_objects': trace.get('background_parked_objects', 0)}
+                if 'Skipping scenario ' in text or trace.get('errors') or requested != initialized:
+                    skipped = [line for line in text.splitlines() if 'Skipping scenario ' in line]
+                    failure = {'source_route_id': str(route.name).removeprefix('RouteScenario_'), 'initialization': report,
+                               'errors': skipped or trace.get('errors') or ['Requested scenario was not initialized'],
+                               'native_record': records[-1] if records else None}
+                    (work/f'invalid-route-{indexer.index}.json').write_text(json.dumps(failure, indent=2)+'\n')
+                    raise RuntimeError('Official scenario setup failed; invalid attempt preserved: '+str(failure['errors']))
                 if not records:
                     raise RuntimeError('Official evaluator did not produce a route record')
                 if not indexer.peek() and not crashed:
                     statistics.compute_global_statistics()
                     statistics.validate_and_write_statistics(evaluator.sensors_initialized, False)
-                pipe.send(('done', records[-1]))
+                pipe.send(('done', {'record': records[-1], 'initialization': report}))
                 if not indexer.peek():
                     break
                 command, _ = pipe.recv()
