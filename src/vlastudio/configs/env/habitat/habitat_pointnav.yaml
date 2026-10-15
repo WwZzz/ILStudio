@@ -1,4 +1,4 @@
-type: benchmark.habitat
+type: vlastudio.benchmark.habitat.create_env
 name: habitat_pointnav
 task: pointnav
 backend: sim

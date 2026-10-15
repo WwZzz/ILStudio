@@ -1,4 +1,4 @@
-type: benchmark.habitat
+type: vlastudio.benchmark.habitat.create_env
 name: habitat_vlnce
 task: r2r_vlnce
 backend: lab

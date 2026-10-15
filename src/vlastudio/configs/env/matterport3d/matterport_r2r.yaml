@@ -1,4 +1,4 @@
-type: benchmark.matterport3d
+type: vlastudio.benchmark.matterport3d.create_env
 name: matterport_r2r
 task: r2r
 episodes: data/R2R_val_seen.json

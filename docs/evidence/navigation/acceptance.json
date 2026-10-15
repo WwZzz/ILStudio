@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "branch": "codex/navigation-integration",
+  "main_base": "12d9d9e893f7caacc12920358f7ef55e32411750",
+  "trained_source_revision": "5f9b7bd05637fede51008bbb319ef50f1eaf58e3",
+  "task": "gps_compass_pointnav",
+  "protocol": "same-scene held-out starts/goals; 1-5m geodesic; STOP within 0.2m; 80 steps",
+  "split_counts": {
+    "train": 200,
+    "validation": 40,
+    "test": 100
+  },
+  "learned": {
+    "total": 100,
+    "total_success": 87,
+    "success_rate": 0.87,
+    "spl": 0.8622603902672324
+  },
+  "random": {
+    "total": 100,
+    "total_success": 0,
+    "success_rate": 0.0,
+    "spl": 0.0
+  },
+  "immediate_stop": {
+    "total": 100,
+    "total_success": 0,
+    "success_rate": 0.0,
+    "spl": 0.0
+  },
+  "framework_recheck": {
+    "total": 100,
+    "success_rate": 0.87,
+    "spl": 0.8622603902672326,
+    "all_100_episode_metrics_identical": true,
+    "inference_calls": 2571
+  },
+  "training": [
+    {
+      "round": 0,
+      "samples": 4143,
+      "loss": 0.2535202205181122,
+      "validation_success_rate": 0.675,
+      "validation_spl": 0.6736239098045547
+    },
+    {
+      "round": 1,
+      "samples": 8710,
+      "loss": 0.38806378841400146,
+      "validation_success_rate": 0.9,
+      "validation_spl": 0.8926162889226872
+    },
+    {
+      "round": 2,
+      "samples": 13260,
+      "loss": 0.4151075482368469,
+      "validation_success_rate": 0.825,
+      "validation_spl": 0.8200697107052758
+    }
+  ],
+  "expert_failures": 0,
+  "versions": {
+    "python": "3.10.14",
+    "torch": "2.4.1+cu121",
+    "habitat_sim": "0.3.3"
+  },
+  "scene_sha256": "b14e29e17f5e31d86a1002eefd77b7d345b265006481739ae480a847e6623f56",
+  "checkpoint_sha256": "ee6490b7f883844d488e229a33a4cfdb40d9477af4359a247155c79e80dc88c8",
+  "source_sha256": {
+    "examples/09_navigation/train_and_evaluate.py": "8d0b7d70c482ece8d071d0bfd948df4beda260e0e1affb1226bfafb329f0250e",
+    "src/vlastudio/benchmark/habitat/__init__.py": "d8cac0ceef887cca64813c302bd6f453944a15cad3318cecf2d5836ccbe53a68",
+    "src/vlastudio/policy/navigation_mlp/__init__.py": "08acfb721d3329e26013e2db40d40d21d4bfb5acd46d2ddb3a9964290ae91be2"
+  },
+  "acceptance": {
+    "threshold": 0.3,
+    "above_random_required": true,
+    "accepted": true
+  },
+  "tests": {
+    "navigation_and_environment_regressions_passed": 66,
+    "real_habitat_rgb_depth_and_expert": true,
+    "real_habitat_lab_r2r_api_on_synthetic_test_scene_episode": true,
+    "full_r2r_benchmark_measured": false,
+    "native_mattersim_runtime_verified": false
+  },
+  "limitations": [
+    "R2R",
+    "VLN-CE language following",
+    "unseen-scene generalization"
+  ],
+  "artifacts": [
+    "policy.pt",
+    "episodes.json",
+    "evaluation.json",
+    "rollout.mp4",
+    "policy_metadata.json",
+    "config.json",
+    "normalize.json"
+  ]
+}

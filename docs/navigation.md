@@ -7,7 +7,7 @@ are optional: importing VLAStudio does not import or install them.
 | Config name | Backend | Task | Runtime status |
 | --- | --- | --- | --- |
 | `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Real training and evaluation in Example 09 |
-| `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Adapter; requires external episodes and MP3D scenes |
+| `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real test-scene API fixture verified; benchmark needs MP3D assets |
 | `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Adapter; requires native build and authorized panoramas |
 
 The continuous R2R config uses Habitat-Lab's built-in `VLN-v0` / `R2RVLN-v1` task.
@@ -15,7 +15,9 @@ It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
 leaderboard. PointNav acceptance does not establish instruction following or
 generalization to unseen scenes. Matterport3D and continuous R2R have contract
 tests but must be validated with real licensed assets before claiming benchmark
-support is fully runtime-verified.
+support is fully runtime-verified. `verify_habitat.py --lab` checks the native
+PointNav renderer and Habitat-Lab R2R API with a clearly marked synthetic episode
+on a public test scene; that fixture is not a benchmark score.
 
 ## Install Habitat-Sim on Python 3.10
 
@@ -85,10 +87,29 @@ arguments, versions and checkpoint SHA256. `episodes.json` fixes all splits.
 `policy.pt` and its metadata can be reloaded by `policy.navigation_mlp`.
 `rollout.mp4` records the first test episode when rendering is enabled.
 
+The initial verified run achieved **87/100 test successes (87%), SPL 0.862260**;
+random and immediate STOP each achieved 0/100. Training produced 13,260 labels
+over three rounds, with zero expert failures. The selected checkpoint came from
+round 1 (validation SR 90%). See [recorded acceptance](evidence/navigation/acceptance.json).
+
 The policy implements the framework `load_model`, `select_action` and batched
 `inference` contracts. Metadata uses identity normalization and
 `ctrl_space: navigation`, `ctrl_type: discrete`; continuous action smoothing
 or interpolation must not be used on discrete navigation actions.
+
+Run the checkpoint through the standard VLAStudio inference worker, shared memory
+and action manager on the same deterministic test seeds:
+
+```bash
+python -m vlastudio.entrypoints.eval_sim -m results/navigation \
+  -e habitat.habitat_pointnav --device cpu -bs 0 -n 100 \
+  -o results/navigation-framework \
+  --env.scene /absolute/path/to/skokloster-castle.glb \
+  --env.seed 200000 --env.max_timesteps 80 --env.reuse_env true
+```
+
+The navigation evaluator is selected by the environment factory's module. SPL
+is averaged across rollouts rather than added.
 
 ## Use the adapters
 
@@ -174,6 +195,14 @@ goal world coordinates and distance-to-goal are withheld from policy inputs.
 Scoring uses weighted connectivity-graph shortest paths, explicit STOP within 3m,
 and actual graph-edge path length for SPL. No data is downloaded or license
 agreement accepted automatically.
+
+Hugging Face hosts [official public Habitat test scenes](https://huggingface.co/datasets/ai-habitat/habitat_test_scenes).
+Community collections such as [VLN-CE-R2R for EASI](https://huggingface.co/datasets/oscarqjh/VLN-CE-R2R_easi)
+also package annotations and meshes, but are not the original benchmark release;
+check their schema, action angles, splits and upstream asset access conditions.
+The [original MP3D project](https://niessner.github.io/Matterport/) requires a signed
+access request. A repository of rendered images is not a substitute for runnable
+scene geometry, and Habitat GLBs are not MatterSim panorama assets.
 
 ## Tests and primary sources
 
