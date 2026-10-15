@@ -5,6 +5,8 @@ backend: sim
 scene: data/scene_datasets/habitat-test-scenes/skokloster-castle.glb
 ctrl_space: navigation
 ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
 max_timesteps: 100
 success_distance: 0.2
 min_distance: 1.0

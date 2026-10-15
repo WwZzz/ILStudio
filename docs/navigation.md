@@ -9,6 +9,7 @@ are optional: importing VLAStudio does not import or install them.
 | `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Real training and evaluation in Example 09 |
 | `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real test-scene API fixture verified; benchmark needs MP3D assets |
 | `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Adapter; requires native build and authorized panoramas |
+| `matterport3d.matterport_r2r_candidates` | Matterport3DSimulator | R2R with optional graph candidates and viewpoint selection | Contract-tested adapter; native asset run still required |
 
 The continuous R2R config uses Habitat-Lab's built-in `VLN-v0` / `R2RVLN-v1` task.
 It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
@@ -185,6 +186,80 @@ PointNav state is `[distance, bearing]`, RGB is uint8 `(1,3,H,W)` and depth is
 float meters `(1,H,W)`. Positive bearing means left. Native navmesh distance
 determines success and shortest-path SPL; traveled distance accumulates actual
 post-collision movement. Stopped or timed-out episodes remain terminal until reset.
+
+## Candidate observations and action configuration
+
+Candidate generation and candidate selection are separate responsibilities.
+The policy owns visual features, learned waypoint proposals, ranking and the
+final decision. An environment can optionally expose native navigability as an
+affordance sensor. This changes the information available to the policy, so it
+must be declared in the environment configuration rather than enabled implicitly.
+
+All existing navigation configs default to:
+
+```yaml
+ctrl_space: navigation
+ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
+```
+
+For MatterSim, candidates can be observed while keeping primitive controls:
+
+```yaml
+action_mode: primitive
+ctrl_type: discrete
+candidate_source: simulator
+candidate_scope: visible
+```
+
+Alternatively, select `matterport3d.matterport_r2r_candidates`, which declares:
+
+```yaml
+ctrl_space: navigation
+ctrl_type: candidate_viewpoint
+action_mode: candidate_viewpoint
+candidate_source: simulator
+candidate_scope: all_neighbors  # visible is also supported in this mode
+```
+
+`visible` keeps MatterSim's camera-FOV restriction. `all_neighbors` disables
+that restriction and exposes every adjacent graph viewpoint. It does not render
+panoramas or candidate-specific images: `image` remains the current camera view.
+Panorama construction and visual encoders belong to the policy/observation
+processing pipeline. All-neighbor candidates are rejected in primitive mode so
+that the original FORWARD action keeps its camera-FOV semantics.
+
+When enabled, `MetaObs.navigation` contains the control contract and a ragged
+`candidates` list. Each candidate contains only `action_id`, `viewpoint_id`,
+`relative_heading`, `relative_elevation` and `distance`. Angles use MatterSim's
+native radians (heading positive to the right, elevation positive upward);
+distance is to the neighboring viewpoint in meters. It contains no instruction
+alignment scores, goal distances, reference routes or teacher labels. The
+environment never chooses or ranks candidates for the policy.
+
+The policy may score K candidates plus STOP, then translate its chosen list
+position to that candidate's `action_id`. IDs are stable within a scan and need
+not be contiguous within the current list. They remain valid identifiers when
+native candidates are reordered. Output an identity-normalized scalar ID with
+`ctrl_space=navigation`, `ctrl_type=candidate_viewpoint`; ID 0 means STOP.
+The adapter resolves the ID to the native index at execution, rejects IDs that
+are not currently reachable, and preserves the camera heading/elevation while
+moving. Primitive action tags are rejected in candidate mode and vice versa.
+Re-observe and select one action per step; do not smooth/interpolate IDs or
+reuse an open-loop sequence against changing candidate sets.
+
+Candidate metadata survives vector observation assembly, shared-memory and
+HTTP serialization, per-client batching and the standard `MetaPolicy` sample
+conversion. Batched metadata is a list of dictionaries, one per observation;
+policies handle any padding/masks they need. Existing PointNav policies ignore
+this optional metadata and continue using their two state values.
+
+Habitat PointNav and the Habitat-Lab adapter currently accept primitive actions
+with `candidate_source=none` only. Learned waypoint generation can live inside
+a policy, but this change does not implement a Habitat waypoint executor.
+MatterSim candidate execution has fake-native contract tests, including stable
+IDs and graph path scoring; it still needs a real run on authorized MP3D assets.
 
 Each navigation module exports its own `evaluate` function because the older
 manipulation evaluator treats `done` as success. The navigation evaluator tracks

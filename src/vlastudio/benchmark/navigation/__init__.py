@@ -7,10 +7,34 @@ import numpy as np
 from vlastudio.benchmark.base import MetaAction
 
 
-def discrete_action(action, count):
+def navigation_options(config, *, supports_candidates=False):
+    """Declare control semantics separately from optional simulator affordances."""
+    mode = getattr(config, 'action_mode', 'primitive')
+    source = getattr(config, 'candidate_source', 'none')
+    scope = getattr(config, 'candidate_scope', 'visible')
+    if mode not in ('primitive', 'candidate_viewpoint'):
+        raise ValueError(f'Unknown navigation action_mode: {mode}')
+    if source not in ('none', 'simulator'):
+        raise ValueError('candidate_source must be none or simulator; learned proposals belong to the policy')
+    if scope not in ('visible', 'all_neighbors'):
+        raise ValueError('candidate_scope must be visible or all_neighbors')
+    if not supports_candidates and (mode != 'primitive' or source != 'none'):
+        raise ValueError('This backend supports primitive actions and candidate_source=none only')
+    if mode == 'candidate_viewpoint' and source != 'simulator':
+        raise ValueError('candidate_viewpoint actions require candidate_source=simulator')
+    if mode == 'primitive' and source == 'simulator' and scope != 'visible':
+        raise ValueError('Primitive actions require visible candidates to preserve FORWARD semantics')
+    ctrl_type = 'discrete' if mode == 'primitive' else 'candidate_viewpoint'
+    if getattr(config, 'ctrl_type', ctrl_type) != ctrl_type or getattr(config, 'ctrl_space', 'navigation') != 'navigation':
+        raise ValueError(f'{mode} requires ctrl_space=navigation, ctrl_type={ctrl_type}')
+    return {'action_mode': mode, 'ctrl_type': ctrl_type, 'candidate_source': source,
+            'candidate_scope': scope if source == 'simulator' else None, 'stop_action': 0}
+
+
+def discrete_action(action, count, *, ctrl_type='discrete'):
     if isinstance(action, (MetaAction, dict)):
-        if action['ctrl_space'] != 'navigation' or action['ctrl_type'] != 'discrete':
-            raise ValueError('Navigation requires ctrl_space=navigation, ctrl_type=discrete')
+        if action['ctrl_space'] != 'navigation' or action['ctrl_type'] != ctrl_type:
+            raise ValueError(f'Navigation requires ctrl_space=navigation, ctrl_type={ctrl_type}')
         action = action['action']
     value = np.asarray(action)
     if value.size != 1 or not np.isfinite(value).all():

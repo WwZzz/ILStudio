@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from vlastudio.benchmark.base import MetaEnv, MetaObs
-from vlastudio.benchmark.navigation import NavigationEpisode, discrete_action, evaluate
+from vlastudio.benchmark.navigation import NavigationEpisode, discrete_action, evaluate, navigation_options
 
 
 def create_env(config):
@@ -17,6 +17,7 @@ def create_env(config):
 class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
     """0 STOP, 1 FORWARD, 2 LEFT, 3 RIGHT. State = distance, bearing."""
     def __init__(self, config):
+        self.navigation_options = navigation_options(config)
         import habitat_sim
         import magnum as mn
         self.hs = habitat_sim
@@ -117,7 +118,8 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
         return MetaObs(state=pointgoal,
                        image=obs['rgb'][None, ..., :3].transpose(0, 3, 1, 2).copy() if 'rgb' in obs else None,
                        depth=obs['depth'][None].copy() if 'depth' in obs else None,
-                       raw_lang='Navigate to the point goal and stop.', timestep=self.steps)
+                       raw_lang='Navigate to the point goal and stop.', timestep=self.steps,
+                       navigation=dict(self.navigation_options))
 
     def meta2act(self, action):
         return discrete_action(action, 4)
@@ -145,6 +147,7 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
 class HabitatLabEnv(MetaEnv):
     """Use a user-supplied, version-matched Habitat-Lab/VLN-CE task config."""
     def __init__(self, config):
+        self.navigation_options = navigation_options(config)
         import habitat
         for module in getattr(config, 'registration_modules', []):
             importlib.import_module(module)
@@ -178,6 +181,7 @@ class HabitatLabEnv(MetaEnv):
         if depth is not None and depth.ndim == 3:
             depth = depth[..., 0]
         return MetaObs(state=state, raw_lang=text, timestep=self.steps,
+                       navigation=dict(self.navigation_options),
                        image=np.asarray(obs['rgb'])[None, ..., :3].transpose(0, 3, 1, 2).copy() if 'rgb' in obs else None,
                        depth=depth[None] if depth is not None else None)
 

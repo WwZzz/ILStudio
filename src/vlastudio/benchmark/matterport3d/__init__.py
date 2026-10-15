@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from vlastudio.benchmark.base import MetaEnv, MetaObs
-from vlastudio.benchmark.navigation import NavigationEpisode, discrete_action, evaluate
+from vlastudio.benchmark.navigation import NavigationEpisode, discrete_action, evaluate, navigation_options
 
 
 def create_env(config):
@@ -46,12 +46,14 @@ def graph_distances(graph, goal):
 
 
 class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
-    """Actions: STOP=0 FORWARD=1 LEFT=2 RIGHT=3 UP=4 DOWN=5.
+    """Primitive actions: STOP=0 FORWARD=1 LEFT=2 RIGHT=3 UP=4 DOWN=5.
 
     FORWARD selects the closest angular navigable viewpoint in the current FOV,
-    matching MatterSim index 1. Goal/teacher/path are never exposed to policy.
+    matching MatterSim index 1. Optional candidate mode selects a stable
+    viewpoint action_id. Goal/teacher/path are never exposed to policy.
     """
     def __init__(self, config):
+        self.navigation_options = navigation_options(config, supports_candidates=True)
         import MatterSim
         self.config = config
         self.max_steps = int(getattr(config, 'max_timesteps', 100))
@@ -77,6 +79,8 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         sim.setCameraVFOV(np.deg2rad(60))
         sim.setDiscretizedViewingAngles(True)
         sim.setDepthEnabled(True)
+        if self.navigation_options['candidate_source'] == 'simulator':
+            sim.setRestrictedNavigation(self.navigation_options['candidate_scope'] == 'visible')
         sim.initialize()
         super().__init__(sim)
 
@@ -89,6 +93,9 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         if scan not in self.graphs:
             self.graphs[scan] = load_graph(Path(self.config.connectivity_path) / f'{scan}_connectivity.json')
         self.graph = self.graphs[scan]
+        # Stable for a scan, irrespective of native candidate ordering or FOV.
+        self.viewpoint_actions = {viewpoint: i + 1 for i, viewpoint in enumerate(sorted(self.graph))}
+        self.action_viewpoints = {action: viewpoint for viewpoint, action in self.viewpoint_actions.items()}
         self.distances = graph_distances(self.graph, item['path'][-1])
         self.env.newEpisode([scan], [item['path'][0]], [item['heading']], [0.0])
         self._begin(self.distances[item['path'][0]])
@@ -100,10 +107,34 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         features = np.asarray([state.heading, state.elevation, len(state.navigableLocations) - 1], dtype=np.float32)
         image = np.asarray(state.rgb)[..., ::-1].copy()  # MatterSim uses BGR.
         depth = np.asarray(state.depth, dtype=np.float32).squeeze(-1) if np.asarray(state.depth).ndim == 3 else np.asarray(state.depth, dtype=np.float32)
+        options = getattr(self, 'navigation_options', navigation_options(None, supports_candidates=True))
+        navigation = dict(options)
+        if options['candidate_source'] == 'simulator':
+            navigation['candidates'] = [
+                {'action_id': self.viewpoint_actions[location.viewpointId],
+                 'viewpoint_id': location.viewpointId,
+                 'relative_heading': float(location.rel_heading),
+                 'relative_elevation': float(location.rel_elevation),
+                 'distance': float(location.rel_distance)}
+                for location in state.navigableLocations[1:]]
         return MetaObs(state=features, image=image[None].transpose(0, 3, 1, 2),
-                       depth=depth[None] / 4000., raw_lang=self.episode['instruction'], timestep=self.steps)
+                       depth=depth[None] / 4000., raw_lang=self.episode['instruction'], timestep=self.steps,
+                       navigation=navigation)
+
+    def _candidate_location(self, action, state):
+        target = self.action_viewpoints[action]
+        for index, location in enumerate(state.navigableLocations[1:], 1):
+            if location.viewpointId == target:
+                return index
+        raise ValueError('Selected viewpoint is not currently navigable; choose action_id from the latest candidates')
 
     def meta2act(self, action):
+        options = getattr(self, 'navigation_options', navigation_options(None, supports_candidates=True))
+        if options['action_mode'] == 'candidate_viewpoint':
+            value = discrete_action(action, len(self.action_viewpoints) + 1, ctrl_type='candidate_viewpoint')
+            if value:
+                self._candidate_location(value, self.env.getState()[0])
+            return value
         return discrete_action(action, 6)
 
     def step(self, action):
@@ -114,7 +145,10 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         before = self.env.getState()[0]
         location, heading, elevation = 0, 0., 0.
         collision = False
-        if action == 1:
+        if getattr(self, 'navigation_options', {}).get('action_mode') == 'candidate_viewpoint':
+            if action:
+                location = self._candidate_location(action, before)
+        elif action == 1:
             if len(before.navigableLocations) > 1:
                 location = 1
             else:

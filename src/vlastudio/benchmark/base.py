@@ -37,6 +37,8 @@ class MetaObs:
     pc: np.array = None # (n, 3)
     raw_lang: str = ''
     timestep: int = -1
+    # Optional navigation contract and simulator candidates; a list when batched.
+    navigation: Optional[dict | list] = None
     
     def __getitem__(self, key):
         return getattr(self, key)
@@ -46,9 +48,30 @@ class MetaObs:
         for k in all_keys:
             if self[k] is not None and isinstance(self[k], np.ndarray):
                 setattr(self, k, self[k][np.newaxis, :])
+        if isinstance(self.navigation, dict):
+            self.navigation = [self.navigation]
     
 META_OBS_KEYS = [f.name for f in fields(MetaObs)]
 META_ACT_KEYS = [f.name for f in fields(MetaAction)]
+
+def observation_metadata_rows(mobs, attribute):
+    """Keep variable-length metadata aligned with each observation's batch row."""
+    state = mobs.state
+    count = state.shape[0] if state is not None and state.ndim > 1 else 1
+    value = getattr(mobs, attribute)
+    if isinstance(value, list):
+        if len(value) != count:
+            raise ValueError(f'{attribute} must have one entry per observation')
+        return value
+    if attribute == 'navigation' and value is not None and count != 1:
+        raise ValueError('Batched navigation metadata must be a list, one dictionary per observation')
+    return [value] * count
+
+
+def batch_observation_metadata(mobs_list, attribute):
+    rows = [row for mobs in mobs_list for row in observation_metadata_rows(mobs, attribute)]
+    return None if all(row is None for row in rows) else rows
+
 
 def dict2meta(data_dict, mtype='obs'):
     if mtype=='obs':
@@ -169,6 +192,9 @@ class MetaPolicy:
         
         for key in keys:
             values = [s[key] for s in samples]
+            if key == 'navigation':
+                batch[key] = values  # Preserve ragged candidates and missing rows.
+                continue
             
             # Skip None values
             if values[0] is None:
@@ -208,8 +234,11 @@ class MetaPolicy:
         batch_size = normed_mobs.state.shape[0] if normed_mobs.state is not None and len(normed_mobs.state.shape) > 1 else 1
         
         samples = []
+        navigation = observation_metadata_rows(normed_mobs, 'navigation')
         for i in range(batch_size):
             sample = {}
+            if normed_mobs.navigation is not None:
+                sample['navigation'] = navigation[i]
             
             # Image: keep original format, let policy's data_processor handle resize
             if normed_mobs.image is not None:

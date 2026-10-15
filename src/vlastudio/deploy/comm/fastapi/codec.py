@@ -177,6 +177,7 @@ def prepare_meta_obs_for_remote(
         pc=meta_obs.pc,
         raw_lang=meta_obs.raw_lang,
         timestep=meta_obs.timestep,
+        navigation=meta_obs.navigation,
     )
 
 

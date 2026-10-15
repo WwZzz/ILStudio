@@ -25,7 +25,7 @@ import torch
 from loguru import logger
 
 from vlastudio.deploy.shm_utils import SharedMemoryChannel
-from vlastudio.benchmark.base import MetaObs, dict2meta
+from vlastudio.benchmark.base import MetaObs, dict2meta, batch_observation_metadata
 
 from ..base import BaseServer
 
@@ -604,7 +604,7 @@ class SHMPolicyServer(BaseServer):
 
         # Helper to safely concatenate arrays
         def safe_concat(attr_name):
-            arrays = [getattr(m, attr_name) for m in mobs_list if getattr(m, attr_name, None) is not None]
+            arrays = [np.atleast_1d(getattr(m, attr_name)) for m in mobs_list if getattr(m, attr_name, None) is not None]
             if not arrays:
                 return None
             return np.concatenate(arrays, axis=0)
@@ -619,7 +619,8 @@ class SHMPolicyServer(BaseServer):
             depth=safe_concat('depth'),
             pc=safe_concat('pc'),
             timestep=safe_concat('timestep'),
-            raw_lang=mobs_list[0].raw_lang if mobs_list[0].raw_lang else '',
+            raw_lang=batch_observation_metadata(mobs_list, 'raw_lang'),
+            navigation=batch_observation_metadata(mobs_list, 'navigation'),
         )
         return batched
 

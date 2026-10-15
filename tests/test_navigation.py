@@ -15,7 +15,7 @@ from vlastudio.benchmark.matterport3d import graph_distances, load_graph, Matter
 
 
 @pytest.mark.parametrize('name', ['habitat.habitat_pointnav', 'habitat.habitat_vlnce',
-                                 'matterport3d.matterport_r2r'])
+                                 'matterport3d.matterport_r2r', 'matterport3d.matterport_r2r_candidates'])
 def test_packaged_configs_resolve_to_factory_and_runtime(name):
     from vlastudio.configuration import read_config
     from vlastudio.extensions import resolve

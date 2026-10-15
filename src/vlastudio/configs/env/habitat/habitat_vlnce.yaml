@@ -9,6 +9,8 @@ habitat_overrides:
 - habitat.simulator.turn_angle=30
 ctrl_space: navigation
 ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
 actions: [stop, move_forward, turn_left, turn_right]
 max_timesteps: 500
 # Uses Habitat-Lab 0.3.3's built-in R2RVLN-v1 loader. Supply matching episodes/scans.
