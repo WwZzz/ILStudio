@@ -1,5 +1,9 @@
 # Navigation simulators
 
+Start with [Example 09 — Navigation](../examples/09_navigation/README.md) for
+setup, config generation, PointNav training, and full CMA / VLN-BERT workflows.
+This guide covers simulator installation and interface details.
+
 Navigation adapters share VLAStudio's `MetaObs` / `MetaAction`, config resolution,
 environment factories, policy loading and `eval_sim` interfaces. Native simulators
 are optional: importing VLAStudio does not import or install them.
@@ -8,13 +12,15 @@ are optional: importing VLAStudio does not import or install them.
 | --- | --- | --- | --- |
 | `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Real training and evaluation in Example 09 |
 | `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real MP3D / original VLN-CE episodes and framework replay verified |
+| `habitat.habitat_vlnce_cma` | Habitat-Lab 0.3.3 | Continuous R2R, CMA paper sensors/actions | Full 1,839-episode learned-model validation completed |
 | `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Real MP3D RGB renderer, primitive actions and framework replay verified |
 | `matterport3d.matterport_r2r_candidates` | Matterport3DSimulator | R2R with optional graph candidates and viewpoint selection | Real MP3D candidates, graph movement and framework replay verified |
+| `matterport3d.matterport_r2r_vlnbert` | Matterport3DSimulator | Panoramic R2R, Recurrent VLN-BERT | Full 2,349-episode learned-model validation completed |
 
 The continuous R2R config uses Habitat-Lab's built-in `VLN-v0` / `R2RVLN-v1` task.
 It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
 leaderboard. PointNav acceptance does not establish instruction following or
-generalization to unseen scenes. The real-asset checks below cover one MP3D scan
+generalization to unseen scenes. The initial real-asset checks below cover one MP3D scan
 and integration behavior; they are not full-benchmark language-policy results.
 `verify_habitat.py --lab` checks the native
 PointNav renderer and Habitat-Lab R2R API with a clearly marked synthetic episode
@@ -407,7 +413,7 @@ versions, source hashes and the limits of this check.
 ## Tests and primary sources
 
 Learned language-navigation baselines and their separate full-split acceptance
-protocol are documented in [the VLN model example](../examples/09_navigation/README.md#learned-vln-models).
+protocol are documented in [Example 09](../examples/09_navigation/README.md#recorded-results).
 The expert checks above establish simulator contracts only. They do not establish
 paper reproduction. The model configurations are `habitat.habitat_vlnce_cma`
 and `matterport3d.matterport_r2r_vlnbert`; their action spaces and image inputs

@@ -223,7 +223,8 @@ Use the policy-server workflow below to evaluate with a simulator in another env
 
 Navigation support includes Habitat PointNav, a Habitat-Lab continuous R2R adapter,
 and a Matterport3D classic R2R adapter. See [navigation setup](docs/navigation.md)
-and [Example 09: train and evaluate a navigation policy](examples/09_navigation).
+and [Example 09: navigation tasks](examples/09_navigation), covering PointNav,
+CMA on continuous VLN-CE, and Recurrent VLN-BERT on viewpoint-based R2R.
 
 Each example shows its own environment setup and Python files. Run from the repository root after installing the required dependencies.
 
@@ -237,6 +238,7 @@ Each example shows its own environment setup and Python files. Run from the repo
 | Write and control a custom robot | [06 · Custom robot](examples/06_custom_robot) |
 | Integrate a custom simulator | [07 · LIBERO Plus](examples/07_custom_sim_env_libero_plus) |
 | Train and evaluate FastWAM | [08 · FastWAM on LIBERO](examples/08_fastwam_libero) |
+| Train and evaluate navigation policies | [09 · Navigation](examples/09_navigation) |
 
 ## Overview
 
