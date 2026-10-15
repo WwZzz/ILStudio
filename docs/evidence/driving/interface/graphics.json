@@ -1,0 +1,8 @@
+{
+  "driver_version": "550.163.01",
+  "package_sha256": "efef680331a5cd31f5b52cfe61cfd81b3037224bca51b52bbeea6af5d6f99f91",
+  "library_path": "${DRIVING_ROOT}/graphics/nvidia-550.163.01/usr/lib/x86_64-linux-gnu",
+  "icd": "${DRIVING_ROOT}/graphics/nvidia-550.163.01/vlastudio-nvidia-icd.json",
+  "vulkaninfo_exit": 0,
+  "egl_vendor": "${DRIVING_ROOT}/graphics/nvidia-egl-vendor.json"
+}

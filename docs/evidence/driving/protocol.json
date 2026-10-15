@@ -1,0 +1,20 @@
+{
+  "status": "pending_full_validation",
+  "implementation_commit": "adbab27",
+  "training": {
+    "initialization": "official TCP",
+    "routes": 10,
+    "optimizer_steps": 100,
+    "batch_size": 4,
+    "learning_rate": 1e-07,
+    "seed": 20261016,
+    "freeze_batch_norm": true
+  },
+  "evaluation": {
+    "benchmark": "Bench2Drive 0.0.4 val",
+    "routes": 220,
+    "traffic_manager_seed": 0,
+    "minimum_success_rate": 0.2,
+    "minimum_driving_score": 40
+  }
+}

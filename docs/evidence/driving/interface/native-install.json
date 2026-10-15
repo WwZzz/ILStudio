@@ -1,0 +1,29 @@
+{
+  "root_mode": "0o755",
+  "maps": [
+    "Town01.umap",
+    "Town01_Opt.umap",
+    "Town02.umap",
+    "Town02_Opt.umap",
+    "Town03.umap",
+    "Town03_Opt.umap",
+    "Town04.umap",
+    "Town04_Opt.umap",
+    "Town05.umap",
+    "Town05_Opt.umap",
+    "Town06.umap",
+    "Town07.umap",
+    "Town10HD.umap",
+    "Town10HD_Opt.umap",
+    "Town11/Town11.umap",
+    "Town12/Town12.umap",
+    "Town13/Town13.umap",
+    "Town15/Town15.umap"
+  ],
+  "native_receipt": {
+    "archive_sha256": "7b2f432ce74b251593f95dcc8dee6d99ad9625c2a71a2d6d48f24d879de19ef7"
+  },
+  "maps_receipt": {
+    "archive_sha256": "49db78d14fef1f403f69fe1a13f1f1802f2111a6d98161826b2ae0d6dd96bba8"
+  }
+}
