@@ -34,9 +34,9 @@ def digest(path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--config', required=True)
-    p.add_argument('--model', required=True)
-    p.add_argument('--output', required=True)
+    p.add_argument('--config', default=str(Path(__file__).resolve().parent/'config/val_unseen.yaml'))
+    p.add_argument('--model', default='checkpoints/example09/vlnbert-official')
+    p.add_argument('--output', default='results/example09_vlnbert_official')
     p.add_argument('--batch-size', type=int, default=8)
     p.add_argument('--device', default='cuda')
     a = p.parse_args()

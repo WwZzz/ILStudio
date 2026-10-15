@@ -19,18 +19,18 @@ import yaml
 
 from vlastudio.benchmark.matterport3d import MatterportNavigationEnv
 from vlastudio.policy.recurrent_vlnbert import RecurrentVLNBERT
-from evaluate_vlnbert import digest
+from evaluate import digest
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--config', required=True)
-    p.add_argument('--model', required=True)
-    p.add_argument('--output', required=True)
+    p.add_argument('--config', default=str(Path(__file__).resolve().parent/'config/train.yaml'))
+    p.add_argument('--model', default='checkpoints/example09/vlnbert-official')
+    p.add_argument('--output', default='checkpoints/example09/vlnbert-trained')
     p.add_argument('--trajectories', type=int, default=512)
     p.add_argument('--epochs', type=int, default=2)
     p.add_argument('--batch-size', type=int, default=4)
-    p.add_argument('--lr', type=float, default=1e-6)
+    p.add_argument('--lr', type=float, default=1e-7)
     p.add_argument('--seed', type=int, default=20261015)
     p.add_argument('--device', default='cuda')
     a = p.parse_args()

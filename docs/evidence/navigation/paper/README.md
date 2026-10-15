@@ -110,7 +110,7 @@ on the platform dataset mount, as authorized by the user.
 
 Run instructions and the fixed metric protocol are in
 [`examples/09_navigation`](../../../../examples/09_navigation/README.md) and
-[`PAPER_REPRODUCTION.md`](../../../../examples/09_navigation/PAPER_REPRODUCTION.md).
+[`PROTOCOL.md`](PROTOCOL.md).
 
 References: [authors' corrected CMA reference](https://github.com/jacobkrantz/VLN-CE/tree/729d141b2ee10628061ada74dd3a5b9f70faeba5#baseline-performance),
 [Recurrent VLN-BERT paper, Table 1](https://arxiv.org/html/2011.13922v2),

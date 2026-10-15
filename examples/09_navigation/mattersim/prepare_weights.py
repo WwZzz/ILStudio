@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 
 import torch
-from evaluate_vlnbert import digest
+from evaluate import digest
 
 
 def main():

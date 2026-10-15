@@ -1,7 +1,7 @@
 # Navigation simulators
 
 Start with [Example 09 — Navigation](../examples/09_navigation/README.md) for
-setup, config generation, PointNav training, and full CMA / VLN-BERT workflows.
+setup, PointNav training, and full CMA / VLN-BERT workflows.
 This guide covers simulator installation and interface details.
 
 Navigation adapters share VLAStudio's `MetaObs` / `MetaAction`, config resolution,
@@ -22,7 +22,7 @@ It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
 leaderboard. PointNav acceptance does not establish instruction following or
 generalization to unseen scenes. The initial real-asset checks below cover one MP3D scan
 and integration behavior; they are not full-benchmark language-policy results.
-`verify_habitat.py --lab` checks the native
+`habitat/verify.py --lab` checks the native
 PointNav renderer and Habitat-Lab R2R API with a clearly marked synthetic episode
 on a public test scene; that fixture is not a benchmark score.
 
@@ -47,7 +47,7 @@ python -m habitat_sim.utils.datasets_download --uids habitat_test_scenes --data-
 If Git LFS is unavailable, download the selected official test scene directly:
 
 ```bash
-python examples/09_navigation/download_test_scene.py
+python examples/09_navigation/habitat/download_test_scene.py
 ```
 
 The build needs EGL/OpenGL and JPEG development headers, plus working NVIDIA EGL
@@ -70,7 +70,7 @@ not verify image rendering. Renderer status is saved in the result configuration
 ## Train and accept a simple policy
 
 ```bash
-python examples/09_navigation/train_and_evaluate.py \
+python examples/09_navigation/habitat/pointnav.py \
   --scene data/scene_datasets/habitat-test-scenes/skokloster-castle.glb \
   --output results/navigation
 ```
@@ -133,10 +133,10 @@ For a small reproducible check, unpack only the first two scenes from the mounte
 minival archive (59,974,964 bytes, including their navigation meshes):
 
 ```bash
-python examples/09_navigation/prepare_mounted_hm3d.py \
+python examples/09_navigation/habitat/prepare_mounted_hm3d.py \
   --archive /inspire/dataset/hm3d/v1/hm3d-minival-habitat-v0.2.tar \
   --output data/hm3d-smoke
-python examples/09_navigation/train_and_evaluate.py \
+python examples/09_navigation/habitat/pointnav.py \
   --scene data/hm3d-smoke/00800-TEEsavR23oF/TEEsavR23oF.basis.glb \
   --output results/navigation-hm3d
 ```
@@ -350,7 +350,7 @@ package installation. The active environment must already contain VLAStudio,
 NumPy, requests, torch and CMake 3.x, with a host C++ compiler and NVIDIA EGL.
 
 ```bash
-python examples/09_navigation/install_mattersim.py --prefix "$PWD/.mattersim"
+python examples/09_navigation/mattersim/install.py --prefix "$PWD/.mattersim"
 source "$PWD/.mattersim/activate.sh"
 ```
 
@@ -368,7 +368,7 @@ With a fully resolved environment YAML (absolute episode/scene/connectivity
 paths and matching RGB/depth options), verify a small real-asset subset:
 
 ```bash
-python examples/09_navigation/verify_vln.py --config /path/to/env.yaml \
+python examples/09_navigation/tools/verify_vln.py --config /path/to/env.yaml \
   --episodes 6 --output results/vln-check
 python -m vlastudio.entrypoints.eval_sim -m results/vln-check \
   -e /path/to/env.yaml --device cpu -bs 0 -n 6 -o results/vln-framework \
@@ -413,7 +413,7 @@ versions, source hashes and the limits of this check.
 ## Tests and primary sources
 
 Learned language-navigation baselines and their separate full-split acceptance
-protocol are documented in [Example 09](../examples/09_navigation/README.md#recorded-results).
+protocol are documented in [Example 09](../examples/09_navigation/README.md).
 The expert checks above establish simulator contracts only. They do not establish
 paper reproduction. The model configurations are `habitat.habitat_vlnce_cma`
 and `matterport3d.matterport_r2r_vlnbert`; their action spaces and image inputs

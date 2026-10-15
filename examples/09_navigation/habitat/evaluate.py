@@ -73,12 +73,12 @@ def receive(pipe):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', required=True)
-    parser.add_argument('--model', required=True)
-    parser.add_argument('--episodes', type=int, required=True)
-    parser.add_argument('--batch-size', type=int, default=4)
+    parser.add_argument('--config', default=str(Path(__file__).resolve().parent/'config/val_unseen.yaml'))
+    parser.add_argument('--model', default='checkpoints/example09/cma-official')
+    parser.add_argument('--episodes', type=int, default=1839)
+    parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--device', default='cuda')
-    parser.add_argument('--output', required=True)
+    parser.add_argument('--output', default='results/example09_cma_official')
     args = parser.parse_args()
     if args.episodes < 1 or args.batch_size < 1:
         parser.error('Episode count and batch size must be positive')

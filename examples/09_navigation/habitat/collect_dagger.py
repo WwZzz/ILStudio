@@ -17,7 +17,7 @@ import yaml
 
 from vlastudio.benchmark.habitat import HabitatLabEnv
 from vlastudio.policy.vlnce_cma import CMAPolicy
-from finetune_cma import sha
+from train import sha
 
 
 def main():

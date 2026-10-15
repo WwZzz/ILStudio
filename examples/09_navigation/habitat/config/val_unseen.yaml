@@ -1,0 +1,33 @@
+type: vlastudio.benchmark.habitat.create_env
+name: habitat_vlnce_cma
+task: r2r_vlnce
+backend: lab
+habitat_config: benchmark/nav/vln_r2r.yaml
+habitat_overrides:
+- habitat.dataset.data_path=data/R2R_VLNCE_v1-3_preprocessed/val_unseen/val_unseen.json.gz
+- habitat.dataset.scenes_dir=data/scene_datasets
+- habitat.dataset.split=val_unseen
+- habitat.seed=100
+- habitat.simulator.turn_angle=15
+- habitat.simulator.forward_step_size=0.25
+- habitat.task.measurements.success.success_distance=3.0
+- habitat.simulator.agents.main_agent.height=1.5
+- habitat.simulator.agents.main_agent.radius=0.1
+- habitat.simulator.agents.main_agent.sim_sensors.rgb_sensor.height=224
+- habitat.simulator.agents.main_agent.sim_sensors.rgb_sensor.width=224
+- habitat.simulator.agents.main_agent.sim_sensors.rgb_sensor.hfov=90
+- habitat.simulator.agents.main_agent.sim_sensors.rgb_sensor.position=[0,1.25,0]
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.height=256
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.width=256
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.hfov=90
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.position=[0,1.25,0]
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.min_depth=0
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.max_depth=10
+- habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.normalize_depth=true
+ctrl_space: navigation
+ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
+actions: [stop, move_forward, turn_left, turn_right]
+return_instruction_tokens: true
+max_timesteps: 500

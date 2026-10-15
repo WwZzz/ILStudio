@@ -1,0 +1,24 @@
+type: vlastudio.benchmark.matterport3d.create_env
+name: matterport_r2r_vlnbert
+task: r2r
+episodes: data/R2R_val_unseen.json
+dataset_path: data/v1/scans
+connectivity_path: .mattersim/source/connectivity
+ctrl_space: navigation
+ctrl_type: candidate_viewpoint
+action_mode: candidate_viewpoint
+candidate_source: simulator
+candidate_scope: all_neighbors
+# Sweep current viewpoint geometry at 36 discretized camera views. A candidate
+# action turns toward its selected source view before moving, matching the paper.
+candidate_view_alignment: panoramic
+# The paper uses cached current-viewpoint image features in the policy. Native
+# rendering is disabled explicitly; this config provides neither RGB nor depth.
+rendering_enabled: false
+depth_enabled: false
+image_size: 640
+max_timesteps: 15
+success_distance: 3.0
+# The paper scores the final viewpoint, including at the decision budget.
+# explicit_stop_success is reported separately from this R2R success metric.
+success_requires_stop: false

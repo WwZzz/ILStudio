@@ -29,18 +29,18 @@ def sha(path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--config', required=True, help='Training split environment config')
-    p.add_argument('--ground-truth', required=True, help='Official train_gt.json.gz')
-    p.add_argument('--model', required=True)
-    p.add_argument('--output', required=True)
+    p.add_argument('--config', default=str(Path(__file__).resolve().parent/'config/train.yaml'))
+    p.add_argument('--ground-truth', help='Official train_gt.json.gz; defaults beside the training annotations')
+    p.add_argument('--model', default='checkpoints/example09/cma-official')
+    p.add_argument('--output', default='checkpoints/example09/cma-trained')
     p.add_argument('--trajectories', type=int, default=256)
     p.add_argument('--epochs', type=int, default=4)
     p.add_argument('--batch-size', type=int, default=5)
     p.add_argument('--unroll', type=int, default=32)
-    p.add_argument('--lr', type=float, default=1e-5)
+    p.add_argument('--lr', type=float, default=1e-6)
     p.add_argument('--seed', type=int, default=20261015)
     p.add_argument('--device', default='cuda')
-    p.add_argument('--precollected', help='Verified train-only feature directory from collect_cma_dagger.py')
+    p.add_argument('--precollected', help='Verified train-only feature directory from collect_dagger.py')
     a = p.parse_args()
     if min(a.trajectories, a.epochs, a.batch_size, a.unroll) < 1:
         p.error('Counts must be positive')
@@ -56,6 +56,8 @@ def main():
     # Require the caller to identify the official training split explicitly.
     overrides = cfg['habitat_overrides']
     data = next(x.split('=', 1)[1] for x in overrides if x.startswith('habitat.dataset.data_path='))
+    if a.ground_truth is None:
+        a.ground_truth = str(Path(data).with_name('train_gt.json.gz'))
     if Path(data).name != 'train.json.gz' or Path(a.ground_truth).name != 'train_gt.json.gz':
         raise ValueError('Continuation accepts official train annotations only')
     payload = json.loads(gzip.decompress(Path(data).read_bytes()))
