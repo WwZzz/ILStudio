@@ -1,0 +1,1 @@
+{"ctrl_space": "navigation", "ctrl_type": "candidate_viewpoint", "chunk_size": 1, "state_dim": 3, "action_dim": 1, "feature_store": "${NAVIGATION_ROOT}/standard-interface/data/navigation/places365"}

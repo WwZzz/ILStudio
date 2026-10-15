@@ -1,0 +1,17 @@
+action_mode: candidate_viewpoint
+candidate_scope: all_neighbors
+candidate_source: simulator
+candidate_view_alignment: panoramic
+connectivity_path: ${NAVIGATION_ROOT}/mattersim-install-check/source/connectivity
+ctrl_space: navigation
+ctrl_type: candidate_viewpoint
+dataset_path: ${NAVIGATION_ROOT}/data/matterport3d/scans
+depth_enabled: false
+episodes: ${NAVIGATION_ROOT}/mp3d-native/R2R_val_unseen.json
+image_size: 640
+max_timesteps: 15
+name: matterport_r2r_vlnbert
+rendering_enabled: false
+success_distance: 3.0
+task: r2r
+type: vlastudio.benchmark.matterport3d.create_env

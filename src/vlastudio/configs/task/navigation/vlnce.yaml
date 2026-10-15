@@ -1,0 +1,15 @@
+name: r2r_vlnce
+datasets:
+- name: r2r_vlnce
+  type: vlastudio.data_utils.datasets.VLNCEDataset
+  args:
+    max_trajectories: 256
+    download: true
+    scenes_dir: data/scene_datasets
+    feature_checkpoint: official
+meta:
+  action_dim: 1
+  state_dim: 2
+  chunk_size: 1
+  action_normalize: identity
+  state_normalize: identity

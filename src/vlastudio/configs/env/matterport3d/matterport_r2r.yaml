@@ -1,0 +1,15 @@
+type: vlastudio.benchmark.matterport3d.create_env
+name: matterport_r2r
+task: r2r
+episodes: data/R2R_val_seen.json
+dataset_path: data/v1/scans
+connectivity_path: Matterport3DSimulator/connectivity
+ctrl_space: navigation
+ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
+candidate_scope: visible
+max_timesteps: 100
+success_distance: 3.0
+image_size: 256
+depth_enabled: true  # Set false for RGB-only skybox datasets; obs.depth is then None.

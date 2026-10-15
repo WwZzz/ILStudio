@@ -1,0 +1,10 @@
+{
+  "updates": 2,
+  "parameter_delta_l2": 0.029008282859220535,
+  "first_loss": 0.7246640920639038,
+  "last_loss": 1.6655763387680054,
+  "trajectory_count": 2,
+  "collection_success_rate": 1.0,
+  "final_checkpoint": "${NAVIGATION_ROOT}/paper-reproduction/cma-dagger-training-gate/epoch-1",
+  "final_model_sha256": "66fe91fae1d4aa4aab6df41f77cf07fe40639ae09f7c90342751efa4a3f282e6"
+}

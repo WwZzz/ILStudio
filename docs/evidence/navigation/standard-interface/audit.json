@@ -1,0 +1,32 @@
+{
+  "recurrent_vlnbert": {
+    "complete_unique_membership": true,
+    "episodes": 2349,
+    "scenes": 11,
+    "source_annotations_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+    "model_sha256": "953736e8eb6fab39a92c26dd32c63fde36c6f96beedba022dec8f9f038593602",
+    "recomputed_metrics": {
+      "success_rate": 0.6275010642826735,
+      "spl": 0.5684179429064375,
+      "navigation_error": 3.926315358493384,
+      "path_length": 12.012436891478982,
+      "oracle_success": 0.70242656449553
+    },
+    "accepted_reference_met": true
+  },
+  "vlnce_cma": {
+    "complete_unique_membership": true,
+    "episodes": 1839,
+    "scenes": 11,
+    "source_annotations_sha256": "1767a407e2c8a011fbb7abece76cd64c5b39ff9fa0e9e340ebdce5a490d167c3",
+    "model_sha256": "96f8dd3b043b3eebefadafdd382b33cef9812f3ca680207d8e1522c8ce44770c",
+    "recomputed_metrics": {
+      "success_rate": 0.30070690592713434,
+      "spl": 0.2795314576077663,
+      "navigation_error": 7.3847034748660345,
+      "path_length": 8.33936795033774,
+      "oracle_success": 0.3675910821098423
+    },
+    "accepted_reference_met": true
+  }
+}

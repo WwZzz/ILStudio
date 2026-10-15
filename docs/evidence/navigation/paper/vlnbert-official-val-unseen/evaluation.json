@@ -1,0 +1,14 @@
+{
+  "model_sha256": "876e53b5f07412c7647ec7227970a351d6749a2a71d43cc1b552d54dfee83de6",
+  "config_sha256": "b4ef4f83f8d42a3790e7dfeccf3e4825272e68ebf9ff6b86653e6272c006d796",
+  "episodes_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+  "scoring": "R2R final viewpoint within 3m; greedy 15 decisions",
+  "episodes": 2349,
+  "scenes": 11,
+  "success_rate": 0.6275010642826735,
+  "spl": 0.5684046549445916,
+  "navigation_error": 3.926873938462868,
+  "path_length": 12.00934236228781,
+  "oracle_success": 0.70242656449553,
+  "elapsed_seconds": 40.909876108169556
+}

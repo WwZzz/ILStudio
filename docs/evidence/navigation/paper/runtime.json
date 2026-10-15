@@ -1,0 +1,24 @@
+{
+  "python": "3.10.14",
+  "platform": "Linux-5.15.0-141-generic-x86_64-with-glibc2.35",
+  "packages": {
+    "torch": "2.4.1",
+    "torchvision": "0.19.1",
+    "numpy": "1.26.4",
+    "gym": "0.23.0",
+    "yacs": "0.1.8",
+    "transformers": "4.50.0",
+    "habitat-lab": "0.3.3",
+    "habitat-sim": "0.3.3",
+    "pybind11": "2.13.5"
+  },
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "cuda": "12.1",
+  "habitat_sim_revision": "v0.3.3",
+  "habitat_lab_revision": "v0.3.3",
+  "mattersim_revision": "589d091b111333f9e9f9d6cfd021b2eb68435925",
+  "vlnce_revision": "729d141b2ee10628061ada74dd3a5b9f70faeba5",
+  "recurrent_vlnbert_revision": "ad147f464ae81ef0a9eeb29dc0a0cbbcddcb1f3e",
+  "scene_mount": "/inspire/dataset/internnav/scene-n1/mp3d",
+  "mounted_scene_count": 90
+}

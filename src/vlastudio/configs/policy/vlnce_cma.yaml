@@ -1,0 +1,9 @@
+type: vlastudio.policy.vlnce_cma
+name: vlnce_cma
+trainer_class: Trainer
+args:
+  device: cuda
+  pretrained_weight_path: official
+  chunk_size: 1
+  action_normalize: identity
+  state_normalize: identity

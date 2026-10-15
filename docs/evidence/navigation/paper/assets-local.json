@@ -1,0 +1,26 @@
+[
+  {
+    "name": "VLN-CE.tar.gz",
+    "url": "https://codeload.github.com/jacobkrantz/VLN-CE/tar.gz/729d141b2ee10628061ada74dd3a5b9f70faeba5",
+    "bytes": 25841013,
+    "sha256": "1c5d515a80556ed8006c3275edaa9e863b42134adea5dcc8589c1aa8bd92ebac"
+  },
+  {
+    "name": "cma-pm-da-aug.pth",
+    "url": "https://drive.usercontent.google.com/download?id=1o9PgBT38BH9pw_7V1QB3XUkY8auJqGKw&export=download&confirm=t",
+    "bytes": 147827650,
+    "sha256": "06278fdbb52ad8c453b404dacb079fb353252056314b1c567a381df77e6827a3"
+  },
+  {
+    "name": "seq2seq-da.pth",
+    "url": "https://drive.usercontent.google.com/download?id=12swcou9g5jwR31GbQU1wJ88E_8j--Qi5&export=download&confirm=t",
+    "bytes": 133037097,
+    "sha256": "ccabe875e07747135a78b769838eb68815afaafed2da79e6a4618ed82ce31e48"
+  },
+  {
+    "name": "R2R_VLNCE_v1-3_preprocessed.zip",
+    "url": "https://drive.usercontent.google.com/download?id=1fo8F4NKgZDH-bPSdVU3cONAkt5EW-tyr&export=download&confirm=t",
+    "bytes": 261610900,
+    "sha256": "3171f5bed90c81d7eb4db9554955b6229ec1fe96d808c9340582ba33eafdb4de"
+  }
+]

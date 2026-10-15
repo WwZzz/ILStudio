@@ -1,0 +1,8 @@
+extends: base.yaml
+description: Official VLN-CE CMA inference and supervised continuation.
+requirements:
+- gym==0.23.0
+- yacs==0.1.8
+notes:
+- Habitat remains an external native environment; see docs/navigation.md.
+- Use original preprocessed R2R instruction tokens and the paper RGBD sensor configuration.

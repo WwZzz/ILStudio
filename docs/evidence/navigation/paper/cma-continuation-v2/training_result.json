@@ -1,0 +1,10 @@
+{
+  "updates": 637,
+  "parameter_delta_l2": 0.8558633975340608,
+  "first_loss": 0.9514023661613464,
+  "last_loss": 0.8627787828445435,
+  "trajectory_count": 256,
+  "replay_success_rate": 1.0,
+  "final_checkpoint": "${NAVIGATION_ROOT}/paper-reproduction/cma-continuation-v2/epoch-4",
+  "final_model_sha256": "8a4f4212eab20d9048fe7b1b4f35767b228edf7ada27b90dbeb29a6ac21a382d"
+}

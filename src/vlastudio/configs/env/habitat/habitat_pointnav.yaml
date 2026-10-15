@@ -1,0 +1,16 @@
+type: vlastudio.benchmark.habitat.create_env
+name: habitat_pointnav
+task: pointnav
+backend: sim
+scene: data/scene_datasets/habitat-test-scenes/skokloster-castle.glb
+ctrl_space: navigation
+ctrl_type: discrete
+action_mode: primitive
+candidate_source: none
+max_timesteps: 100
+success_distance: 0.2
+min_distance: 1.0
+max_distance: 5.0
+image_size: 128
+render: true
+seed: 0

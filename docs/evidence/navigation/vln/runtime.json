@@ -1,0 +1,334 @@
+{
+  "purpose": "Real MP3D simulator integration verification using privileged experts and diagnostic replay; not learned VLN performance",
+  "scene": "17DRP5sb8fy",
+  "validation_unique_routes_per_backend": 2,
+  "instructions_per_route": 3,
+  "versions": {
+    "python": "3.10.14",
+    "habitat_sim": "0.3.3",
+    "habitat_lab": "0.3.3",
+    "mattersim": "589d091b111333f9e9f9d6cfd021b2eb68435925",
+    "pybind11": "2.13.6",
+    "native_opencv": "4.5.4"
+  },
+  "tests": {
+    "passed": 87,
+    "command": "PYTHONPATH=src python -m pytest tests/test_navigation.py tests/test_navigation_candidates.py tests/test_environment_guidance.py -q"
+  },
+  "checks": {
+    "ce": {
+      "successes": 6,
+      "total": 6,
+      "spl": 0.977170641838841,
+      "actions": 252,
+      "observation_contract": {
+        "image_shape": [
+          1,
+          3,
+          128,
+          128
+        ],
+        "depth_shape": [
+          1,
+          128,
+          128
+        ],
+        "action_mode": "primitive"
+      },
+      "direct_equals_framework_per_episode": true,
+      "episodes": [
+        {
+          "distance_to_goal": 0.06602941453456879,
+          "success": true,
+          "spl": 0.9870826230501055,
+          "episode_id": "97"
+        },
+        {
+          "distance_to_goal": 0.06532185524702072,
+          "success": true,
+          "spl": 0.9672586606275763,
+          "episode_id": "328"
+        },
+        {
+          "distance_to_goal": 0.06602941453456879,
+          "success": true,
+          "spl": 0.9870826230501055,
+          "episode_id": "95"
+        },
+        {
+          "distance_to_goal": 0.06532185524702072,
+          "success": true,
+          "spl": 0.9672586606275763,
+          "episode_id": "327"
+        },
+        {
+          "distance_to_goal": 0.06532185524702072,
+          "success": true,
+          "spl": 0.9672586606275763,
+          "episode_id": "326"
+        },
+        {
+          "distance_to_goal": 0.06602941453456879,
+          "success": true,
+          "spl": 0.9870826230501055,
+          "episode_id": "96"
+        }
+      ]
+    },
+    "primitive": {
+      "successes": 6,
+      "total": 6,
+      "spl": 1.0,
+      "actions": 135,
+      "observation_contract": {
+        "image_shape": [
+          1,
+          3,
+          128,
+          128
+        ],
+        "depth_shape": null,
+        "action_mode": "primitive"
+      },
+      "direct_equals_framework_per_episode": true,
+      "episodes": [
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 17,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_0"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 17,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_1"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 17,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_2"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 28,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_0"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 28,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_1"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 28,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_2"
+        }
+      ]
+    },
+    "candidates": {
+      "successes": 6,
+      "total": 6,
+      "spl": 1.0,
+      "actions": 39,
+      "observation_contract": {
+        "image_shape": [
+          1,
+          3,
+          128,
+          128
+        ],
+        "depth_shape": null,
+        "action_mode": "candidate_viewpoint"
+      },
+      "direct_equals_framework_per_episode": true,
+      "episodes": [
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_0"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_1"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 5.698951748068726,
+          "shortest_path_length": 5.698951748068726,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "1154_2"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 7,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_0"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 7,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_1"
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.799242537484089,
+          "shortest_path_length": 8.799242537484089,
+          "steps": 7,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "3228_2"
+        }
+      ]
+    }
+  },
+  "negative_controls": {
+    "ce": {
+      "timeout": {
+        "distance_to_goal": 4.942983627319336,
+        "success": false,
+        "spl": 0.0,
+        "episode_id": "97"
+      },
+      "recreation_frames_identical": true
+    },
+    "primitive": {
+      "timeout": {
+        "success": false,
+        "spl": 0.0,
+        "distance_to_goal": 5.698951748068726,
+        "path_length": 0.0,
+        "shortest_path_length": 5.698951748068726,
+        "steps": 2,
+        "stopped": false,
+        "timeout": true,
+        "collision": false,
+        "episode_id": "1154_0"
+      },
+      "recreation_frames_identical": true
+    },
+    "candidates": {
+      "timeout": {
+        "success": false,
+        "spl": 0.0,
+        "distance_to_goal": 3.6080303298419816,
+        "path_length": 2.0909214182267446,
+        "shortest_path_length": 5.698951748068726,
+        "steps": 2,
+        "stopped": false,
+        "timeout": true,
+        "collision": false,
+        "episode_id": "1154_0"
+      },
+      "recreation_frames_identical": true
+    }
+  },
+  "limits": [
+    "One MP3D scan, not the full R2R/VLN-CE benchmark",
+    "MatterSim native RGB tested; real MatterSim depth assets not available",
+    "No learned language-policy score is claimed; PointNav trained-policy results are separate"
+  ],
+  "additional_native_training_split_checks": {
+    "ce": {
+      "successes": 75,
+      "total": 75
+    },
+    "candidates": {
+      "successes": 90,
+      "total": 90
+    }
+  },
+  "assets": {
+    "files": 50,
+    "bytes": 41396250,
+    "manifest": "assets.json",
+    "manifest_sha256": "2d9c6347bf836c5de56bab63e81a7a33ebae60b63b774324d78aa1b2ccab943b"
+  },
+  "fresh_installer": {
+    "passed": true,
+    "native_and_framework_checks_used_fresh_build": true,
+    "manifest": "mattersim-installation.json",
+    "system_package_installations": 0
+  },
+  "habitat_independent_environment_creation": {
+    "total": 6,
+    "unique_episodes": 6,
+    "metrics_identical_to_reused_environment": true
+  }
+}

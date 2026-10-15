@@ -1,0 +1,155 @@
+{
+  "date": "2026-10-15",
+  "status": "accepted",
+  "training_scope": "Continuation from official pretrained checkpoints; not from-scratch training",
+  "models": {
+    "cma": {
+      "checkpoint": "cma-continuation-lr1e-6/epoch-4",
+      "evaluation": "cma-continuation-lr1e-6-val-unseen/epoch-4",
+      "model_sha256": "30869101e833f6033ba8718f3bd76af613f0de2416788cac5f8ecd04abbc25ef",
+      "reference": {
+        "success_rate": 0.29,
+        "spl": 0.27,
+        "precision": "exact threshold",
+        "source": "Author-corrected official reference, explicitly approved by user on 2026-10-15"
+      },
+      "result": {
+        "model_sha256": "30869101e833f6033ba8718f3bd76af613f0de2416788cac5f8ecd04abbc25ef",
+        "config_sha256": "06f12b90b74ee5fe27bb86d7e1dba2549c1c01dabe97c8dae8765a355a3e29dc",
+        "episodes": 1839,
+        "successes": 549,
+        "total": 1839,
+        "success_rate": 0.29853181076672103,
+        "spl": 0.2771667999745243,
+        "navigation_error": 7.470993960192432,
+        "oracle_success": 0.36595976073953235,
+        "path_length": 8.240021146140345,
+        "elapsed_seconds": 623.8820269107819
+      },
+      "training": {
+        "epoch": 4,
+        "updates": 630,
+        "source_sha256": "e120f5346dd8b01ef9e57ed75304f0d73066767d51be9e6d7892d8f1f60ce617"
+      },
+      "parameter_delta_l2": 0.10579729119415263,
+      "passed": true
+    },
+    "vlnbert": {
+      "checkpoint": "vlnbert-continuation-lr1e-7/epoch-1",
+      "evaluation": "vlnbert-continuation-lr1e-7-val-unseen/epoch-1",
+      "model_sha256": "71380fc0bff6cc0b656933c626b76ba5a6ed3dbea9c68489eafc8609b7db9bde",
+      "reference": {
+        "success_rate": 0.63,
+        "spl": 0.57,
+        "precision": "published whole percentage points",
+        "source": "Recurrent VLN-BERT Table 1, val_unseen, PREVALENT"
+      },
+      "result": {
+        "model_sha256": "71380fc0bff6cc0b656933c626b76ba5a6ed3dbea9c68489eafc8609b7db9bde",
+        "config_sha256": "b4ef4f83f8d42a3790e7dfeccf3e4825272e68ebf9ff6b86653e6272c006d796",
+        "episodes_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+        "scoring": "R2R final viewpoint within 3m; greedy 15 decisions",
+        "episodes": 2349,
+        "scenes": 11,
+        "success_rate": 0.6257982120051085,
+        "spl": 0.566772235808689,
+        "navigation_error": 3.95312759895054,
+        "path_length": 12.054813145733837,
+        "oracle_success": 0.7011494252873564,
+        "elapsed_seconds": 39.07714295387268
+      },
+      "training": {
+        "epoch": 1,
+        "updates": 128,
+        "source_sha256": "876e53b5f07412c7647ec7227970a351d6749a2a71d43cc1b552d54dfee83de6"
+      },
+      "parameter_delta_l2": 0.01568360510661932,
+      "passed": true
+    }
+  },
+  "full_evaluations_audited": [
+    {
+      "directory": "cma-official-val-unseen",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "398004504968ff6fea0429012ecd6d09f01bd95655f599b476b2366aa0461347"
+    },
+    {
+      "directory": "vlnbert-official-val-unseen",
+      "episodes": 2349,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "4699b6b564cc4a5621072a1373e99bf474b2860f7bac831b0dd74827655b24dd"
+    },
+    {
+      "directory": "cma-continuation-v2-val-unseen/epoch-1",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "fb2ac1861b351a7eeb73665246556ecfc1be3cc9877ba5c9edd85a50f7c00b6a"
+    },
+    {
+      "directory": "cma-continuation-v2-val-unseen/epoch-2",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "7b2d3b3cb11d0142d032b67f80e28607b1435774b5a32f0f366f1b1d7587e633"
+    },
+    {
+      "directory": "cma-continuation-v2-val-unseen/epoch-3",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "e7e8740db75ecd89c81ea0ace92ff8f8c39d7b05f71c181cc9829b6958a0c8d5"
+    },
+    {
+      "directory": "cma-continuation-v2-val-unseen/epoch-4",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "0d7c1522e53f494c4315312f346bff315bf9ebcba2bd0f728513e26e0331e782"
+    },
+    {
+      "directory": "cma-continuation-lr1e-6-val-unseen/epoch-4",
+      "episodes": 1839,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "7ee6187b60509b36c3091b64852e12da9206d4208497b8816e7dccbbf7ff3b14"
+    },
+    {
+      "directory": "vlnbert-continuation-val-unseen/epoch-1",
+      "episodes": 2349,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "a30540ab5626d86598abbbd0405fa70234a50d8b930c8fa01414f71c1d2d252d"
+    },
+    {
+      "directory": "vlnbert-continuation-val-unseen/epoch-2",
+      "episodes": 2349,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "01472c089406000803298ce25094008bc151aa8c8e9e8d76e340d8246df9f809"
+    },
+    {
+      "directory": "vlnbert-continuation-lr1e-7-val-unseen/epoch-1",
+      "episodes": 2349,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "4157d0b24673a93a36f216c1bd92c2a2de26906cdf983d6df91525a572fe88cd"
+    },
+    {
+      "directory": "vlnbert-continuation-lr1e-7-val-unseen/epoch-2",
+      "episodes": 2349,
+      "exact_membership": true,
+      "metrics_recomputed": true,
+      "journal_sha256": "6b5b25b94087a8150efd7692e37f126687a3c5286129bab1eff228deed1628c2"
+    }
+  ],
+  "regression_tests": {
+    "passed": 51,
+    "command": "pytest tests/test_navigation.py tests/test_navigation_candidates.py tests/test_vlnce_cma.py -q -p no:cacheprovider"
+  },
+  "cma_original_paper_spl_0_30_claimed": false,
+  "selection_scope": "Maximum full val_unseen SPL among evaluated continuation checkpoints; validation selection, not a separate held-out test claim"
+}

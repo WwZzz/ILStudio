@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "datasets": [
+    {
+      "dataset_id": "r2r",
+      "ctrl_space": "navigation",
+      "ctrl_type": "candidate_viewpoint"
+    }
+  ],
+  "state": {
+    "r2r": "identity"
+  },
+  "action": {
+    "r2r": "identity"
+  }
+}

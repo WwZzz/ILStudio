@@ -1,0 +1,14 @@
+name: r2r
+datasets:
+- name: r2r
+  type: vlastudio.data_utils.datasets.R2RDataset
+  args:
+    max_trajectories: 512
+    download: true
+    connectivity_path: .mattersim/source/connectivity
+meta:
+  action_dim: 1
+  state_dim: 3
+  chunk_size: 1
+  action_normalize: identity
+  state_normalize: identity

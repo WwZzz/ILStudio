@@ -1,0 +1,36 @@
+{
+  "criterion": "Complete val_unseen SPL, as in paper",
+  "all_epochs": [
+    {
+      "epoch": 1,
+      "model_sha256": "71380fc0bff6cc0b656933c626b76ba5a6ed3dbea9c68489eafc8609b7db9bde",
+      "config_sha256": "b4ef4f83f8d42a3790e7dfeccf3e4825272e68ebf9ff6b86653e6272c006d796",
+      "episodes_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+      "scoring": "R2R final viewpoint within 3m; greedy 15 decisions",
+      "episodes": 2349,
+      "scenes": 11,
+      "success_rate": 0.6257982120051085,
+      "spl": 0.566772235808689,
+      "navigation_error": 3.95312759895054,
+      "path_length": 12.054813145733837,
+      "oracle_success": 0.7011494252873564,
+      "elapsed_seconds": 39.07714295387268
+    },
+    {
+      "epoch": 2,
+      "model_sha256": "b495bd61222735ed565259daaaa01cdfed7e307544b421151008531ed281e8ec",
+      "config_sha256": "b4ef4f83f8d42a3790e7dfeccf3e4825272e68ebf9ff6b86653e6272c006d796",
+      "episodes_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+      "scoring": "R2R final viewpoint within 3m; greedy 15 decisions",
+      "episodes": 2349,
+      "scenes": 11,
+      "success_rate": 0.6223925074499788,
+      "spl": 0.565055420721314,
+      "navigation_error": 3.95348934061982,
+      "path_length": 11.98774551970359,
+      "oracle_success": 0.6994465730097914,
+      "elapsed_seconds": 39.19953155517578
+    }
+  ],
+  "best_epoch": 1
+}

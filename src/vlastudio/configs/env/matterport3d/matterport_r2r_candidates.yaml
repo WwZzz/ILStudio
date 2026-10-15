@@ -1,0 +1,20 @@
+type: vlastudio.benchmark.matterport3d.create_env
+name: matterport_r2r_candidates
+task: r2r
+
+episodes: data/R2R_val_seen.json
+dataset_path: data/v1/scans
+connectivity_path: Matterport3DSimulator/connectivity
+ctrl_space: navigation
+ctrl_type: candidate_viewpoint
+action_mode: candidate_viewpoint
+# Output 0 for STOP or an action_id from obs.navigation.candidates. These IDs
+# are stable within a scan; they are not positions in the latest candidate list.
+candidate_source: simulator
+# Native graph neighbors outside the camera FOV are included. RGB remains one
+# current camera view; panorama/visual features and candidate ranking belong to policy.
+candidate_scope: all_neighbors
+max_timesteps: 100
+success_distance: 3.0
+image_size: 256
+depth_enabled: true  # Requires matching skybox depth PNGs; false enables RGB-only.

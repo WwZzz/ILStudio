@@ -1,0 +1,61 @@
+{
+  "sources": [
+    {
+      "name": "cma_policy.py",
+      "url": "https://raw.githubusercontent.com/jacobkrantz/VLN-CE/729d141b2ee10628061ada74dd3a5b9f70faeba5/vlnce_baselines/models/cma_policy.py",
+      "sha256": "976f69d6aba6b5585172e95d6c1a57a3009d6caf27b30ca08fd665daf7b59b72"
+    },
+    {
+      "name": "instruction_encoder.py",
+      "url": "https://raw.githubusercontent.com/jacobkrantz/VLN-CE/729d141b2ee10628061ada74dd3a5b9f70faeba5/vlnce_baselines/models/encoders/instruction_encoder.py",
+      "sha256": "f6f78d1501833e4d0f74fdb1b0e9890c6d38f7b3658da5e0cf6f64c3bc236311"
+    },
+    {
+      "name": "resnet_encoders.py",
+      "url": "https://raw.githubusercontent.com/jacobkrantz/VLN-CE/729d141b2ee10628061ada74dd3a5b9f70faeba5/vlnce_baselines/models/encoders/resnet_encoders.py",
+      "sha256": "6f106f5a9a79b5ef14fe5bd94d14691ee01213c193ff45d4bc68f88c4b2c8bc6"
+    },
+    {
+      "name": "aux_losses.py",
+      "url": "https://raw.githubusercontent.com/jacobkrantz/VLN-CE/729d141b2ee10628061ada74dd3a5b9f70faeba5/vlnce_baselines/common/aux_losses.py",
+      "sha256": "aa2db2cdef9034eaf19733f11c03e948f92a44ba1572f3a58d74da40e13f567b"
+    },
+    {
+      "name": "resnet.py",
+      "url": "https://raw.githubusercontent.com/facebookresearch/habitat-lab/v0.1.7/habitat_baselines/rl/ddppo/policy/resnet.py",
+      "sha256": "499f4a5a24265660fae1fe1463798408aef1648210131e797365f364dcea75de"
+    },
+    {
+      "name": "rnn_state_encoder.py",
+      "url": "https://raw.githubusercontent.com/facebookresearch/habitat-lab/v0.1.7/habitat_baselines/rl/models/rnn_state_encoder.py",
+      "sha256": "33ec287f4d2e71ab112abf84d9eb407b26665cc1f275e810bde6e4071388ac59"
+    },
+    {
+      "name": "resnet_policy.py",
+      "url": "https://raw.githubusercontent.com/facebookresearch/habitat-lab/v0.1.7/habitat_baselines/rl/ddppo/policy/resnet_policy.py",
+      "sha256": "fd361f5a32f1bbffcbc324fdc851dcd88a3ddbe14a701e3bbb31ad5a8b0c26f7"
+    },
+    {
+      "name": "running_mean_and_var.py",
+      "url": "https://raw.githubusercontent.com/facebookresearch/habitat-lab/v0.1.7/habitat_baselines/rl/ddppo/policy/running_mean_and_var.py",
+      "sha256": "59724765f3145fbe845a0b1c15b67be170878ba4f1fa2fc849881d74b49fe157"
+    },
+    {
+      "name": "LICENSE-VLN-CE",
+      "url": "https://raw.githubusercontent.com/jacobkrantz/VLN-CE/729d141b2ee10628061ada74dd3a5b9f70faeba5/LICENSE",
+      "sha256": "c7c9e93e64f244505d84ba6b0f1d28ab3bd9492b70349727f0f4d0cc4d691200"
+    },
+    {
+      "name": "LICENSE-Habitat",
+      "url": "https://raw.githubusercontent.com/facebookresearch/habitat-lab/v0.1.7/LICENSE",
+      "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+    }
+  ],
+  "changes": [
+    "Use local relative imports without Habitat trainer initialization",
+    "Extract the official ResNetEncoder and CMANet classes unchanged in computation",
+    "Construct TorchVision without downloading initial weights because the checkpoint contains every weight",
+    "Use native single-frame observation spaces",
+    "Use restricted tensor loading for the optional depth encoder checkpoint"
+  ]
+}

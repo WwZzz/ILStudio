@@ -37,7 +37,8 @@ def test_loaders_explain_missing_packages(monkeypatch, category, selector, flag)
     assert 'torch' in text and 'missing' in text
     argument = {'--policy': 'policy', '--dataset': 'dataset', '--env': 'environment'}[flag]
     assert f'{argument}=' in text and selector in text
-    assert 'python -m pip install' in text
+    assert f'vlastudio env create {flag}' in text
+    assert f'vlastudio env install {flag}' in text
     assert 'install_dependencies' not in text
     assert 'python run.py' in text
     assert '-m vlastudio' not in text
@@ -111,8 +112,9 @@ def test_plan_and_check_do_not_create_cache(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(dependencies.metadata, 'version', missing)
     assert main(['plan', '--policy', 'act', '--json']) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert 'uv venv --python 3.10' in plan['commands']['create']
-    assert 'python -m pip install' in plan['commands']['install_current']
+    assert plan['commands']['create'] == 'vlastudio env create --policy act'
+    assert plan['profile']['python'] == '3.10'
+    assert plan['commands']['install_current'] == 'vlastudio env install --policy act'
     assert main(['check', '--policy', 'act']) == 2
     assert not cache.exists()
 
@@ -121,7 +123,8 @@ def test_platform_requirement_does_not_hide_installation_plan(monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'win32')
     plan = vla.environment_plan(policy='pi0')
     assert any('platform' in issue for issue in plan['issues'])
-    assert 'transformers==4.53.2' in plan['commands']['install_current']
+    assert plan['commands']['install_current'] == 'vlastudio env install --policy pi0'
+    assert 'transformers==4.53.2' in plan['profile']['requirements']
 
 
 def test_legacy_model_metadata_is_discoverable():

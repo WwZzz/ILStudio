@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-15",
+  "branch": "codex/navigation-integration",
+  "task": "gps_compass_pointnav",
+  "dataset": {
+    "qz_record": 1887,
+    "dataset_id": "hm3d",
+    "version_id": "v1",
+    "archive": "hm3d-minival-habitat-v0.2.tar",
+    "selection": "First two lexicographically sorted .basis.glb scenes in minival; fixed before training",
+    "scene_sha256": {
+      "00800-TEEsavR23oF/TEEsavR23oF.basis.glb": "56efe1b85e17d010f6ecc942ab56fe82ed32a53c58599ffe3dc74327c20525e9",
+      "00801-HaxA7YrQdEC/HaxA7YrQdEC.basis.glb": "679be1b01ba8d36814bdba813e76290fde57ba7a2b4d10e320e0322e55ed9959"
+    },
+    "extracted_bytes": 59974964
+  },
+  "protocol": "same-scene held-out starts/goals; 1-5m geodesic; STOP within 0.2m; 80 steps",
+  "split_counts": {
+    "train": 200,
+    "validation": 40,
+    "test": 100
+  },
+  "learned": {
+    "total": 100,
+    "total_success": 75,
+    "success_rate": 0.75,
+    "spl": 0.7375061839366785
+  },
+  "random": {
+    "total": 100,
+    "total_success": 0,
+    "success_rate": 0.0,
+    "spl": 0.0
+  },
+  "stop": {
+    "total": 100,
+    "total_success": 0,
+    "success_rate": 0.0,
+    "spl": 0.0
+  },
+  "training": [
+    {
+      "round": 0,
+      "samples": 4087,
+      "loss": 0.47507622838020325,
+      "validation_success_rate": 0.75,
+      "validation_spl": 0.7388493770849258
+    },
+    {
+      "round": 1,
+      "samples": 9683,
+      "loss": 0.7191903591156006,
+      "validation_success_rate": 0.25,
+      "validation_spl": 0.2483124281234954
+    },
+    {
+      "round": 2,
+      "samples": 17025,
+      "loss": 0.71338951587677,
+      "validation_success_rate": 0.25,
+      "validation_spl": 0.24714889609087928
+    }
+  ],
+  "expert_failures": 0,
+  "checkpoint_sha256": "ea7b423e3dcb91f31c08f2b9a295e3604c7cbf269a1b14f4ad805a18e3fcd64d",
+  "source_sha256": {
+    "examples/09_navigation/train_and_evaluate.py": "8d0b7d70c482ece8d071d0bfd948df4beda260e0e1affb1226bfafb329f0250e",
+    "src/vlastudio/benchmark/habitat/__init__.py": "d8cac0ceef887cca64813c302bd6f453944a15cad3318cecf2d5836ccbe53a68",
+    "src/vlastudio/policy/navigation_mlp/__init__.py": "08acfb721d3329e26013e2db40d40d21d4bfb5acd46d2ddb3a9964290ae91be2"
+  },
+  "trained_source_revision": "5f9b7bd05637fede51008bbb319ef50f1eaf58e3",
+  "versions": {
+    "python": "3.10.14",
+    "torch": "2.4.1+cu121",
+    "habitat_sim": "0.3.3"
+  },
+  "acceptance": {
+    "threshold": 0.3,
+    "above_random_required": true,
+    "accepted": true
+  },
+  "framework_recheck": {
+    "all_100_episode_metrics_identical": true,
+    "total": 100,
+    "total_success": 75,
+    "success_rate": 0.75,
+    "spl": 0.7375061839366785
+  },
+  "transfer": {
+    "scene": "00801-HaxA7YrQdEC",
+    "seed": 300000,
+    "protocol": "Second fixed HM3D minival scene, unseen during training; 100 episodes, seed300000; 1-5m; STOP<0.2m;80steps",
+    "scene_sha256": "679be1b01ba8d36814bdba813e76290fde57ba7a2b4d10e320e0322e55ed9959",
+    "checkpoint_sha256": {
+      "castle_policy": "ee6490b7f883844d488e229a33a4cfdb40d9477af4359a247155c79e80dc88c8",
+      "hm3d_policy": "ea7b423e3dcb91f31c08f2b9a295e3604c7cbf269a1b14f4ad805a18e3fcd64d"
+    },
+    "results": {
+      "castle_policy": {
+        "total": 100,
+        "total_success": 72,
+        "success_rate": 0.72,
+        "spl": 0.7146677166215273
+      },
+      "hm3d_policy": {
+        "total": 100,
+        "total_success": 79,
+        "success_rate": 0.79,
+        "spl": 0.7782369136751285
+      },
+      "random": {
+        "total": 100,
+        "total_success": 0,
+        "success_rate": 0.0,
+        "spl": 0.0
+      },
+      "stop": {
+        "total": 100,
+        "total_success": 0,
+        "success_rate": 0.0,
+        "spl": 0.0
+      }
+    }
+  },
+  "limitations": [
+    "GPS/compass PointNav, no image or language input to policy",
+    "Two minival scenes used for smoke tests, not official benchmark splits",
+    "Short 1-5m routes; one additional unseen scene does not establish broad generalization",
+    "No original MP3D/R2R benchmark result"
+  ],
+  "artifacts": [
+    "hm3d-training/policy.pt",
+    "hm3d-training/evaluation.json",
+    "hm3d-training/episodes.json",
+    "hm3d-training/rollout.mp4",
+    "hm3d-transfer/evaluation.json",
+    "hm3d-transfer/episodes.json",
+    "hm3d-transfer/rollout.mp4"
+  ]
+}

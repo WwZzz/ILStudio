@@ -30,6 +30,12 @@ base, except `create --policy/--env`, which derives a name from the component
 
 ## Native simulators
 
+Navigation uses Python 3.10 on Linux. Habitat requires native Habitat-Sim 0.3.3
+and matching Habitat-Lab for VLN-CE. MatterSim has an isolated native installer;
+its R2R baseline uses published panorama features. MP3D geometry is supplied by
+an existing authorized scene directory or mount. See [Example 09](../examples/09_navigation/README.md)
+and the [navigation installation guide](navigation.md).
+
 Review the upstream licenses before using acceptance flags:
 
 ```bash

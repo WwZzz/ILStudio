@@ -1,0 +1,7 @@
+extends: remote.yaml
+platforms: [linux]
+description: Habitat-Sim PointNav; native simulator must be installed in the selected interpreter.
+notes:
+- Build habitat-sim v0.3.3 for Python 3.10 before using runtime=current; public Conda binaries use Python 3.9.
+- Native Conda packages cannot be provisioned by the pip environment resolver.
+- Install habitat-lab v0.3.3 for the optional continuous R2R task. See docs/navigation.md.

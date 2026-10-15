@@ -1,0 +1,11 @@
+{
+  "archive_sha256": "791344c4987de20ff792f80159a7f9e229310f421f59e4494c564b938c5bab8d",
+  "panoramas": 10567,
+  "shape": [
+    10567,
+    36,
+    2048
+  ],
+  "dtype": "float32",
+  "source": "Official Recurrent-VLN-BERT Places365 ResNet-152 features"
+}

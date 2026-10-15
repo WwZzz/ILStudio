@@ -1,0 +1,20 @@
+{
+  "source_model_sha256": "e120f5346dd8b01ef9e57ed75304f0d73066767d51be9e6d7892d8f1f60ce617",
+  "train_data_sha256": "340a80133b2157520354ab055a91d98feb2f42e4bbda17b200c911f8788492ea",
+  "config_sha256": "be15dc66c84d887b53a030d432adaeb25a102c7921f0c03f48016abed6395812",
+  "episode_ids": [
+    "9938",
+    "3644"
+  ],
+  "method": "Train-only DAgger continuation; 0.5m shortest-path follower labels at learner-visited states",
+  "arguments": {
+    "config": "${NAVIGATION_ROOT}/paper-reproduction/cma-train.yaml",
+    "model": "${NAVIGATION_ROOT}/paper-reproduction/cma-official",
+    "output": "${NAVIGATION_ROOT}/paper-reproduction/cma-dagger-gate",
+    "trajectories": 2,
+    "teacher_probability": 0.75,
+    "seed": 20261016,
+    "device": "cuda"
+  },
+  "scene_count": 2
+}

@@ -15,10 +15,12 @@ POLICY_PROFILES = {
     'act': 'base', 'mlp': 'base', 'diffusion_policy': 'diffusion_policy',
     'remote': 'remote', 'smolvla': 'smolvla', 'openpi': 'openpi',
     'openvla': 'openvla', 'fastwam': 'fastwam',
+    'vlnce_cma': 'vlnce_cma', 'recurrent_vlnbert': 'base',
 }
 ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld',
                 'tabletop_sim': 'tabletop_sim', 'rlbench': 'rlbench',
-                'robotwin': 'robotwin', 'behavior1k': 'behavior1k'}
+                'robotwin': 'robotwin', 'behavior1k': 'behavior1k',
+                'habitat': 'habitat', 'matterport3d': 'matterport3d'}
 FIELDS = {'extends', 'python', 'requires_python', 'requirements', 'lockfile', 'lock', 'entrypoint',
           'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes',
           'installers', 'checks'}
@@ -197,7 +199,7 @@ def merge_component_runtimes(profile, config, path):
 
 
 def dataset_environment(config, path, *, check_platform=True, python=None):
-    """Shared loaders need no simulator, even for LIBERO/RLBench recordings."""
+    """Resolve dataset dependencies; navigation replay also needs its native backend."""
     profile = environment_for({}, path, str(recipe('data')), check_platform=check_platform)
     fixed_python = python is not None
     if python:
@@ -219,6 +221,11 @@ def dataset_environment(config, path, *, check_platform=True, python=None):
                 profile = combine_profiles(profile, environment_for({}, path, str(recipe('rlds')), check_platform=check_platform))
             elif module.endswith('.WrappedLerobotDataset') or module.startswith('data_utils.datasets.libero_lerobot'):
                 profile = combine_profiles(profile, {'python': profile['python'], 'requirements': ['lerobot==0.3.3']})
+            elif module.endswith('.R2RDataset'):
+                profile = combine_profiles(profile, environment_for({}, path, str(recipe('matterport3d')), check_platform=check_platform))
+            elif module.endswith('.VLNCEDataset'):
+                for family in ['habitat', 'vlnce_cma']:
+                    profile = combine_profiles(profile, environment_for({}, path, str(recipe(family)), check_platform=check_platform))
             for key, child in value.items():
                 if key != 'runtime':
                     visit(child)

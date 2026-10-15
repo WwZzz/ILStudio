@@ -1,0 +1,8 @@
+{
+  "source": "https://zenodo.org/records/4437864/files/snap.zip?download=1",
+  "member": "snap/VLNBERT-PREVALENT-final/state_dict/best_val_unseen",
+  "sha256": "612fccc817d104ef09de4df70c081ddd692cbb85c219785c7bbfc627507c3ee0",
+  "compressed_sha256": "e17b6a418bb4def8cc36936f03f8dbe48b0ccd06ebbece4d4d8e6de703353c28",
+  "bytes": 1680026782,
+  "compressed_bytes": 1375263232
+}

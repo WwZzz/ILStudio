@@ -1,0 +1,164 @@
+{
+  "vlnce_cma": {
+    "episodes": 6,
+    "standard_api": "vlastudio.load_env(...).evaluate",
+    "model_sha256": "96f8dd3b043b3eebefadafdd382b33cef9812f3ca680207d8e1522c8ce44770c",
+    "summary": {
+      "total_success": 1,
+      "total": 6,
+      "horizon": [
+        500,
+        83,
+        33,
+        54,
+        51,
+        68
+      ],
+      "horizon_success": 33.0,
+      "success_rate": 0.16666666666666666,
+      "spl": 0.16666666666666666,
+      "episodes": [
+        {
+          "distance_to_goal": 0.8632094264030457,
+          "success": false,
+          "spl": 0.0,
+          "episode_id": "3"
+        },
+        {
+          "distance_to_goal": 6.450243949890137,
+          "success": false,
+          "spl": 0.0,
+          "episode_id": "6"
+        },
+        {
+          "distance_to_goal": 2.271308183670044,
+          "success": true,
+          "spl": 1.0,
+          "episode_id": "1"
+        },
+        {
+          "distance_to_goal": 9.888504028320312,
+          "success": false,
+          "spl": 0.0,
+          "episode_id": "5"
+        },
+        {
+          "distance_to_goal": 10.138425827026367,
+          "success": false,
+          "spl": 0.0,
+          "episode_id": "4"
+        },
+        {
+          "distance_to_goal": 11.531280517578125,
+          "success": false,
+          "spl": 0.0,
+          "episode_id": "2"
+        }
+      ],
+      "eval_time": 54.40776205062866
+    },
+    "purpose": "Pipeline check only; not a full benchmark estimate"
+  },
+  "recurrent_vlnbert": {
+    "episodes": 6,
+    "standard_api": "vlastudio.load_env(...).evaluate",
+    "model_sha256": "953736e8eb6fab39a92c26dd32c63fde36c6f96beedba022dec8f9f038593602",
+    "summary": {
+      "total_success": 5,
+      "total": 6,
+      "horizon": [
+        6,
+        5,
+        15,
+        6,
+        6,
+        6
+      ],
+      "horizon_success": 7.6,
+      "success_rate": 0.8333333333333334,
+      "spl": 0.6836174654874436,
+      "episodes": [
+        {
+          "success": false,
+          "spl": 0.0,
+          "distance_to_goal": 5.163127264153355,
+          "path_length": 16.020984419340998,
+          "shortest_path_length": 10.857857155187645,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "4332_0",
+          "explicit_stop_success": false
+        },
+        {
+          "success": true,
+          "spl": 0.8540639689712721,
+          "distance_to_goal": 2.3637827999080203,
+          "path_length": 12.713166167478104,
+          "shortest_path_length": 10.857857155187645,
+          "steps": 5,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "4332_1",
+          "explicit_stop_success": true
+        },
+        {
+          "success": true,
+          "spl": 0.24764082395338974,
+          "distance_to_goal": 2.2301851171819793,
+          "path_length": 43.84518263931831,
+          "shortest_path_length": 10.857857155187645,
+          "steps": 15,
+          "stopped": false,
+          "timeout": true,
+          "collision": false,
+          "episode_id": "4332_2",
+          "explicit_stop_success": false
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.037513542415756,
+          "shortest_path_length": 8.037513542415756,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "2390_0",
+          "explicit_stop_success": true
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.037513542415756,
+          "shortest_path_length": 8.037513542415756,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "2390_1",
+          "explicit_stop_success": true
+        },
+        {
+          "success": true,
+          "spl": 1.0,
+          "distance_to_goal": 0.0,
+          "path_length": 8.037513542415756,
+          "shortest_path_length": 8.037513542415756,
+          "steps": 6,
+          "stopped": true,
+          "timeout": false,
+          "collision": false,
+          "episode_id": "2390_2",
+          "explicit_stop_success": true
+        }
+      ],
+      "eval_time": 3.1386053562164307
+    },
+    "purpose": "Pipeline check only; not a full benchmark estimate"
+  }
+}

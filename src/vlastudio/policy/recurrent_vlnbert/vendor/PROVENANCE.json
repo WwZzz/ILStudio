@@ -1,0 +1,17 @@
+{
+  "revision": "ad147f464ae81ef0a9eeb29dc0a0cbbcddcb1f3e",
+  "sources": [
+    {
+      "url": "https://github.com/YicongHong/Recurrent-VLN-BERT/blob/ad147f464ae81ef0a9eeb29dc0a0cbbcddcb1f3e/r2r_src/model_PREVALENT.py",
+      "sha256": "4fecb5beab3d535ac10cce1b95726c7efea9f0c86ac1d9dea12dbb03ba638336"
+    },
+    {
+      "url": "https://github.com/YicongHong/Recurrent-VLN-BERT/blob/ad147f464ae81ef0a9eeb29dc0a0cbbcddcb1f3e/r2r_src/vlnbert/vlnbert_PREVALENT.py",
+      "sha256": "621c2aba208f4e0f8da4068bba3b3c792fe0b2757665578b62b20e4e89f1b028"
+    }
+  ],
+  "changes": [
+    "Replace global command-line arguments with fixed published PREVALENT settings",
+    "Replace obsolete HuggingFace pretrained loader with local tensor-only strict loading; no changes to forward computation"
+  ]
+}

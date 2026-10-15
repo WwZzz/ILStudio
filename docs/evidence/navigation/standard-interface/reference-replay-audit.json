@@ -1,0 +1,23 @@
+{
+  "records": [
+    {
+      "episode_id": "1797_0",
+      "exactly_equal": true,
+      "reference_steps": 7,
+      "prior_steps": 7
+    },
+    {
+      "episode_id": "1797_1",
+      "exactly_equal": true,
+      "reference_steps": 7,
+      "prior_steps": 7
+    },
+    {
+      "episode_id": "1797_2",
+      "exactly_equal": true,
+      "reference_steps": 7,
+      "prior_steps": 7
+    }
+  ],
+  "all_training_samples_exactly_match_reference_replay": true
+}
