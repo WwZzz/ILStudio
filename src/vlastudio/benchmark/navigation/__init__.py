@@ -111,7 +111,11 @@ class NavigationEpisode:
     def _finish_step(self, distance, stopped, collision=False):
         self.steps += 1
         self.done = bool(stopped or self.steps >= self.max_steps)
-        success = bool(stopped and distance < self.success_distance)
+        explicit_stop_success = bool(stopped and distance < self.success_distance)
+        # Published R2R scores the final viewpoint at the decision budget. Other
+        # tasks retain explicit STOP semantics unless configured otherwise.
+        requires_stop = getattr(self, 'success_requires_stop', True)
+        success = bool(distance < self.success_distance and (stopped or (self.done and not requires_stop)))
         self.last_info = {
             'success': success, 'spl': spl(success, self.shortest, self.travelled),
             'distance_to_goal': float(distance), 'path_length': self.travelled,
@@ -119,4 +123,6 @@ class NavigationEpisode:
             'stopped': bool(stopped), 'timeout': bool(self.done and not stopped),
             'collision': bool(collision), 'episode_id': str(self.episode_id),
         }
+        if not requires_stop:
+            self.last_info['explicit_stop_success'] = explicit_stop_success
         return asdict(self.prev_obs), float(success), self.done, dict(self.last_info)

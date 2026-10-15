@@ -1,0 +1,4 @@
+type: vlastudio.policy.vlnce_cma
+name: vlnce_cma
+args:
+  device: cuda

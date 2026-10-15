@@ -191,8 +191,14 @@ class HabitatLabEnv(MetaEnv):
         depth = np.asarray(obs['depth']) if 'depth' in obs else None
         if depth is not None and depth.ndim == 3:
             depth = depth[..., 0]
+        navigation = dict(self.navigation_options)
+        if getattr(self.config, 'return_instruction_tokens', False):
+            tokens = instruction.get('instruction_tokens') if isinstance(instruction, dict) else getattr(instruction, 'instruction_tokens', None)
+            if tokens is None:
+                raise ValueError('Configured instruction tokens are missing from this episode')
+            navigation['instruction_tokens'] = list(tokens)
         return MetaObs(state=state, raw_lang=text, timestep=self.steps,
-                       navigation=dict(self.navigation_options),
+                       navigation=navigation,
                        image=np.asarray(obs['rgb'])[None, ..., :3].transpose(0, 3, 1, 2).copy() if 'rgb' in obs else None,
                        depth=depth[None] if depth is not None else None)
 

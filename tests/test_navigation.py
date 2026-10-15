@@ -15,7 +15,8 @@ from vlastudio.benchmark.matterport3d import graph_distances, load_graph, Matter
 
 
 @pytest.mark.parametrize('name', ['habitat.habitat_pointnav', 'habitat.habitat_vlnce',
-                                 'matterport3d.matterport_r2r', 'matterport3d.matterport_r2r_candidates'])
+                                 'habitat.habitat_vlnce_cma', 'matterport3d.matterport_r2r',
+                                 'matterport3d.matterport_r2r_candidates', 'matterport3d.matterport_r2r_vlnbert'])
 def test_packaged_configs_resolve_to_factory_and_runtime(name):
     from vlastudio.configuration import read_config
     from vlastudio.extensions import resolve
@@ -59,6 +60,21 @@ def test_spl_uses_geodesic_path_length():
     assert spl(True, 0., 0.) == 1.
 
 
+def test_r2r_final_viewpoint_scoring_is_explicitly_configured():
+    env = NavigationEpisode()
+    env.max_steps, env.success_distance, env.episode_id = 1, 3., 'r2r'
+    env.prev_obs = MetaObs(state=np.zeros(3))
+    env.success_requires_stop = False
+    env._begin(4.)
+    env.travelled = 4.
+    _, _, done, info = env._finish_step(2., stopped=False)
+    assert done and info['timeout'] and info['success'] and info['spl'] == 1.
+    assert info['explicit_stop_success'] is False
+    env.success_requires_stop = True
+    env._begin(4.)
+    assert not env._finish_step(2., stopped=False)[3]['success']
+
+
 def test_vector_evaluator_does_not_count_failure_and_freezes_finished_slots():
     class Envs:
         def __init__(self):
@@ -97,6 +113,44 @@ def test_r2r_graph_distance_is_not_straight_line(tmp_path):
     path = tmp_path / 'graph.json'
     path.write_text(json.dumps(nodes))
     assert graph_distances(load_graph(path), 'c')['a'] == 7.
+
+
+def test_vlnce_config_uses_the_paper_success_distance():
+    from vlastudio.configuration import read_config
+    cfg, _ = read_config('habitat.habitat_vlnce', 'env')
+    assert 'habitat.task.measurements.success.success_distance=3.0' in cfg['habitat_overrides']
+
+
+def test_panoramic_candidates_use_current_viewpoint_and_cache_geometry():
+    class Sweep:
+        def __init__(self):
+            self.view = 0
+            self.scans = []
+        def newEpisode(self, scans, viewpoints, heading, elevation):
+            self.scans.append((scans, viewpoints))
+            self.view = 0
+        def makeAction(self, index, heading, elevation):
+            self.view += 1
+        def getState(self):
+            return [SimpleNamespace(viewIndex=self.view, heading=(self.view % 12)*np.pi/6,
+                elevation=(self.view//12-1)*np.pi/6,
+                navigableLocations=[SimpleNamespace(), SimpleNamespace(viewpointId='neighbor',
+                    rel_heading=.1 if self.view == 13 else .2, rel_elevation=0., rel_distance=2.)])]
+    env = MatterportNavigationEnv.__new__(MatterportNavigationEnv)
+    env.panorama_sim, env.panorama_cache = Sweep(), {}
+    env.viewpoint_actions = {'neighbor': 7}
+    state = SimpleNamespace(scanId='scan', location=SimpleNamespace(viewpointId='current'),
+                            viewIndex=12, elevation=0.)
+    candidate = env._panoramic_candidates(state)[0]
+    assert candidate['action_id'] == 7
+    assert candidate['source_view_index'] == 13
+    assert env.panorama_sim.scans == [(['scan'], ['current'])]
+    state.viewIndex = 15
+    again = env._panoramic_candidates(state)[0]
+    assert again['source_view_index'] == 13
+    assert again['relative_heading'] == pytest.approx(candidate['relative_heading']-np.pi/2)
+    assert len(env.panorama_sim.scans) == 1
+    assert not {'goal', 'teacher', 'reference_path'} & candidate.keys()
 
 
 def test_matterport_turn_increments_rgb_depth_and_no_goal_leakage():
@@ -200,12 +254,31 @@ def test_habitat_lab_selects_disjoint_rollout_offsets_and_stride():
     def make(index):
         env = HabitatLabEnv.__new__(HabitatLabEnv)
         env.index, env.stride = index, 2
+        env.config = SimpleNamespace()
         env.navigation_options = {}
         env.env = SimpleNamespace(episodes=episodes, reset=lambda: {})
         return env
     left, right = make(0), make(1)
     assert [left.reset().raw_lang, right.reset().raw_lang] == ['Route 0', 'Route 1']
     assert [left.reset().raw_lang, right.reset().raw_lang] == ['Route 2', 'Route 3']
+
+
+def test_preprocessed_instruction_tokens_are_explicit_and_unmodified():
+    from vlastudio.benchmark.habitat import HabitatLabEnv
+    env = HabitatLabEnv.__new__(HabitatLabEnv)
+    env.config = SimpleNamespace(return_instruction_tokens=True)
+    env.navigation_options, env.steps = {}, 0
+    env.env = SimpleNamespace(current_episode=SimpleNamespace(instruction={
+        'instruction_text': 'Find the stairs.', 'instruction_tokens': [15, 4, 9, 0, 0]}))
+    obs = env.obs2meta({})
+    assert obs.navigation['instruction_tokens'] == [15, 4, 9, 0, 0]
+    assert obs.raw_lang == 'Find the stairs.'
+    env.config.return_instruction_tokens = False
+    assert 'instruction_tokens' not in env.obs2meta({}).navigation
+    env.config.return_instruction_tokens = True
+    del env.env.current_episode.instruction['instruction_tokens']
+    with pytest.raises(ValueError, match='tokens are missing'):
+        env.obs2meta({})
 
 
 @pytest.mark.parametrize('batch_size', [1, 2])

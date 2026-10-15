@@ -1,0 +1,20 @@
+{
+  "selected_checkpoint": "vlnbert-continuation-lr1e-7/epoch-1",
+  "selected_model_sha256": "71380fc0bff6cc0b656933c626b76ba5a6ed3dbea9c68489eafc8609b7db9bde",
+  "selected_training": {
+    "epoch": 1,
+    "updates": 128,
+    "source_sha256": "876e53b5f07412c7647ec7227970a351d6749a2a71d43cc1b552d54dfee83de6"
+  },
+  "selected_parameter_delta_l2": 0.01568360510661932,
+  "training_episode_count": 512,
+  "train_validation_scenes_disjoint": true,
+  "all_training_ids_in_original_train": true,
+  "full_validation_membership_verified": 2349,
+  "framework_parity_episodes": 6,
+  "framework_metric_max_difference": 0.0,
+  "training_epoch_mean_cross_entropy": {
+    "1": 0.5888918761629611,
+    "2": 0.5720142575446516
+  }
+}

@@ -406,6 +406,16 @@ versions, source hashes and the limits of this check.
 
 ## Tests and primary sources
 
+Learned language-navigation baselines and their separate full-split acceptance
+protocol are documented in [the VLN model example](../examples/09_navigation/README.md#learned-vln-models).
+The expert checks above establish simulator contracts only. They do not establish
+paper reproduction. The model configurations are `habitat.habitat_vlnce_cma`
+and `matterport3d.matterport_r2r_vlnbert`; their action spaces and image inputs
+are explicitly different. The latter offers `candidate_view_alignment: panoramic`
+to match published candidate macro-actions. `preserve` retains the existing
+candidate action behavior. Rendering and depth are configured independently,
+and depth requires rendering.
+
 ```bash
 PYTHONPATH=src python -m pytest tests/test_navigation.py -q
 ```

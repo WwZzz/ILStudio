@@ -58,7 +58,20 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         self.config = config
         self.max_steps = int(getattr(config, 'max_timesteps', 100))
         self.success_distance = float(getattr(config, 'success_distance', 3.0))
+        self.success_requires_stop = bool(getattr(config, 'success_requires_stop', True))
         self.depth_enabled = bool(getattr(config, 'depth_enabled', True))
+        self.rendering_enabled = bool(getattr(config, 'rendering_enabled', True))
+        self.candidate_view_alignment = getattr(config, 'candidate_view_alignment', 'preserve')
+        if self.candidate_view_alignment not in ('preserve', 'panoramic'):
+            raise ValueError('candidate_view_alignment must be preserve or panoramic')
+        if self.candidate_view_alignment == 'panoramic' and not (
+                self.navigation_options['action_mode'] == 'candidate_viewpoint' and
+                self.navigation_options['candidate_scope'] == 'all_neighbors'):
+            raise ValueError('Panoramic alignment requires candidate_viewpoint and all_neighbors')
+        if not self.rendering_enabled and self.depth_enabled:
+            raise ValueError('Depth requires rendering_enabled=true')
+        self.panorama_cache = {}
+        self.panorama_sim = None
         opener = gzip.open if str(config.episodes).endswith('.gz') else open
         with opener(config.episodes, 'rt', encoding='utf-8') as stream:
             raw = json.load(stream)
@@ -76,6 +89,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         sim.setDatasetPath(str(Path(config.dataset_path).expanduser().resolve()))
         sim.setNavGraphPath(str(Path(config.connectivity_path).expanduser().resolve()))
         sim.setBatchSize(1)
+        sim.setRenderingEnabled(self.rendering_enabled)
         sim.setCameraResolution(getattr(config, 'image_size', 256), getattr(config, 'image_size', 256))
         sim.setCameraVFOV(np.deg2rad(60))
         sim.setDiscretizedViewingAngles(True)
@@ -83,7 +97,48 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         if self.navigation_options['candidate_source'] == 'simulator':
             sim.setRestrictedNavigation(self.navigation_options['candidate_scope'] == 'visible')
         sim.initialize()
+        if self.candidate_view_alignment == 'panoramic':
+            self.panorama_sim = MatterSim.Simulator()
+            self.panorama_sim.setDatasetPath(str(Path(config.dataset_path).expanduser().resolve()))
+            self.panorama_sim.setNavGraphPath(str(Path(config.connectivity_path).expanduser().resolve()))
+            self.panorama_sim.setBatchSize(1)
+            self.panorama_sim.setRenderingEnabled(False)
+            self.panorama_sim.setDepthEnabled(False)
+            self.panorama_sim.setCameraResolution(640, 480)
+            self.panorama_sim.setCameraVFOV(np.deg2rad(60))
+            self.panorama_sim.setDiscretizedViewingAngles(True)
+            self.panorama_sim.setRestrictedNavigation(True)
+            self.panorama_sim.initialize()
         super().__init__(sim)
+
+    def _panoramic_candidates(self, state):
+        """Official R2R 36-view sweep, using only current-viewpoint geometry."""
+        key = (state.scanId, state.location.viewpointId)
+        if key not in self.panorama_cache:
+            adjacent = {}
+            for view in range(36):
+                if view == 0:
+                    self.panorama_sim.newEpisode([key[0]], [key[1]], [0.], [-np.pi/6])
+                else:
+                    self.panorama_sim.makeAction([0], [1.], [1. if view % 12 == 0 else 0.])
+                pose = self.panorama_sim.getState()[0]
+                if pose.viewIndex != view:
+                    raise RuntimeError('MatterSim panoramic sweep view mismatch')
+                for location in pose.navigableLocations[1:]:
+                    distance = float(np.hypot(location.rel_heading, location.rel_elevation))
+                    old = adjacent.get(location.viewpointId)
+                    if old is None or distance < old['angular_distance']:
+                        adjacent[location.viewpointId] = {
+                            'viewpoint_id': location.viewpointId, 'source_view_index': view,
+                            'heading': float(pose.heading+location.rel_heading),
+                            'elevation': float(pose.elevation+location.rel_elevation),
+                            'angular_distance': distance, 'distance': float(location.rel_distance)}
+            self.panorama_cache[key] = list(adjacent.values())
+        base_heading = (state.viewIndex % 12)*np.pi/6
+        return [{**row, 'action_id': self.viewpoint_actions[row['viewpoint_id']],
+            'relative_heading': row['heading']-base_heading,
+            'relative_elevation': row['elevation']-float(state.elevation)}
+            for row in self.panorama_cache[key]]
 
     def reset(self):
         item = self.episodes[self.index % len(self.episodes)]
@@ -106,7 +161,9 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
     def obs2meta(self, state):
         # Heading/elevation and current visible degree are observable, unlike goal distance.
         features = np.asarray([state.heading, state.elevation, len(state.navigableLocations) - 1], dtype=np.float32)
-        image = np.asarray(state.rgb)[..., ::-1].copy()  # MatterSim uses BGR.
+        image = None
+        if getattr(self, 'rendering_enabled', True):
+            image = np.asarray(state.rgb)[..., ::-1].copy()  # MatterSim uses BGR.
         depth = None
         if self.depth_enabled:
             depth = np.asarray(state.depth, dtype=np.float32)
@@ -115,6 +172,9 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
             depth = depth[None] / 4000.
         options = getattr(self, 'navigation_options', navigation_options(None, supports_candidates=True))
         navigation = dict(options)
+        if hasattr(state, 'scanId') and hasattr(state, 'viewIndex'):
+            navigation.update(scan_id=state.scanId, viewpoint_id=state.location.viewpointId,
+                              view_index=int(state.viewIndex))
         if options['candidate_source'] == 'simulator':
             navigation['candidates'] = [
                 {'action_id': self.viewpoint_actions[location.viewpointId],
@@ -123,12 +183,18 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
                  'relative_elevation': float(location.rel_elevation),
                  'distance': float(location.rel_distance)}
                 for location in state.navigableLocations[1:]]
-        return MetaObs(state=features, image=image[None].transpose(0, 3, 1, 2),
+            if getattr(self, 'candidate_view_alignment', 'preserve') == 'panoramic':
+                navigation['candidates'] = self._panoramic_candidates(state)
+                navigation['candidate_view_alignment'] = 'panoramic'
+        return MetaObs(state=features, image=None if image is None else image[None].transpose(0, 3, 1, 2),
                        depth=depth, raw_lang=self.episode['instruction'], timestep=self.steps,
                        navigation=navigation)
 
     def _candidate_location(self, action, state):
         target = self.action_viewpoints[action]
+        if getattr(self, 'candidate_view_alignment', 'preserve') == 'panoramic' and not any(
+                row['action_id'] == action for row in self.prev_obs.navigation['candidates']):
+            raise ValueError('Selected viewpoint is absent from the latest panoramic candidates')
         for index, location in enumerate(state.navigableLocations[1:], 1):
             if location.viewpointId == target:
                 return index
@@ -155,6 +221,15 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         collision = False
         if getattr(self, 'navigation_options', {}).get('action_mode') == 'candidate_viewpoint':
             if action:
+                if getattr(self, 'candidate_view_alignment', 'preserve') == 'panoramic':
+                    candidate = next(row for row in self.prev_obs.navigation['candidates'] if row['action_id'] == action)
+                    view = candidate['source_view_index']
+                    while self.env.getState()[0].viewIndex // 12 != view // 12:
+                        current_level = self.env.getState()[0].viewIndex // 12
+                        self.env.makeAction([0], [0.], [1. if current_level < view // 12 else -1.])
+                    while self.env.getState()[0].viewIndex != view:
+                        self.env.makeAction([0], [1.], [0.])
+                    before = self.env.getState()[0]
                 location = self._candidate_location(action, before)
         elif action == 1:
             if len(before.navigableLocations) > 1:
@@ -177,6 +252,9 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         return self._finish_step(self.distances.get(target, float('inf')), action == 0, collision)
 
     def close(self):
+        if getattr(self, 'panorama_sim', None) is not None:
+            self.panorama_sim.close()
+            self.panorama_sim = None
         if self.env is not None:
             self.env.close()
             self.env = None

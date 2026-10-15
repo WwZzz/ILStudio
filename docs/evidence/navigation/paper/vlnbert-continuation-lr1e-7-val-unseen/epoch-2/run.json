@@ -1,0 +1,6 @@
+{
+  "model_sha256": "b495bd61222735ed565259daaaa01cdfed7e307544b421151008531ed281e8ec",
+  "config_sha256": "b4ef4f83f8d42a3790e7dfeccf3e4825272e68ebf9ff6b86653e6272c006d796",
+  "episodes_sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+  "scoring": "R2R final viewpoint within 3m; greedy 15 decisions"
+}

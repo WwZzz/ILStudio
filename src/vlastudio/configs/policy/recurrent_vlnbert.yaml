@@ -1,0 +1,4 @@
+type: vlastudio.policy.recurrent_vlnbert
+name: recurrent_vlnbert
+args:
+  device: cuda

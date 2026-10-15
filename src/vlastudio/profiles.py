@@ -15,6 +15,7 @@ POLICY_PROFILES = {
     'act': 'base', 'mlp': 'base', 'diffusion_policy': 'diffusion_policy',
     'remote': 'remote', 'smolvla': 'smolvla', 'openpi': 'openpi',
     'openvla': 'openvla', 'fastwam': 'fastwam',
+    'vlnce_cma': 'vlnce_cma', 'recurrent_vlnbert': 'base',
 }
 ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld',
                 'tabletop_sim': 'tabletop_sim', 'habitat': 'habitat',

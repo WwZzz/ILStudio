@@ -1,0 +1,9 @@
+{
+  "updates": 256,
+  "parameter_delta_l2": 0.026127671337519386,
+  "first_loss": 0.3514650762081146,
+  "last_loss": 0.7607775926589966,
+  "trajectory_count": 512,
+  "final_checkpoint": "${NAVIGATION_ROOT}/paper-reproduction/vlnbert-continuation-lr1e-7/epoch-2",
+  "final_model_sha256": "b495bd61222735ed565259daaaa01cdfed7e307544b421151008531ed281e8ec"
+}
