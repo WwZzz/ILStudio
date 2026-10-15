@@ -111,6 +111,56 @@ python -m vlastudio.entrypoints.eval_sim -m results/navigation \
 The navigation evaluator is selected by the environment factory's module. SPL
 is averaged across rollouts rather than added.
 
+## QZ mounted HM3D smoke run
+
+QZ Data Square's active HM3D record (1887, `hm3d:v1`) was successfully mounted
+at `/inspire/dataset/hm3d/v1`. It contains Habitat geometry tar archives; it is
+not the original MP3D panorama/R2R release. Attach the live-validated
+`dataset_info` entry to a new QZ instance instead of copying the whole dataset:
+
+```json
+{"dataset_info": [{"dataset_id": "hm3d", "version_id": "v1"}]}
+```
+
+For a small reproducible check, unpack only the first two scenes from the mounted
+minival archive (59,974,964 bytes, including their navigation meshes):
+
+```bash
+python examples/09_navigation/prepare_mounted_hm3d.py \
+  --archive /inspire/dataset/hm3d/v1/hm3d-minival-habitat-v0.2.tar \
+  --output data/hm3d-smoke
+python examples/09_navigation/train_and_evaluate.py \
+  --scene data/hm3d-smoke/00800-TEEsavR23oF/TEEsavR23oF.basis.glb \
+  --output results/navigation-hm3d
+```
+
+Selection uses scene names sorted before training. The first scene supplies
+200/40/100 disjoint training/validation/test episodes with the protocol above.
+The second scene, `00801-HaxA7YrQdEC`, supplies 100 additional episodes with seed
+300000 and is never used for training or checkpoint selection.
+
+| Evaluation | Success | SPL | Random / immediate STOP |
+| --- | --- | --- | --- |
+| First scene, held-out episodes | 75/100 | 0.737506 | 0/100 each |
+| Second scene, unseen during training | 79/100 | 0.778237 | 0/100 each |
+
+All three training rounds are retained in the evidence. Validation selected
+round 0 (75%); later rounds reached only 25%. The final checkpoint passed the
+30% threshold without selecting against test results. There were 17,025 expert
+labels and zero expert failures. Native RGB/depth rendering and the Habitat-Lab
+API fixture were also verified on the first HM3D scene.
+
+See [HM3D acceptance and artifact hashes](evidence/navigation/hm3d/acceptance.json).
+These are short-range GPS/compass PointNav smoke results. Both selected scenes
+come from HM3D minival, so this experiment does not implement official HM3D
+training/evaluation splits, a complete unseen-scene benchmark, or language
+following. The mounted release lacks semantic annotations; the simulator logs
+a missing semantic descriptor, while RGB, depth, navigation and scoring run.
+
+The standard framework command above also accepts the HM3D checkpoint and scene.
+Use the first scene with seed 200000 to reproduce the main test, or the second
+scene with seed 300000 to reproduce the additional transfer test.
+
 ## Use the adapters
 
 ```python
