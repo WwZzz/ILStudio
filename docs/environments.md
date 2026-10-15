@@ -48,6 +48,8 @@ python -m pip install -e . -r requirements/smolvla.txt -r requirements/libero.tx
 | MetaWorld | 3.10 | `requirements/metaworld.txt` |
 | Tabletop-Sim | 3.10 | `requirements/tabletop_sim.txt`, plus source/submodules/assets |
 | RLDS loaders | 3.10 or 3.11 | `requirements/rlds.txt` |
+| Habitat PointNav / continuous R2R | 3.10, Linux | Native Habitat-Sim 0.3.3 source build; optional matching Habitat-Lab; see [navigation](navigation.md) |
+| Matterport3D / R2R | 3.10, Linux | Native MatterSim source build and authorized panoramas; see [navigation](navigation.md) |
 
 LeRobot 0.3.3 needs glibc >= 2.31 on Linux. OpenPI also requires Linux/glibc >= 2.31.
 The requirements files contain inherited shared data/model requirements and

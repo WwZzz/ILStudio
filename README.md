@@ -221,6 +221,10 @@ Use the policy-server workflow below to evaluate with a simulator in another env
 
 ### Runnable examples
 
+Navigation support includes Habitat PointNav, a Habitat-Lab continuous R2R adapter,
+and a Matterport3D classic R2R adapter. See [navigation setup](docs/navigation.md)
+and [Example 09: train and evaluate a navigation policy](examples/09_navigation).
+
 Each example shows its own environment setup and Python files. Run from the repository root after installing the required dependencies.
 
 | Goal | Example |

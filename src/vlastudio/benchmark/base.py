@@ -235,9 +235,10 @@ class MetaPolicy:
             
             # Timestamp (optional)
             if hasattr(normed_mobs, 'timestep') and normed_mobs.timestep is not None:
-                sample['timestamp'] = normed_mobs.timestep[i] if len(normed_mobs.timestep.shape) > 1 else normed_mobs.timestep
+                timestep = np.asarray(normed_mobs.timestep)
+                sample['timestamp'] = timestep[i] if timestep.ndim > 0 and timestep.shape[0] == batch_size else timestep
             # Construct observations, convert arrays to tensors
-            if sample['image'] is not None:
+            if sample.get('image') is not None:
                 # Safety check: ensure images are uint8 with values in [0, 255]
                 from vlastudio.data_utils.utils import ensure_uint8_image
                 sample['image'] = ensure_uint8_image(sample['image'])   # (cameras, C, H, W)
