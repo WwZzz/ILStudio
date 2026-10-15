@@ -1,0 +1,38 @@
+{
+  "selected_checkpoint": "cma-continuation-lr1e-6/epoch-4",
+  "selected_model_sha256": "30869101e833f6033ba8718f3bd76af613f0de2416788cac5f8ecd04abbc25ef",
+  "selected_training": {
+    "epoch": 4,
+    "updates": 630,
+    "source_sha256": "e120f5346dd8b01ef9e57ed75304f0d73066767d51be9e6d7892d8f1f60ce617"
+  },
+  "selected_parameter_delta_l2": 0.10579729119415263,
+  "training_episode_count": 256,
+  "training_scene_count": 61,
+  "validation_scene_count": 11,
+  "train_validation_scenes_disjoint": true,
+  "all_training_ids_in_original_train": true,
+  "audited_evaluations": [
+    {
+      "directory": "cma-official-val-unseen",
+      "episodes": 1839,
+      "exact_split_membership": true
+    },
+    {
+      "directory": "cma-continuation-lr1e-6-val-unseen/epoch-4",
+      "episodes": 1839,
+      "exact_split_membership": true
+    }
+  ],
+  "training_epoch_mean_loss": {
+    "1": 1.1719397283517397,
+    "2": 1.1307953262025383,
+    "3": 1.1226518840729436,
+    "4": 1.1432818496752086
+  },
+  "acceptance_reference": {
+    "success_rate": 0.29,
+    "spl": 0.27,
+    "source": "Author-corrected official reference, explicitly chosen by user on 2026-10-15"
+  }
+}

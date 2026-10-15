@@ -17,6 +17,9 @@ following or unseen-scene generalization.
 
 ## Learned VLN models
 
+The completed full-split results, selected trained checkpoints and acceptance
+audit are in the [navigation acceptance report](../../docs/evidence/navigation/paper/README.md).
+
 [PAPER_REPRODUCTION.md](PAPER_REPRODUCTION.md) fixes the full-split protocol and
 paper references. CMA uses RGB, normalized depth, and original instruction tokens;
 Recurrent VLN-BERT uses instruction text, current-viewpoint Places365 panorama
@@ -48,6 +51,14 @@ experiments and save separate checkpoints, loss histories and parameter changes.
 They do not reproduce the papers' complete original training schedules. CMA checks
 official training trajectory replay before learning, and maps episode IDs to the
 native dataset order rather than assuming file order is preserved.
+
+`collect_cma_dagger.py` additionally collects labels at learner-visited training
+states, mixing the policy and a privileged 0.5 m shortest-path follower. It stores
+the actions actually executed separately from expert labels. Reuse these samples
+with `finetune_cma.py --precollected /path/collection/features`, keeping the same
+model, train config, trajectory count and seed. The loader verifies collection
+provenance and uses actual previous actions as recurrent inputs. The small native
+DAgger gate validates alignment and backpropagation; it is not a benchmark result.
 
 R2R's published metric scores the final viewpoint, including at the 15-decision
 budget. Its config declares `success_requires_stop: false`, and also records

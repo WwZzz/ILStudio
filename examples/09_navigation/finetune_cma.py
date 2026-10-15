@@ -40,6 +40,7 @@ def main():
     p.add_argument('--lr', type=float, default=1e-5)
     p.add_argument('--seed', type=int, default=20261015)
     p.add_argument('--device', default='cuda')
+    p.add_argument('--precollected', help='Verified train-only feature directory from collect_cma_dagger.py')
     a = p.parse_args()
     if min(a.trajectories, a.epochs, a.batch_size, a.unroll) < 1:
         p.error('Counts must be positive')
@@ -48,7 +49,8 @@ def main():
     np.random.seed(a.seed)
     torch.manual_seed(a.seed)
     out = Path(a.output)
-    cache = out / 'features'
+    out.mkdir(parents=True, exist_ok=True)
+    cache = Path(a.precollected) if a.precollected else out / 'features'
     cache.mkdir(parents=True, exist_ok=True)
     cfg = yaml.safe_load(Path(a.config).read_text())
     # Require the caller to identify the official training split explicitly.
@@ -73,12 +75,24 @@ def main():
             chosen.append(episode)
     chosen += [e for e in pool if e not in chosen][:max(0, a.trajectories-len(chosen))]
     chosen = chosen[:a.trajectories]
+    # Habitat seeds Python's global RNG during native initialization. Preserve
+    # the post-selection state so fresh collection and cached runs train alike.
+    training_rng = random.Random()
+    training_rng.setstate(random.getstate())
+    collection = None
+    if a.precollected:
+        collection = json.loads((cache.parent/'collection.json').read_text())
+        expected = {'source_model_sha256': sha(Path(a.model)/'policy.pt'),
+            'train_data_sha256': sha(data), 'config_sha256': sha(a.config),
+            'episode_ids': [str(e['episode_id']) for e in chosen]}
+        if any(collection.get(key) != value for key, value in expected.items()):
+            raise ValueError('Precollected features belong to another model, training split, or episode selection')
     signature = {'source_model_sha256': sha(Path(a.model)/'policy.pt'),
         'train_data_sha256': sha(data), 'ground_truth_sha256': sha(a.ground_truth),
         'config_sha256': sha(a.config), 'arguments': vars(a),
         'episode_ids': [str(e['episode_id']) for e in chosen],
         'scene_count': len({e['scene_id'] for e in chosen}),
-        'method': 'teacher-forced train-only CMA continuation with inflection weighting and progress loss'}
+        'method': collection['method'] if collection else 'teacher-forced train-only CMA continuation with inflection weighting and progress loss'}
     manifest = out / 'training_manifest.json'
     if manifest.exists() and json.loads(manifest.read_text()) != signature:
         raise ValueError('Output belongs to another training protocol')
@@ -89,6 +103,8 @@ def main():
             target = cache / f"{episode['episode_id']}.pt"
             if target.exists():
                 continue
+            if a.precollected:
+                raise ValueError(f'Precollected training episode is missing: {episode["episode_id"]}')
             if env is None:
                 env = HabitatLabEnv(SimpleNamespace(**cfg))
                 # Habitat reorders dataset.episodes; file offsets are not native offsets.
@@ -130,7 +146,7 @@ def main():
     paths = [cache/f"{e['episode_id']}.pt" for e in chosen]
     replay = [torch.load(x, weights_only=True) for x in paths]
     replay_success = float(np.mean([x['replay_success'] for x in replay]))
-    if replay_success < .95:
+    if not a.precollected and replay_success < .95:
         raise RuntimeError(f'Official training trajectory replay success {replay_success:.3f}; investigate simulator alignment before learning')
     optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=a.lr)
     before = {n: p.detach().cpu().clone() for n, p in model.named_parameters() if p.requires_grad}
@@ -139,7 +155,7 @@ def main():
         model.train()
         model.net.rgb_encoder.cnn.eval()
         model.net.depth_encoder.visual_encoder.eval()
-        random.shuffle(replay)
+        training_rng.shuffle(replay)
         for offset in range(0, len(replay), a.batch_size):
             rows = replay[offset:offset+a.batch_size]
             batch = len(rows)
@@ -166,10 +182,11 @@ def main():
                     n = max(0, min(end, len(row['actions']))-start)
                     labels[:n, i] = row['actions'][start:start+n].to(a.device)
                     target_progress[:n, i] = row['progress'][start:start+n].to(a.device)
-                    prev = torch.cat([torch.zeros(1, dtype=torch.long), row['actions'][:-1]])
+                    teacher_prev = torch.cat([torch.zeros(1, dtype=torch.long), row['actions'][:-1]])
+                    prev = row.get('previous_actions', teacher_prev)
                     previous[:n, i] = prev[start:start+n].to(a.device)
                     valid[:n, i] = True
-                    weights[:n, i] = torch.where(labels[:n, i] != previous[:n, i], 3.2, 1.)
+                    weights[:n, i] = torch.where(labels[:n, i] != teacher_prev[start:start+n].to(a.device), 3.2, 1.)
                 masks = torch.ones_like(valid)
                 if start == 0:
                     masks[0] = False
@@ -207,7 +224,7 @@ def main():
         raise RuntimeError('No learned parameter changed')
     (out/'training_result.json').write_text(json.dumps({'updates': updates, 'parameter_delta_l2': delta,
         'first_loss': history[0]['loss'], 'last_loss': history[-1]['loss'], 'trajectory_count': len(replay),
-        'replay_success_rate': replay_success, 'final_checkpoint': str(checkpoint_dir),
+        ('collection_success_rate' if a.precollected else 'replay_success_rate'): replay_success, 'final_checkpoint': str(checkpoint_dir),
         'final_model_sha256': sha(checkpoint_dir/'policy.pt')}, indent=2)+'\n')
 
 

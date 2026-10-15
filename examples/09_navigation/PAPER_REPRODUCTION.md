@@ -15,8 +15,11 @@ checkpoint hash, source revision, simulator/runtime version, and the complete
 episode journal. Use greedy single-run inference, without search or exploration.
 Report exact differences from the references; do not replace the paper target
 with a lower number after observing results. Formal acceptance remains pending
-until both full benchmarks meet the paper targets, or the user explicitly accepts
-a documented reproduction tolerance or an author-corrected reference.
+until both full benchmarks meet the agreed references. On 2026-10-15 the user
+explicitly selected the authors' corrected CMA reference (SR 0.29, SPL 0.27)
+for acceptance. The original paper SPL 0.30 remains visible in every comparison.
+R2R paper SR/SPL are published as integer percentages; retain unrounded values
+in the evidence and show the comparison at the paper's published precision.
 
 Habitat uses 0.25 m forward actions, 15 degree turns, 500 steps, RGB 224x224 and
 normalized depth 256x256 (0–10 m), 90 degree horizontal FOV, and sensor height

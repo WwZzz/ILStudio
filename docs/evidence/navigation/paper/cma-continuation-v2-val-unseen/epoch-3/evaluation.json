@@ -1,0 +1,13 @@
+{
+  "model_sha256": "e51c94a7b6b17480a0c3994afb9a7b1369173f579d2a212c7fd45b75daa4f09f",
+  "config_sha256": "06f12b90b74ee5fe27bb86d7e1dba2549c1c01dabe97c8dae8765a355a3e29dc",
+  "episodes": 1839,
+  "successes": 523,
+  "total": 1839,
+  "success_rate": 0.2843936922240348,
+  "spl": 0.26658915029739505,
+  "navigation_error": 7.664563002037477,
+  "oracle_success": 0.3485589994562262,
+  "path_length": 8.057919191454822,
+  "elapsed_seconds": 599.9806458950043
+}
