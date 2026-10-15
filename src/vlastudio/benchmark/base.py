@@ -254,6 +254,11 @@ class MetaPolicy:
             
             # State: use specified control space (already normalized)
             sample['state'] = normed_mobs.state[i] if len(normed_mobs.state.shape) > 1 else normed_mobs.state
+            # Depth has (cameras,H,W), with an extra leading axis when batched.
+            # Preserve native units/range and leave processing to the policy.
+            if normed_mobs.depth is not None:
+                depth = normed_mobs.depth
+                sample['depth'] = torch.as_tensor(depth[i] if depth.ndim == 4 else depth)
             
             # Language instruction
             if normed_mobs.raw_lang is not None:

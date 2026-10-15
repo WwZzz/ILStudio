@@ -154,13 +154,19 @@ class HabitatLabEnv(MetaEnv):
         self.config = config
         self.steps = 0
         self.done = False
+        self.index = int(getattr(config, 'rollout_index', 0))
+        self.stride = int(getattr(config, 'episode_stride', 1))
         self.actions = list(getattr(config, 'actions', ['stop', 'move_forward', 'turn_left', 'turn_right']))
         if getattr(config, 'legacy_config', False):
             self.actions = [action.upper() for action in self.actions]
         kwargs = {'config_paths': config.habitat_config} if getattr(config, 'legacy_config', False) else {
             'config_path': config.habitat_config}
-        if getattr(config, 'habitat_overrides', None):
-            kwargs['opts' if getattr(config, 'legacy_config', False) else 'overrides'] = list(config.habitat_overrides)
+        overrides = list(getattr(config, 'habitat_overrides', []) or [])
+        if getattr(config, 'max_timesteps', None) is not None:
+            key = 'ENVIRONMENT.MAX_EPISODE_STEPS' if getattr(config, 'legacy_config', False) else 'habitat.environment.max_episode_steps'
+            overrides += [key, str(int(config.max_timesteps))] if getattr(config, 'legacy_config', False) else [f'{key}={int(config.max_timesteps)}']
+        if overrides:
+            kwargs['opts' if getattr(config, 'legacy_config', False) else 'overrides'] = overrides
         task = habitat.get_config(**kwargs)
         super().__init__(habitat.Env(config=task))
 
@@ -168,6 +174,11 @@ class HabitatLabEnv(MetaEnv):
         self.steps = 0
         self.done = False
         self.last_info = {}
+        # Honor framework rollout offsets even when each rollout creates a new
+        # native environment. Habitat's default seeded shuffle otherwise repeats
+        # the same first episode in every independently created vector slot.
+        self.env.current_episode = self.env.episodes[self.index % len(self.env.episodes)]
+        self.index += self.stride
         self.prev_obs = self.obs2meta(self.env.reset())
         return self.prev_obs
 

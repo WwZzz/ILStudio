@@ -111,6 +111,7 @@ def test_matterport_turn_increments_rgb_depth_and_no_goal_leakage():
             self.actions.append((index, heading, elevation))
     env = MatterportNavigationEnv.__new__(MatterportNavigationEnv)
     env.env = Sim()
+    env.depth_enabled = True
     env.episode = {'instruction': 'Turn left and stop'}
     env.episode_id, env.max_steps, env.success_distance = 'a', 10, 3.
     env.distances = {'a': 5.}
@@ -164,6 +165,7 @@ def test_habitat_lab_adapter_preserves_instruction_and_uses_task_success(monkeyp
             self.episode_over = False
             self.current_episode = SimpleNamespace(episode_id='r2r-1',
                 instruction=SimpleNamespace(instruction_text='Walk through the door.'))
+            self.episodes = [self.current_episode]
         def reset(self):
             return {'rgb': np.zeros((2, 2, 3), dtype=np.uint8), 'depth': np.ones((2, 2, 1))}
         def step(self, action):
@@ -186,3 +188,42 @@ def test_habitat_lab_adapter_preserves_instruction_and_uses_task_success(monkeyp
     assert obs.image.shape == (1, 3, 2, 2) and obs.depth.shape == (1, 2, 2)
     _, reward, done, info = env.step(0)
     assert done and not info['success'] and reward == 0.
+    calls.clear()
+    HabitatLabEnv(SimpleNamespace(habitat_config='task.yaml', max_timesteps=2))
+    assert calls[0]['overrides'] == ['habitat.environment.max_episode_steps=2']
+
+
+def test_habitat_lab_selects_disjoint_rollout_offsets_and_stride():
+    from vlastudio.benchmark.habitat import HabitatLabEnv
+    episodes = [SimpleNamespace(episode_id=str(i), instruction={'instruction_text': f'Route {i}'})
+                for i in range(6)]
+    def make(index):
+        env = HabitatLabEnv.__new__(HabitatLabEnv)
+        env.index, env.stride = index, 2
+        env.navigation_options = {}
+        env.env = SimpleNamespace(episodes=episodes, reset=lambda: {})
+        return env
+    left, right = make(0), make(1)
+    assert [left.reset().raw_lang, right.reset().raw_lang] == ['Route 0', 'Route 1']
+    assert [left.reset().raw_lang, right.reset().raw_lang] == ['Route 2', 'Route 3']
+
+
+@pytest.mark.parametrize('batch_size', [1, 2])
+def test_depth_reaches_policy_without_range_or_camera_changes(batch_size):
+    import torch
+    from vlastudio.benchmark.base import MetaPolicy
+    from vlastudio.data_utils.normalize import Identity
+    from vlastudio.benchmark.utils import organize_obs
+    depth = np.arange(12, dtype=np.float32).reshape(2, 2, 3) / 10
+    observations = [MetaObs(state=np.zeros(2, dtype=np.float32), depth=depth + i)
+                    for i in range(batch_size)]
+    class Policy:
+        def select_action(self, obs):
+            assert obs['depth'].shape == (batch_size, 2, 2, 3)
+            for i in range(batch_size):
+                np.testing.assert_array_equal(obs['depth'][i].numpy(), depth + i)
+            return torch.zeros((batch_size, 1, 1))
+    normalizer = Identity(ctrl_space='navigation', ctrl_type='discrete')
+    policy = MetaPolicy(Policy(), state_normalizer=normalizer, action_normalizer=normalizer,
+                        ctrl_space='navigation', ctrl_type='discrete')
+    policy.inference(organize_obs(observations))

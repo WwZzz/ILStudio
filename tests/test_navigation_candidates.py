@@ -58,6 +58,8 @@ def make_matterport(monkeypatch, tmp_path, **options):
             raise AttributeError(key)
         def initialize(self):
             pass
+        def close(self):
+            self.closed = True
         def newEpisode(self, scan, location, heading, elevation):
             self.current = location[0]
         def getState(self):
@@ -81,6 +83,29 @@ def make_matterport(monkeypatch, tmp_path, **options):
     config = SimpleNamespace(episodes=str(episodes), dataset_path=str(tmp_path),
                              connectivity_path=str(tmp_path), **options)
     return MatterportNavigationEnv(config)
+
+
+def test_rgb_only_and_renderer_close(monkeypatch, tmp_path):
+    env = make_matterport(monkeypatch, tmp_path, depth_enabled=False)
+    native = env.env
+    assert env.reset().depth is None
+    assert native.settings['setDepthEnabled'] == (False,)
+    env.close()
+    env.close()
+    assert native.closed and env.env is None
+
+
+def test_distance_uses_snapshot_before_native_state_mutation(monkeypatch, tmp_path):
+    env = make_matterport(monkeypatch, tmp_path)
+    env.reset()
+    native = env.env
+    state = native.getState()[0]
+    native.getState = lambda: [state]
+    def move(*args):
+        state.location.viewpointId = 'b'
+    native.makeAction = move
+    env.step(1)
+    assert env.travelled == 1.
 
 
 def test_candidates_are_opt_in_and_do_not_choose_an_action(monkeypatch, tmp_path):

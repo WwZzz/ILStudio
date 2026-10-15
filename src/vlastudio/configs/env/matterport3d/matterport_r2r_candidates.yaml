@@ -17,3 +17,4 @@ candidate_scope: all_neighbors
 max_timesteps: 100
 success_distance: 3.0
 image_size: 256
+depth_enabled: true  # Requires matching skybox depth PNGs; false enables RGB-only.

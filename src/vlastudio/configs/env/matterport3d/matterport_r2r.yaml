@@ -12,3 +12,4 @@ candidate_scope: visible
 max_timesteps: 100
 success_distance: 3.0
 image_size: 256
+depth_enabled: true  # Set false for RGB-only skybox datasets; obs.depth is then None.

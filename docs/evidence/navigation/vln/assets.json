@@ -1,0 +1,278 @@
+{
+  "scene_files": [
+    {
+      "url": "https://huggingface.co/datasets/alexzyqi/VLN-Ego-making/resolve/fe9e673519804c55bd5d50e2573b62f6e2a6cf0c/data/scene_datasets/mp3d/17DRP5sb8fy/17DRP5sb8fy.glb",
+      "bytes": 21109340,
+      "sha256": "ab0f715afe9f1a0d77ca6c91e6ff41f589b7d649618c5c1cd3776e13ccd075b1"
+    },
+    {
+      "url": "https://huggingface.co/datasets/alexzyqi/VLN-Ego-making/resolve/fe9e673519804c55bd5d50e2573b62f6e2a6cf0c/data/scene_datasets/mp3d/17DRP5sb8fy/17DRP5sb8fy.navmesh",
+      "bytes": 21900,
+      "sha256": "0f36abb98ee3545d7e1f5103882269206feaaea05dcb54014333290b1d2b00c8"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/00ebbf3782c64d74aaf7dd39cd561175_skybox_small.jpg",
+      "bytes": 401516,
+      "sha256": "e22fc9b8bf9781c8d127ae43b099575347f68918b3b9c8b787bc6e003956b527"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/08115b08da534f1aafff2fa81fc73512_skybox_small.jpg",
+      "bytes": 410105,
+      "sha256": "aea310743b8115f85719075b5259bad62e00e4df7f0f1959d2a6dab768950d17"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/08c774f20c984008882da2b8547850eb_skybox_small.jpg",
+      "bytes": 404328,
+      "sha256": "e68a43760f92008917bbe49ef013f86cc11298e23a635b3883b7947b4f67f584"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/0e92a69a50414253a23043758f111cec_skybox_small.jpg",
+      "bytes": 293654,
+      "sha256": "c7f9d29fc69cd7f317853488d5775b9619debacd2dc6e0812af33f1344419de8"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/0f37bd0737e349de9d536263a4bdd60d_skybox_small.jpg",
+      "bytes": 397204,
+      "sha256": "be086a9e3d4e4bd94ce4f7436abd46e6ec171100734936011f76f2f81e55c5cd"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/10c252c90fa24ef3b698c6f54d984c5c_skybox_small.jpg",
+      "bytes": 370824,
+      "sha256": "f57ac42921705a0684e2b72a610f7f3cdc61f5c31e33e605ba88d2d1ec8878d2"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/194bef4cbba641dc9860ba7f43a0c16a_skybox_small.jpg",
+      "bytes": 589101,
+      "sha256": "b7609131b1e0e1e8df84f01a6f94ca479a7c2826e201d58364b7105a5453fce5"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/1a41339ece1846eda6a924cdb4c417dd_skybox_small.jpg",
+      "bytes": 379760,
+      "sha256": "1fd3ffcb87248b9ec9947ccd816996b9851db2ab56e450b33e9eb901a1bc191f"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/1e86968849944444b66d9537efb5da9e_skybox_small.jpg",
+      "bytes": 350073,
+      "sha256": "1f5362f580bf17bb0a0e14bba7ca13fbf33d7d1a379896ef89b6efc53b53b467"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/23ec8bbec8eb40478411cba2e55b732e_skybox_small.jpg",
+      "bytes": 403600,
+      "sha256": "c5482ded134c9bfd78d130999a2f370778c3b14ee7a260c1c43a62e5f49f5464"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/28db29e8c72c4a68bfdf5bb2b454443d_skybox_small.jpg",
+      "bytes": 434853,
+      "sha256": "a6df08bd2bec482e26056d49e0b7a1966a09c64fe021dd314798ac8b2b52715a"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/30c97842da204e6290ac32904c924e17_skybox_small.jpg",
+      "bytes": 489857,
+      "sha256": "751bd710f8dc3fee825edf2586f02790ea070df43602d90b88f90327355a4324"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/352a92fb1f6d4b71b3aafcc74e196234_skybox_small.jpg",
+      "bytes": 492526,
+      "sha256": "bb1a926bc7275f8640ced96cbc53e8c4a30a459bc8d1a4f5e9a25a5993b43190"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/3577de361e1a46b1be544d37731bfde6_skybox_small.jpg",
+      "bytes": 475342,
+      "sha256": "22e887489ea003b86a4e0d4a3dbfe40fd04477350115ae06945f09d649615828"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/3a6d2322867f40d9a3d2758ab88df288_skybox_small.jpg",
+      "bytes": 407542,
+      "sha256": "fd27b8bd80bda67892d7ab7964eaee148fe2ede918a85426d24cd864f6ae5925"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/50c241453dfd45c1ba95b5d7191982ef_skybox_small.jpg",
+      "bytes": 445638,
+      "sha256": "9cb25681716bfb76e91f296db9e1b54e72c239eb342e2f2c58ef9c35f8300fd2"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/51857544c192476faebf212acb1b3d90_skybox_small.jpg",
+      "bytes": 375168,
+      "sha256": "4183c8ceecc4a20f75348dd80d40c0fabd08195991177cc88431a796bba07b63"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/558ba0761bf24428b9cf91e60333ea25_skybox_small.jpg",
+      "bytes": 351353,
+      "sha256": "2b17ad2ed2ee5a3bb00db2bdfdff3d1e70601432cf16f88b6c89fdc6a1d2663b"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/5b9b2794954e4694a45fc424a8643081_skybox_small.jpg",
+      "bytes": 557142,
+      "sha256": "5eb7d8497b5dde5dd40d70b4171cecb01028e9786247014526e2863175372cd5"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/5e9f4f8654574e699480e90ecdd150c8_skybox_small.jpg",
+      "bytes": 394018,
+      "sha256": "a9a29c303234c03d9bbe703504e59158b9519e6511f806686d0b4263d723b4da"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/5efaa5e4a30e481f9dadc1bac5e56a21_skybox_small.jpg",
+      "bytes": 539208,
+      "sha256": "33a69e5ea2ca7c1bacf3992ab4b150f8da91538fda07993816c24191a165efc4"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/6800f98e9e67463e9928a4253253bc2f_skybox_small.jpg",
+      "bytes": 399157,
+      "sha256": "c9385ebf3f0567b455bb38354107db370e0d757825ab41f5255569b3d8fe84bd"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/701f7128272a4bb2acd9dbd89b5cdf6f_skybox_small.jpg",
+      "bytes": 398541,
+      "sha256": "03787e95fc13a359b275772d217b6af280e5ead01fab53e0e7540c5886f3990c"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/77a1a11978b04e9cbf74914c98578ab8_skybox_small.jpg",
+      "bytes": 388988,
+      "sha256": "1ecb357c587e9ddcca4236019a1753cdece2a67da62450435b67a3d4ef4e407f"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/7ad0b4e15c4f4cf38f56efbbcadfbf6a_skybox_small.jpg",
+      "bytes": 403920,
+      "sha256": "5e9a1c0f31344e3f7a66b154c2ab37f8822c6aff2dd1bcd4103e45706b3d1418"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/8345f786b7cb4e1eb6c63e2b87ddcabb_skybox_small.jpg",
+      "bytes": 467346,
+      "sha256": "ccdb488128010947b92fe2cafc12d538025aa0c0840904db0b65a5ee6976a5d2"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/85c23efeaecd4d43a7dcd5b90137179e_skybox_small.jpg",
+      "bytes": 582289,
+      "sha256": "f5b1263891bc66d37edfda1b9fe123d5e2ead9871386bceb115161894666756a"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/8a0f2f1a8ea441658501561e5dc34a3e_skybox_small.jpg",
+      "bytes": 390044,
+      "sha256": "73fe22f415f853ad3df52c06702ef0b34f8527125df04bddc268292a3dd0148d"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/8ccf449f599a4cd88648e1d0ff39fdd0_skybox_small.jpg",
+      "bytes": 360214,
+      "sha256": "28f6f28a48791637f1600903d1517468d23df2a4ad678f778e0cc37788aef9f6"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/902e65564f81489687878425d9b3cb55_skybox_small.jpg",
+      "bytes": 491572,
+      "sha256": "0d4442a3124b4461146698e305e43666e8faa7ec0b44b5069da8d489b38354ee"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/abe20dd6e5194f579dfc6b63a612c150_skybox_small.jpg",
+      "bytes": 454151,
+      "sha256": "8826046aecd355980e44d19c7f0391bd4db51afce6ed7630379f54875cf52718"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/b185432bf33645aca813ac2a961b4140_skybox_small.jpg",
+      "bytes": 416155,
+      "sha256": "20a0f0f4fe1990ff6db1a9451f5613c70bb1b896a64b2b6428ef1a9cf7b3748d"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/b2e9278f9b8f4661abcb0446d2cbb98e_skybox_small.jpg",
+      "bytes": 306621,
+      "sha256": "f92fd042c1411f82701449d49e3059e1c3bbb050c85ac988b0d0b004fb0fcd49"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/c341c46acf7044d1a712d622cbc94a27_skybox_small.jpg",
+      "bytes": 351737,
+      "sha256": "0dc1ac3c45ecc097d1acc3a256ddc90ff2a5e71318ed481116f4e358e2fc57b2"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/c429b363fd3145fe8a7631bbe9644066_skybox_small.jpg",
+      "bytes": 380490,
+      "sha256": "f71e4553692b7b4567e77e56954abbf1c7071da97583a9286cad150dbb66ce7c"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/c8112f69d34d476fbb29e6b3909deba2_skybox_small.jpg",
+      "bytes": 296809,
+      "sha256": "00711dc6e90280b9196323d6bbe2adf5b7754a13f3e04d42d56003ebb5c3b294"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/cb66d4266148455bbddf5d059a483711_skybox_small.jpg",
+      "bytes": 351876,
+      "sha256": "4b27a2f6ea5117430cdf975c12905482334e93975aafeb2e6c73eb890fd3df9c"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/cb6a9786e4ff47f79a11b024c36ef7c0_skybox_small.jpg",
+      "bytes": 401020,
+      "sha256": "4b86825271a56cec28993c2f4baa655e3bb47a2741ee982857afb799cea70cba"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/d160d2229e4148839ef3a43dbc0ecdc4_skybox_small.jpg",
+      "bytes": 323640,
+      "sha256": "742482f2a86dd9f8ce7343dc1498d1be4d812dabd44e8fa26592b3481f491775"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/d65b6505904448d1940e679c9a098047_skybox_small.jpg",
+      "bytes": 506215,
+      "sha256": "077d74f57109436f5bd7c2053f662bc1cbd9302215f7c842c5dae4387e077e37"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/da5fa65c13e643719a20cbb818c9a85d_skybox_small.jpg",
+      "bytes": 322408,
+      "sha256": "0f500d133b1d16ea798a804e1b4aa16f6eebdfb34da1bb0f36319161779e9a1f"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/db145474a5fa476d95c2cc7f09e7c83a_skybox_small.jpg",
+      "bytes": 570834,
+      "sha256": "0096c2ab49a8c6d68b19fecf1978bf55fd5f23e1c97736692aab600676a85642"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/df211c2c55f94b87a717ce1469577456_skybox_small.jpg",
+      "bytes": 501525,
+      "sha256": "f005c38f8e60c7b216f9a0644924eb24392bd75bd5da7ac1ee27e7b41858fcb4"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/e0ce09f0178c48e2bbe649d2bf659702_skybox_small.jpg",
+      "bytes": 277375,
+      "sha256": "16484a80a09931c66037929f27eb1ed67cfad25e21a26066e54cc758f1351ecc"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/e34dcf54d26a4a95869cc8a0c01cd2be_skybox_small.jpg",
+      "bytes": 392307,
+      "sha256": "a7954336e5a1eae7196b088b3dcac107741f1aa829edcdef3073e9c0ccb396a8"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/e693b5de8ad84d4cb61a79ece2e66d11_skybox_small.jpg",
+      "bytes": 617131,
+      "sha256": "ef4a13ce9c821239f7a79eaec010f419ea3f14e87dff87c62bcdd813cfe91458"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/ee59d6b5e5da4def9fe85a8ba94ecf25_skybox_small.jpg",
+      "bytes": 357589,
+      "sha256": "37cb057b86d4ee94c53afa31c7f7e64c4bfd94c5a6dd380f9dab9d552060328e"
+    },
+    {
+      "url": "https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans/resolve/b163b478fb19aa2b8c9e0b93f37e964e9cd2e5a9/17DRP5sb8fy/matterport_skybox_images/f4d03f729dfc49068db327584455e975_skybox_small.jpg",
+      "bytes": 592244,
+      "sha256": "684b8c08a7696141167911d630eeed4de4bb7e9c98a320d620b15f7688a04872"
+    }
+  ],
+  "r2r_annotations": [
+    {
+      "url": "https://dl.dropboxusercontent.com/s/hh5qec8o5urcztn/R2R_train.json",
+      "sha256": "30af70d96ea217778ba0d1b3085a774a13f36266fef39a13dbe8b03516fbf988",
+      "bytes": 3996671,
+      "paths": 4675,
+      "selected_paths": 30
+    },
+    {
+      "url": "https://dl.dropboxusercontent.com/s/8ye4gqce7v8yzdm/R2R_val_seen.json",
+      "sha256": "755633db9d5e64d5ca71d329c5046bb722781a09f0d1d501d7e8d094c83652ec",
+      "bytes": 292756,
+      "paths": 340,
+      "selected_paths": 2
+    },
+    {
+      "url": "https://dl.dropboxusercontent.com/s/p6hlckr70a07wka/R2R_val_unseen.json",
+      "sha256": "1cc730adc1c098998ac9191462849fc725e0c5336984a35bfbac7d5f044e682c",
+      "bytes": 665674,
+      "paths": 783,
+      "selected_paths": 0
+    }
+  ],
+  "vlnce_source": "https://drive.google.com/file/d/1T9SjqZWyR2PCLSXYkFckfDeIs6Un0Rjm/view"
+}

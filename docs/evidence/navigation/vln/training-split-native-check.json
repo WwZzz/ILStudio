@@ -1,0 +1,1544 @@
+{
+  "ce": {
+    "successes": 75,
+    "total": 75,
+    "episodes": [
+      {
+        "distance_to_goal": 0.10069365799427032,
+        "success": true,
+        "spl": 0.9992447946589863,
+        "episode_id": "5796"
+      },
+      {
+        "distance_to_goal": 0.05204193666577339,
+        "success": true,
+        "spl": 0.9987619886901802,
+        "episode_id": "517"
+      },
+      {
+        "distance_to_goal": 0.11753830313682556,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10516"
+      },
+      {
+        "distance_to_goal": 0.0635443776845932,
+        "success": true,
+        "spl": 0.984100611923714,
+        "episode_id": "3717"
+      },
+      {
+        "distance_to_goal": 0.0635443776845932,
+        "success": true,
+        "spl": 0.984100611923714,
+        "episode_id": "3716"
+      },
+      {
+        "distance_to_goal": 0.14105333387851715,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "3773"
+      },
+      {
+        "distance_to_goal": 0.0247845146805048,
+        "success": true,
+        "spl": 0.977933143586777,
+        "episode_id": "9072"
+      },
+      {
+        "distance_to_goal": 0.005781489424407482,
+        "success": true,
+        "spl": 0.9741925884327526,
+        "episode_id": "5574"
+      },
+      {
+        "distance_to_goal": 0.06086679920554161,
+        "success": true,
+        "spl": 0.9913034425143453,
+        "episode_id": "4540"
+      },
+      {
+        "distance_to_goal": 0.10069365799427032,
+        "success": true,
+        "spl": 0.9992447946589863,
+        "episode_id": "5797"
+      },
+      {
+        "distance_to_goal": 0.14105333387851715,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "3774"
+      },
+      {
+        "distance_to_goal": 0.1835705190896988,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "1076"
+      },
+      {
+        "distance_to_goal": 0.08329267054796219,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "9524"
+      },
+      {
+        "distance_to_goal": 0.08329267054796219,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "9526"
+      },
+      {
+        "distance_to_goal": 0.10069365799427032,
+        "success": true,
+        "spl": 0.9992447946589863,
+        "episode_id": "5795"
+      },
+      {
+        "distance_to_goal": 0.14105333387851715,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "3775"
+      },
+      {
+        "distance_to_goal": 0.0247845146805048,
+        "success": true,
+        "spl": 0.977933143586777,
+        "episode_id": "9073"
+      },
+      {
+        "distance_to_goal": 0.0444350466132164,
+        "success": true,
+        "spl": 0.9724259975155172,
+        "episode_id": "3899"
+      },
+      {
+        "distance_to_goal": 0.05204193666577339,
+        "success": true,
+        "spl": 0.9987619886901802,
+        "episode_id": "516"
+      },
+      {
+        "distance_to_goal": 0.0831858366727829,
+        "success": true,
+        "spl": 0.99018658643987,
+        "episode_id": "5150"
+      },
+      {
+        "distance_to_goal": 0.12376194447278976,
+        "success": true,
+        "spl": 0.9998804813544999,
+        "episode_id": "8504"
+      },
+      {
+        "distance_to_goal": 0.03346290439367294,
+        "success": true,
+        "spl": 0.9718766644782425,
+        "episode_id": "576"
+      },
+      {
+        "distance_to_goal": 0.02170667052268982,
+        "success": true,
+        "spl": 0.9768671890588579,
+        "episode_id": "6092"
+      },
+      {
+        "distance_to_goal": 0.04314667358994484,
+        "success": true,
+        "spl": 0.9704146654924548,
+        "episode_id": "2944"
+      },
+      {
+        "distance_to_goal": 0.12582319974899292,
+        "success": true,
+        "spl": 0.982064164142715,
+        "episode_id": "10156"
+      },
+      {
+        "distance_to_goal": 0.06086679920554161,
+        "success": true,
+        "spl": 0.9913034425143453,
+        "episode_id": "4538"
+      },
+      {
+        "distance_to_goal": 0.12376194447278976,
+        "success": true,
+        "spl": 0.9998804813544999,
+        "episode_id": "8506"
+      },
+      {
+        "distance_to_goal": 0.0444350466132164,
+        "success": true,
+        "spl": 0.9724259975155172,
+        "episode_id": "3900"
+      },
+      {
+        "distance_to_goal": 0.1801782250404358,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10355"
+      },
+      {
+        "distance_to_goal": 0.03346290439367294,
+        "success": true,
+        "spl": 0.9718766644782425,
+        "episode_id": "577"
+      },
+      {
+        "distance_to_goal": 0.1835705190896988,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "1074"
+      },
+      {
+        "distance_to_goal": 0.06086679920554161,
+        "success": true,
+        "spl": 0.9913034425143453,
+        "episode_id": "4539"
+      },
+      {
+        "distance_to_goal": 0.17849351465702057,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "6783"
+      },
+      {
+        "distance_to_goal": 0.0247845146805048,
+        "success": true,
+        "spl": 0.977933143586777,
+        "episode_id": "9071"
+      },
+      {
+        "distance_to_goal": 0.05204193666577339,
+        "success": true,
+        "spl": 0.9987619886901802,
+        "episode_id": "515"
+      },
+      {
+        "distance_to_goal": 0.1801782250404358,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10356"
+      },
+      {
+        "distance_to_goal": 0.1835705190896988,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "1075"
+      },
+      {
+        "distance_to_goal": 0.12582319974899292,
+        "success": true,
+        "spl": 0.982064164142715,
+        "episode_id": "10155"
+      },
+      {
+        "distance_to_goal": 0.039832890033721924,
+        "success": true,
+        "spl": 0.9860752135499314,
+        "episode_id": "3605"
+      },
+      {
+        "distance_to_goal": 0.03286314755678177,
+        "success": true,
+        "spl": 0.9942869515745308,
+        "episode_id": "2890"
+      },
+      {
+        "distance_to_goal": 0.0444350466132164,
+        "success": true,
+        "spl": 0.9724259975155172,
+        "episode_id": "3901"
+      },
+      {
+        "distance_to_goal": 0.0635443776845932,
+        "success": true,
+        "spl": 0.984100611923714,
+        "episode_id": "3718"
+      },
+      {
+        "distance_to_goal": 0.039832890033721924,
+        "success": true,
+        "spl": 0.9860752135499314,
+        "episode_id": "3606"
+      },
+      {
+        "distance_to_goal": 0.17849351465702057,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "6782"
+      },
+      {
+        "distance_to_goal": 0.039832890033721924,
+        "success": true,
+        "spl": 0.9860752135499314,
+        "episode_id": "3607"
+      },
+      {
+        "distance_to_goal": 0.0831858366727829,
+        "success": true,
+        "spl": 0.99018658643987,
+        "episode_id": "5151"
+      },
+      {
+        "distance_to_goal": 0.022156035527586937,
+        "success": true,
+        "spl": 0.9765861092008975,
+        "episode_id": "3373"
+      },
+      {
+        "distance_to_goal": 0.1801782250404358,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10357"
+      },
+      {
+        "distance_to_goal": 0.07333265244960785,
+        "success": true,
+        "spl": 0.9691465168461127,
+        "episode_id": "1802"
+      },
+      {
+        "distance_to_goal": 0.10058021545410156,
+        "success": true,
+        "spl": 0.9839860468814658,
+        "episode_id": "1116"
+      },
+      {
+        "distance_to_goal": 0.10058021545410156,
+        "success": true,
+        "spl": 0.9839860468814658,
+        "episode_id": "1118"
+      },
+      {
+        "distance_to_goal": 0.08947474509477615,
+        "success": true,
+        "spl": 0.982696107366747,
+        "episode_id": "8816"
+      },
+      {
+        "distance_to_goal": 0.02170667052268982,
+        "success": true,
+        "spl": 0.9768671890588579,
+        "episode_id": "6093"
+      },
+      {
+        "distance_to_goal": 0.17849351465702057,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "6784"
+      },
+      {
+        "distance_to_goal": 0.04314667358994484,
+        "success": true,
+        "spl": 0.9704146654924548,
+        "episode_id": "2943"
+      },
+      {
+        "distance_to_goal": 0.12582319974899292,
+        "success": true,
+        "spl": 0.982064164142715,
+        "episode_id": "10154"
+      },
+      {
+        "distance_to_goal": 0.022156035527586937,
+        "success": true,
+        "spl": 0.9765861092008975,
+        "episode_id": "3371"
+      },
+      {
+        "distance_to_goal": 0.07333265244960785,
+        "success": true,
+        "spl": 0.9691465168461127,
+        "episode_id": "1803"
+      },
+      {
+        "distance_to_goal": 0.0831858366727829,
+        "success": true,
+        "spl": 0.99018658643987,
+        "episode_id": "5152"
+      },
+      {
+        "distance_to_goal": 0.08947474509477615,
+        "success": true,
+        "spl": 0.982696107366747,
+        "episode_id": "8818"
+      },
+      {
+        "distance_to_goal": 0.005781489424407482,
+        "success": true,
+        "spl": 0.9741925884327526,
+        "episode_id": "5573"
+      },
+      {
+        "distance_to_goal": 0.03346290439367294,
+        "success": true,
+        "spl": 0.9718766644782425,
+        "episode_id": "575"
+      },
+      {
+        "distance_to_goal": 0.03286314755678177,
+        "success": true,
+        "spl": 0.9942869515745308,
+        "episode_id": "2889"
+      },
+      {
+        "distance_to_goal": 0.11753830313682556,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10514"
+      },
+      {
+        "distance_to_goal": 0.10058021545410156,
+        "success": true,
+        "spl": 0.9839860468814658,
+        "episode_id": "1117"
+      },
+      {
+        "distance_to_goal": 0.03286314755678177,
+        "success": true,
+        "spl": 0.9942869515745308,
+        "episode_id": "2888"
+      },
+      {
+        "distance_to_goal": 0.07333265244960785,
+        "success": true,
+        "spl": 0.9691465168461127,
+        "episode_id": "1804"
+      },
+      {
+        "distance_to_goal": 0.08329267054796219,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "9525"
+      },
+      {
+        "distance_to_goal": 0.12376194447278976,
+        "success": true,
+        "spl": 0.9998804813544999,
+        "episode_id": "8505"
+      },
+      {
+        "distance_to_goal": 0.005781489424407482,
+        "success": true,
+        "spl": 0.9741925884327526,
+        "episode_id": "5575"
+      },
+      {
+        "distance_to_goal": 0.02170667052268982,
+        "success": true,
+        "spl": 0.9768671890588579,
+        "episode_id": "6094"
+      },
+      {
+        "distance_to_goal": 0.022156035527586937,
+        "success": true,
+        "spl": 0.9765861092008975,
+        "episode_id": "3372"
+      },
+      {
+        "distance_to_goal": 0.11753830313682556,
+        "success": true,
+        "spl": 1.0,
+        "episode_id": "10515"
+      },
+      {
+        "distance_to_goal": 0.08947474509477615,
+        "success": true,
+        "spl": 0.982696107366747,
+        "episode_id": "8817"
+      },
+      {
+        "distance_to_goal": 0.04314667358994484,
+        "success": true,
+        "spl": 0.9704146654924548,
+        "episode_id": "2942"
+      }
+    ]
+  },
+  "candidates": {
+    "successes": 90,
+    "total": 90,
+    "episodes": [
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.055930317941849,
+        "shortest_path_length": 6.055930317941849,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3399_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.055930317941849,
+        "shortest_path_length": 6.055930317941849,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3399_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.055930317941849,
+        "shortest_path_length": 6.055930317941849,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3399_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.158204394666517,
+        "shortest_path_length": 6.158204394666517,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5894_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.158204394666517,
+        "shortest_path_length": 6.158204394666517,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5894_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.158204394666517,
+        "shortest_path_length": 6.158204394666517,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5894_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.830917053122604,
+        "shortest_path_length": 8.830917053122604,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2505_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.830917053122604,
+        "shortest_path_length": 8.830917053122604,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2505_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.830917053122604,
+        "shortest_path_length": 8.830917053122604,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2505_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 7.678800067760447,
+        "shortest_path_length": 7.678800067760446,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6066_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 7.678800067760447,
+        "shortest_path_length": 7.678800067760446,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6066_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 7.678800067760447,
+        "shortest_path_length": 7.678800067760446,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6066_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.296430721326618,
+        "shortest_path_length": 5.296430721326618,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2571_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.296430721326618,
+        "shortest_path_length": 5.296430721326618,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2571_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.296430721326618,
+        "shortest_path_length": 5.296430721326618,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2571_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.087743859547015,
+        "shortest_path_length": 6.087743859547015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3546_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.087743859547015,
+        "shortest_path_length": 6.087743859547015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3546_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.087743859547015,
+        "shortest_path_length": 6.087743859547015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3546_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.931785795674813,
+        "shortest_path_length": 5.931785795674813,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3827_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.931785795674813,
+        "shortest_path_length": 5.931785795674813,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3827_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.931785795674813,
+        "shortest_path_length": 5.931785795674813,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3827_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.379246243647011,
+        "shortest_path_length": 7.379246243647012,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "681_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.379246243647011,
+        "shortest_path_length": 7.379246243647012,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "681_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.379246243647011,
+        "shortest_path_length": 7.379246243647012,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "681_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.091036080406875,
+        "shortest_path_length": 7.091036080406875,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "338_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.091036080406875,
+        "shortest_path_length": 7.091036080406875,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "338_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.091036080406875,
+        "shortest_path_length": 7.091036080406875,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "338_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.61071424098375,
+        "shortest_path_length": 5.61071424098375,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2223_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.61071424098375,
+        "shortest_path_length": 5.61071424098375,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2223_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.61071424098375,
+        "shortest_path_length": 5.61071424098375,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2223_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.24241289538213,
+        "shortest_path_length": 8.24241289538213,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6833_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.24241289538213,
+        "shortest_path_length": 8.24241289538213,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6833_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.24241289538213,
+        "shortest_path_length": 8.24241289538213,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6833_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.164596684588401,
+        "shortest_path_length": 5.1645966845884015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "7084_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.164596684588401,
+        "shortest_path_length": 5.1645966845884015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "7084_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.164596684588401,
+        "shortest_path_length": 5.1645966845884015,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "7084_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.2394283281075245,
+        "shortest_path_length": 6.2394283281075245,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3014_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.2394283281075245,
+        "shortest_path_length": 6.2394283281075245,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3014_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.2394283281075245,
+        "shortest_path_length": 6.2394283281075245,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3014_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.338529513268576,
+        "shortest_path_length": 5.338529513268576,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6380_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.338529513268576,
+        "shortest_path_length": 5.338529513268576,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6380_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.338529513268576,
+        "shortest_path_length": 5.338529513268576,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6380_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 9.589110333135181,
+        "shortest_path_length": 9.589110333135181,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2496_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 9.589110333135181,
+        "shortest_path_length": 9.589110333135181,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2496_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 9.589110333135181,
+        "shortest_path_length": 9.589110333135181,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2496_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.723098933895209,
+        "shortest_path_length": 6.7230989338952085,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "790_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.723098933895209,
+        "shortest_path_length": 6.7230989338952085,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "790_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.723098933895209,
+        "shortest_path_length": 6.7230989338952085,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "790_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.348910063042329,
+        "shortest_path_length": 8.348910063042329,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "706_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.348910063042329,
+        "shortest_path_length": 8.348910063042329,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "706_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.348910063042329,
+        "shortest_path_length": 8.348910063042329,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "706_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.2512312997718755,
+        "shortest_path_length": 7.2512312997718755,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3070_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.2512312997718755,
+        "shortest_path_length": 7.2512312997718755,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3070_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.2512312997718755,
+        "shortest_path_length": 7.2512312997718755,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3070_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.1645966845884015,
+        "shortest_path_length": 5.164596684588401,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5692_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.1645966845884015,
+        "shortest_path_length": 5.164596684588401,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5692_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.1645966845884015,
+        "shortest_path_length": 5.164596684588401,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "5692_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.510262314347998,
+        "shortest_path_length": 7.510262314347998,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4010_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.510262314347998,
+        "shortest_path_length": 7.510262314347998,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4010_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 7.510262314347998,
+        "shortest_path_length": 7.510262314347998,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4010_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.223597941046013,
+        "shortest_path_length": 5.2235979410460125,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1165_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.223597941046013,
+        "shortest_path_length": 5.2235979410460125,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1165_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.223597941046013,
+        "shortest_path_length": 5.2235979410460125,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1165_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.183051914481894,
+        "shortest_path_length": 8.183051914481894,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "378_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.183051914481894,
+        "shortest_path_length": 8.183051914481894,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "378_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 8.183051914481894,
+        "shortest_path_length": 8.183051914481894,
+        "steps": 7,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "378_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.957428147096547,
+        "shortest_path_length": 6.957428147096547,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1945_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.957428147096547,
+        "shortest_path_length": 6.957428147096547,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1945_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.957428147096547,
+        "shortest_path_length": 6.957428147096547,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1945_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.105668013383425,
+        "shortest_path_length": 5.105668013383424,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2464_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.105668013383425,
+        "shortest_path_length": 5.105668013383424,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2464_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999998,
+        "distance_to_goal": 0.0,
+        "path_length": 5.105668013383425,
+        "shortest_path_length": 5.105668013383424,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2464_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.7261413108922525,
+        "shortest_path_length": 5.7261413108922525,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1901_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.7261413108922525,
+        "shortest_path_length": 5.7261413108922525,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1901_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.7261413108922525,
+        "shortest_path_length": 5.7261413108922525,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "1901_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.203122839993158,
+        "shortest_path_length": 6.203122839993157,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2403_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.203122839993158,
+        "shortest_path_length": 6.203122839993157,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2403_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.203122839993158,
+        "shortest_path_length": 6.203122839993157,
+        "steps": 6,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "2403_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.282482866990331,
+        "shortest_path_length": 6.282482866990331,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4487_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.282482866990331,
+        "shortest_path_length": 6.282482866990331,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4487_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.282482866990331,
+        "shortest_path_length": 6.282482866990331,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "4487_2"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.74023966518565,
+        "shortest_path_length": 6.7402396651856495,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3109_0"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.74023966518565,
+        "shortest_path_length": 6.7402396651856495,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3109_1"
+      },
+      {
+        "success": true,
+        "spl": 0.9999999999999999,
+        "distance_to_goal": 0.0,
+        "path_length": 6.74023966518565,
+        "shortest_path_length": 6.7402396651856495,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3109_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.579653432145082,
+        "shortest_path_length": 5.579653432145082,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6967_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.579653432145082,
+        "shortest_path_length": 5.579653432145082,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6967_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 5.579653432145082,
+        "shortest_path_length": 5.579653432145082,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "6967_2"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.188144007787243,
+        "shortest_path_length": 6.188144007787243,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3693_0"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.188144007787243,
+        "shortest_path_length": 6.188144007787243,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3693_1"
+      },
+      {
+        "success": true,
+        "spl": 1.0,
+        "distance_to_goal": 0.0,
+        "path_length": 6.188144007787243,
+        "shortest_path_length": 6.188144007787243,
+        "steps": 5,
+        "stopped": true,
+        "timeout": false,
+        "collision": false,
+        "episode_id": "3693_2"
+      }
+    ]
+  }
+}

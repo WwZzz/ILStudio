@@ -1,0 +1,307 @@
+{
+  "mattersim_revision": "589d091b111333f9e9f9d6cfd021b2eb68435925",
+  "pybind11": "2.13.6",
+  "python": "3.10.14 (main, May  6 2024, 19:42:50) [GCC 11.2.0]",
+  "packages": [
+    {
+      "file": "gdal-data_3.4.1+dfsg-1build4_all.deb",
+      "sha256": "aa36d0c5df4ec0620ec8e720d29c365a8986c583dc747fcd13d8b27a60c97aa3"
+    },
+    {
+      "file": "libaec0_1.0.6-1_amd64.deb",
+      "sha256": "55f884476a610f8a2c5b7826959b44dfe523b5c2a0347585c28639c97e34aafd"
+    },
+    {
+      "file": "libarmadillo10_1%3a10.8.2+dfsg-1_amd64.deb",
+      "sha256": "c6993e2c83e96f7a5cc77007afc4d935ae480d5acdb5f92f3292ee5794dbb3a0"
+    },
+    {
+      "file": "libarpack2_3.8.0-1_amd64.deb",
+      "sha256": "07a4b576bd52ae9b0f487a3739b8922183ac88ceb1b2f2e943e3e68b8a12108a"
+    },
+    {
+      "file": "libblosc1_1.21.1+ds2-2_amd64.deb",
+      "sha256": "9389112b41a96d68650c10d75098355361a5cc14074c340ba82c7cf63866ad24"
+    },
+    {
+      "file": "libcfitsio9_4.0.0-1_amd64.deb",
+      "sha256": "584c93e6f2e2af6e51462520ad15e2394df044bc9f28c6fb1b12865763c78221"
+    },
+    {
+      "file": "libcharls2_2.3.4-1_amd64.deb",
+      "sha256": "1c3f94791746c47f796e8df9983984520fed9b35863a32cc4eee8b39538684d1"
+    },
+    {
+      "file": "libde265-0_1.0.8-1ubuntu0.3_amd64.deb",
+      "sha256": "380f359d4c9de0b1118e3f450a55909e1995b605988a70e442b446c121744821"
+    },
+    {
+      "file": "libegl-dev_1.4.0-1_amd64.deb",
+      "sha256": "2a1f5391086b08e84eafdc60243e49795e6182c3fe170b28c8abc4cd7026a2b1"
+    },
+    {
+      "file": "libegl1_1.4.0-1_amd64.deb",
+      "sha256": "4a35c0e925e15a076e7ce11d7c76f8ecb16615fc347c2c09afa4c205a7ca8ec4"
+    },
+    {
+      "file": "libepoxy-dev_1.5.10-1_amd64.deb",
+      "sha256": "075fbb11331397e989f12bdd8fff519a7f66395e561cc4eb63f4bfeedce02c4f"
+    },
+    {
+      "file": "libepoxy0_1.5.10-1_amd64.deb",
+      "sha256": "b074cde6aa853be14ec11148794bfeb2f55db41a9abdc0c99f18db97bb99e47b"
+    },
+    {
+      "file": "libfreexl1_1.0.6-1_amd64.deb",
+      "sha256": "539dec65f88fa436f1278f923a0c99952c8d946a0ef410efd0f4ec6dd2f541d2"
+    },
+    {
+      "file": "libfyba0_4.1.1-7_amd64.deb",
+      "sha256": "0fec32728a8b531b84a1ff697d1850259a0a1ce0e0252813b1024fe0e2e28d07"
+    },
+    {
+      "file": "libgdal30_3.4.1+dfsg-1build4_amd64.deb",
+      "sha256": "859027931725531c190b67df31abfd71fc4836b2c13d2d92e6a0d869d38a1754"
+    },
+    {
+      "file": "libgdcm-dev_3.0.10-1build2_amd64.deb",
+      "sha256": "81c1a71b4a65e82e889dbbfd9449c9388dd331b55a9b15740da0c03676896d67"
+    },
+    {
+      "file": "libgdcm3.0_3.0.10-1build2_amd64.deb",
+      "sha256": "cfdabe7bf1a4ade5fe1bd74b8ce58b594236df22604ed8761ed40973b21cf291"
+    },
+    {
+      "file": "libgeos-c1v5_3.10.2-1_amd64.deb",
+      "sha256": "c06851a22fff6614bc0ec9ace5a0a5862e5a952c06b47f2de07322578e839f03"
+    },
+    {
+      "file": "libgeos3.10.2_3.10.2-1_amd64.deb",
+      "sha256": "4504948aac0329e5a5a9c350ed03ec4adf50d4a4bc6efa7878bebfef762261de"
+    },
+    {
+      "file": "libgeotiff5_1.7.0-2build1_amd64.deb",
+      "sha256": "9b553f3319e2baedd182c01387795e86e88e96f47008c94d20eb7c451de8ad02"
+    },
+    {
+      "file": "libgif7_5.1.9-2ubuntu0.3_amd64.deb",
+      "sha256": "506682225d0080ad508a1609c93626c8d689046a4fef9cb9739993cf47d2704d"
+    },
+    {
+      "file": "libgl-dev_1.4.0-1_amd64.deb",
+      "sha256": "6cda0891ca38204ab3a9a2a9279ecb99989ab100d6e48101306efce28f0759a2"
+    },
+    {
+      "file": "libgl1_1.4.0-1_amd64.deb",
+      "sha256": "4fb2bbff94bb1a59bbdb40041e7a8ab58db2a003a151f4055357af03f0b78666"
+    },
+    {
+      "file": "libglm-dev_0.9.9.8+ds-2_all.deb",
+      "sha256": "e01d71215c18bde79da26c9b37ded4a6bb346bcfea7ff459bf39a6b53f7bb88e"
+    },
+    {
+      "file": "libglx-dev_1.4.0-1_amd64.deb",
+      "sha256": "98bc8061e0cc40bc553df71d84f4c653c8188ed4aabc9315aae99926948af7e4"
+    },
+    {
+      "file": "libhdf4-0-alt_4.2.15-4_amd64.deb",
+      "sha256": "2fd86cb99a693895fca5b54a4abaa36b0c401b29601b957f47d6dee28a8e7bc5"
+    },
+    {
+      "file": "libhdf5-103-1_1.10.7+repack-4ubuntu2_amd64.deb",
+      "sha256": "0e2ea8acee333ad1a63cf64b8b0435b2a2e4575bad7336bffe326745b21850be"
+    },
+    {
+      "file": "libhdf5-hl-100_1.10.7+repack-4ubuntu2_amd64.deb",
+      "sha256": "4361d3fcaf9c96b1f480a98b17067ee284db281a926dda579389f619ace9aaaf"
+    },
+    {
+      "file": "libheif1_1.12.0-2build1_amd64.deb",
+      "sha256": "41c256565bef1b24bc6d499e4e02fcbb2b71a8c9d1d9405735b08db42c749d08"
+    },
+    {
+      "file": "libilmbase25_2.5.7-2_amd64.deb",
+      "sha256": "4708a25787f6d8d38d30db21d1afbae473a9a8bd69e663f5ddd341836b39ef90"
+    },
+    {
+      "file": "libjsoncpp-dev_1.9.5-3_amd64.deb",
+      "sha256": "0d503dd0f2bffdaa7f5238a5ed3688fef9f9900c47ffd06a6d6857b38951e857"
+    },
+    {
+      "file": "libjsoncpp25_1.9.5-3_amd64.deb",
+      "sha256": "8844bfab4691b56cf49e741b65389147b03168bef4254b31ae97ad679d199a78"
+    },
+    {
+      "file": "libkmlbase1_1.3.0-9_amd64.deb",
+      "sha256": "2f9b15d93df94a6245a2ea4948228b83575db3832ead21b63167379be6231825"
+    },
+    {
+      "file": "libkmldom1_1.3.0-9_amd64.deb",
+      "sha256": "4f697a133a9faa718e666500e2c21ca7fa5fd9b7b9884e6ab937a48142804bab"
+    },
+    {
+      "file": "libkmlengine1_1.3.0-9_amd64.deb",
+      "sha256": "ac22c168fe91756203e43f6036356c5b0a9ca7a85537602fd46c502ebb161460"
+    },
+    {
+      "file": "liblcms2-2_2.12~rc1-2ubuntu0.1_amd64.deb",
+      "sha256": "4e74357c16f3b8a833dafab18aaadef6bfe5bda17730fa8afa2e85c24025a7d5"
+    },
+    {
+      "file": "libltdl7_2.4.6-15build2_amd64.deb",
+      "sha256": "14f150a03085bd5469242fdb8ea2a702ab5d6d2fd3497fdb70654028a4074257"
+    },
+    {
+      "file": "libminizip1_1.1-8build1_amd64.deb",
+      "sha256": "3e962dbdd1c3ee9ca2418eda3f57b857bdbec1f97c9f807a1612b366cb5cd69c"
+    },
+    {
+      "file": "libmysqlclient21_8.0.46-0ubuntu0.22.04.4_amd64.deb",
+      "sha256": "ad7b6f491ca0f41fe9651ff03b39576c12d08d57417b575cc3b36a3fc493b815"
+    },
+    {
+      "file": "libnetcdf19_1%3a4.8.1-1_amd64.deb",
+      "sha256": "df91892d5268377ec281583d122598ed08938f460d5fcae99953da1306918b04"
+    },
+    {
+      "file": "libnspr4_2%3a4.35-0ubuntu0.22.04.1_amd64.deb",
+      "sha256": "b3c96e4a61675c87f8d9655109346748847d859abc95f20493159d06b5aa30ef"
+    },
+    {
+      "file": "libnss3_2%3a3.98-0ubuntu0.22.04.4_amd64.deb",
+      "sha256": "caf60f375adbbdafef74930c5dd91411de0ac5c9499bf699185110dc77d82611"
+    },
+    {
+      "file": "libodbc2_2.3.9-5ubuntu0.1_amd64.deb",
+      "sha256": "b0cefd997e46885ed708a90924ae03b0af74e2b00eca674067a6cb97d31310f3"
+    },
+    {
+      "file": "libodbcinst2_2.3.9-5ubuntu0.1_amd64.deb",
+      "sha256": "076e23ecff48e7448890bbda626c5847db6c64d744b0adb5c07cac2bcffbab66"
+    },
+    {
+      "file": "libogdi4.1_4.1.0+ds-5_amd64.deb",
+      "sha256": "1cda339520c525ae2b614ca9efc769d9c8a726098b71ff4b53f462a183555734"
+    },
+    {
+      "file": "libopencv-core-dev_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "e1b628e1e6235dab998cdd2c8282f1188c24363a17964f01b9538a1a8d4e1d69"
+    },
+    {
+      "file": "libopencv-core4.5d_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "320c8141aec5a415833370af0e1bd388c03283cd22c9225b045a1b40efca528f"
+    },
+    {
+      "file": "libopencv-imgcodecs-dev_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "51eabab507cf7733d8b9447730574e508a09dd265a4312be28659d5dd48bec70"
+    },
+    {
+      "file": "libopencv-imgcodecs4.5d_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "52d720b7d303a8a123262c1f22a53595c261c87f9ef5ecfa8bbf544422f069a0"
+    },
+    {
+      "file": "libopencv-imgproc-dev_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "8b18618f30002dc29d9b04f4153b76c788600c6b227876154eca7aa4a321b8de"
+    },
+    {
+      "file": "libopencv-imgproc4.5d_4.5.4+dfsg-9ubuntu4_amd64.deb",
+      "sha256": "54e646c5964f18e56ca1e5b7a399e988a19d830eccfb2378eea2fe86e5953e62"
+    },
+    {
+      "file": "libopenexr25_2.5.7-1_amd64.deb",
+      "sha256": "18c83b13687efdb7e3eab668496ed148f69e399dffeffe972cc63aa12dd2134c"
+    },
+    {
+      "file": "libopengl-dev_1.4.0-1_amd64.deb",
+      "sha256": "825d0374431335bb4693a8f6e5a650353fd680838d6dc988fb9e232ffa0d95a1"
+    },
+    {
+      "file": "libopengl0_1.4.0-1_amd64.deb",
+      "sha256": "486473b82c475d8137d2a061adb22fbcd1d681936e9d85a3ca7f8b4b83e2ccde"
+    },
+    {
+      "file": "libpoppler118_22.02.0-2ubuntu0.14_amd64.deb",
+      "sha256": "7cb48217cbd05e22248a801021410353b1e50d3cd6f864f907273c915ed78d2c"
+    },
+    {
+      "file": "libpq5_14.24-0ubuntu0.22.04.1_amd64.deb",
+      "sha256": "79f9af127350c5bbf4c1722ebc4aa7d31ae4fd71b0404e501f7a76ed65709e0d"
+    },
+    {
+      "file": "libproj22_8.2.1-1_amd64.deb",
+      "sha256": "b6845e212ca36a905471901005fb634e40d5441a930200d867cff9ad93c77353"
+    },
+    {
+      "file": "libqhull-r8.0_2020.2-4_amd64.deb",
+      "sha256": "f0d0201dc648fd4be32ba0e596340f5018e119e5d48b7b21b48e781e69adacfa"
+    },
+    {
+      "file": "librttopo1_1.1.0-2_amd64.deb",
+      "sha256": "d52815d85fb0591192ca323599154aa1ebc5a9bfb392513c2623879f81cf0dd2"
+    },
+    {
+      "file": "libsocket++1_1.12.13+git20131030.5d039ba-1_amd64.deb",
+      "sha256": "013d37ad94db5a4d719798dfa62ac77ca5b18dccc05f63c984e2100b4a776d03"
+    },
+    {
+      "file": "libspatialite7_5.0.1-2build2_amd64.deb",
+      "sha256": "a2e3c9a7110628f2754968128dd26e3f813cecf89ee26fad43224ac0ddab67ca"
+    },
+    {
+      "file": "libsuperlu5_5.3.0+dfsg1-2_amd64.deb",
+      "sha256": "3ddb7f9412b45310f1eaf9d2d996f8c9de7805383a8914c3224021b5a91b567f"
+    },
+    {
+      "file": "libsz2_1.0.6-1_amd64.deb",
+      "sha256": "da2011ac840f6a6cff634d606b6cadb5456d576e5f601eea4acd7e8bfbbd7c01"
+    },
+    {
+      "file": "libtbb-dev_2021.5.0-7ubuntu2_amd64.deb",
+      "sha256": "d3052b9b07c59315cc87d18f7a9ed9c3c5d8d7c446104cdcba6bd17ddfb1fbaa"
+    },
+    {
+      "file": "libtbb12_2021.5.0-7ubuntu2_amd64.deb",
+      "sha256": "05981f9120f8fb5c2e5a1e1f2a6017976077500141fc4eaf0d3106be6b793c4a"
+    },
+    {
+      "file": "libtbb2_2020.3-1ubuntu3_amd64.deb",
+      "sha256": "93684d6b6a0871cbe27c4332aeed7f9b3209f342e72817d255fcf0d0f48dc321"
+    },
+    {
+      "file": "libtbbmalloc2_2021.5.0-7ubuntu2_amd64.deb",
+      "sha256": "7b3bd4bde4c92b17c94d27001c884b285eadb0272dd67b4c5405e1de6af20066"
+    },
+    {
+      "file": "libtiff5_4.3.0-6ubuntu0.13_amd64.deb",
+      "sha256": "298a778a6a579a556f6bb4e32512cd76e0483b57b4a379ee85397f62fe21f225"
+    },
+    {
+      "file": "liburiparser1_0.9.6+dfsg-1_amd64.deb",
+      "sha256": "f43eb7e8fd376ac30612eb55e3b0e9ce35ffd73912d8fc25c3738b8408ff03c5"
+    },
+    {
+      "file": "libxerces-c3.2_3.2.3+debian-3ubuntu0.1_amd64.deb",
+      "sha256": "6383ebac0d30bd45de7700338102f9fc9e662b3a8fefc11e8b7e11f3f4223fab"
+    },
+    {
+      "file": "mysql-common_5.8+1.0.8_all.deb",
+      "sha256": "1e4e9c090c71333a6f83c2d3021866e77a21df914cd2af40bf2892054f97ed35"
+    },
+    {
+      "file": "proj-data_8.2.1-1_all.deb",
+      "sha256": "8a4d1096438a4ebf4e072150c566531ff0eaa33d7db4bcfcb411713f36248100"
+    },
+    {
+      "file": "unixodbc-common_2.3.9-5ubuntu0.1_all.deb",
+      "sha256": "f28b964696a3ae8f46eda42c41d33bfa7c3060a018b13b47f6836ad21bc400f2"
+    },
+    {
+      "file": "zlib1g-dev_1%3a1.2.11.dfsg-2ubuntu9.2_amd64.deb",
+      "sha256": "679f94589586a433c31fa9f705a6fd2e3bfa2407542ba06227ce14f821647764"
+    }
+  ],
+  "source_changes": [
+    "OpenCV 4 image-load constant",
+    "explicit C++/OpenCV includes"
+  ]
+}

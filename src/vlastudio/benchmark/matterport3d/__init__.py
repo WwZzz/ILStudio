@@ -58,6 +58,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         self.config = config
         self.max_steps = int(getattr(config, 'max_timesteps', 100))
         self.success_distance = float(getattr(config, 'success_distance', 3.0))
+        self.depth_enabled = bool(getattr(config, 'depth_enabled', True))
         opener = gzip.open if str(config.episodes).endswith('.gz') else open
         with opener(config.episodes, 'rt', encoding='utf-8') as stream:
             raw = json.load(stream)
@@ -78,7 +79,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         sim.setCameraResolution(getattr(config, 'image_size', 256), getattr(config, 'image_size', 256))
         sim.setCameraVFOV(np.deg2rad(60))
         sim.setDiscretizedViewingAngles(True)
-        sim.setDepthEnabled(True)
+        sim.setDepthEnabled(self.depth_enabled)
         if self.navigation_options['candidate_source'] == 'simulator':
             sim.setRestrictedNavigation(self.navigation_options['candidate_scope'] == 'visible')
         sim.initialize()
@@ -106,7 +107,12 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         # Heading/elevation and current visible degree are observable, unlike goal distance.
         features = np.asarray([state.heading, state.elevation, len(state.navigableLocations) - 1], dtype=np.float32)
         image = np.asarray(state.rgb)[..., ::-1].copy()  # MatterSim uses BGR.
-        depth = np.asarray(state.depth, dtype=np.float32).squeeze(-1) if np.asarray(state.depth).ndim == 3 else np.asarray(state.depth, dtype=np.float32)
+        depth = None
+        if self.depth_enabled:
+            depth = np.asarray(state.depth, dtype=np.float32)
+            if depth.ndim == 3:
+                depth = depth[..., 0]
+            depth = depth[None] / 4000.
         options = getattr(self, 'navigation_options', navigation_options(None, supports_candidates=True))
         navigation = dict(options)
         if options['candidate_source'] == 'simulator':
@@ -118,7 +124,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
                  'distance': float(location.rel_distance)}
                 for location in state.navigableLocations[1:]]
         return MetaObs(state=features, image=image[None].transpose(0, 3, 1, 2),
-                       depth=depth[None] / 4000., raw_lang=self.episode['instruction'], timestep=self.steps,
+                       depth=depth, raw_lang=self.episode['instruction'], timestep=self.steps,
                        navigation=navigation)
 
     def _candidate_location(self, action, state):
@@ -143,6 +149,8 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
             return asdict(self.prev_obs), 0., True, dict(self.last_info)
         action = self.meta2act(action)
         before = self.env.getState()[0]
+        # Native SimState is mutated in-place by makeAction. Copy the ID first.
+        source = before.location.viewpointId
         location, heading, elevation = 0, 0., 0.
         collision = False
         if getattr(self, 'navigation_options', {}).get('action_mode') == 'candidate_viewpoint':
@@ -161,7 +169,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         if action != 0:
             self.env.makeAction([location], [heading], [elevation])
         after = self.env.getState()[0]
-        source, target = before.location.viewpointId, after.location.viewpointId
+        target = after.location.viewpointId
         if source != target:
             self.travelled += self.graph[source][target]
         self.prev_obs = self.obs2meta(after)
@@ -169,5 +177,6 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         return self._finish_step(self.distances.get(target, float('inf')), action == 0, collision)
 
     def close(self):
-        # MatterSim's Python API has no close method; release renderer ownership.
-        self.env = None
+        if self.env is not None:
+            self.env.close()
+            self.env = None

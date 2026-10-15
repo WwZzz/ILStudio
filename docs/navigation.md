@@ -7,16 +7,16 @@ are optional: importing VLAStudio does not import or install them.
 | Config name | Backend | Task | Runtime status |
 | --- | --- | --- | --- |
 | `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Real training and evaluation in Example 09 |
-| `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real test-scene API fixture verified; benchmark needs MP3D assets |
-| `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Adapter; requires native build and authorized panoramas |
-| `matterport3d.matterport_r2r_candidates` | Matterport3DSimulator | R2R with optional graph candidates and viewpoint selection | Contract-tested adapter; native asset run still required |
+| `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real MP3D / original VLN-CE episodes and framework replay verified |
+| `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Real MP3D RGB renderer, primitive actions and framework replay verified |
+| `matterport3d.matterport_r2r_candidates` | Matterport3DSimulator | R2R with optional graph candidates and viewpoint selection | Real MP3D candidates, graph movement and framework replay verified |
 
 The continuous R2R config uses Habitat-Lab's built-in `VLN-v0` / `R2RVLN-v1` task.
 It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
 leaderboard. PointNav acceptance does not establish instruction following or
-generalization to unseen scenes. Matterport3D and continuous R2R have contract
-tests but must be validated with real licensed assets before claiming benchmark
-support is fully runtime-verified. `verify_habitat.py --lab` checks the native
+generalization to unseen scenes. The real-asset checks below cover one MP3D scan
+and integration behavior; they are not full-benchmark language-policy results.
+`verify_habitat.py --lab` checks the native
 PointNav renderer and Habitat-Lab R2R API with a clearly marked synthetic episode
 on a public test scene; that fixture is not a benchmark score.
 
@@ -258,14 +258,16 @@ this optional metadata and continue using their two state values.
 Habitat PointNav and the Habitat-Lab adapter currently accept primitive actions
 with `candidate_source=none` only. Learned waypoint generation can live inside
 a policy, but this change does not implement a Habitat waypoint executor.
-MatterSim candidate execution has fake-native contract tests, including stable
-IDs and graph path scoring; it still needs a real run on authorized MP3D assets.
+MatterSim candidate execution has contract tests and real MP3D runs, including
+stable IDs, graph path scoring and framework inference transport.
 
 Each navigation module exports its own `evaluate` function because the older
 manipulation evaluator treats `done` as success. The navigation evaluator tracks
 termination separately, preserves failed results, and freezes finished vector slots.
 When constructing multiple R2R environments, set `rollout_index` and
 `episode_stride` to nonoverlapping offsets/strides for the desired episode set.
+Both adapters honor these offsets, including independently created environments.
+The Habitat adapter also applies `max_timesteps` to the native task horizon.
 
 ## Continuous R2R / VLN-CE task
 
@@ -308,6 +310,7 @@ and supply authorized Matterport panorama assets. Then use
 episodes: /datasets/R2R_val_seen.json
 dataset_path: /datasets/v1/scans
 connectivity_path: /src/Matterport3DSimulator/connectivity
+depth_enabled: false  # RGB-only skyboxes; set true only with matching depth PNGs.
 ```
 
 R2R records are expanded per instruction, retaining `path_id_instructionIndex`.
@@ -315,6 +318,10 @@ Actions add `4 LOOK_UP`, `5 LOOK_DOWN`; FORWARD selects visible navigable index 
 or stays in place on obstruction. This is the classic six-action interface,
 not a panoramic variable-candidate policy. Discretized MatterSim turns use +/-1
 increments. RGB BGR channels are converted to RGB and depth units to meters.
+With `depth_enabled: false`, the renderer does not load depth and `obs.depth` is
+`None`. Enabled depth requires `*_skybox_depth_small.png` alongside RGB skyboxes.
+The real MP3D run used RGB-only assets; native MatterSim depth rendering has not
+been verified with real depth assets. Its unit conversion has contract tests.
 State contains heading, elevation and visible degree; reference path, teacher,
 goal world coordinates and distance-to-goal are withheld from policy inputs.
 Scoring uses weighted connectivity-graph shortest paths, explicit STOP within 3m,
@@ -328,6 +335,74 @@ check their schema, action angles, splits and upstream asset access conditions.
 The [original MP3D project](https://niessner.github.io/Matterport/) requires a signed
 access request. A repository of rendered images is not a substitute for runnable
 scene geometry, and Habitat GLBs are not MatterSim panorama assets.
+
+## Verified MatterSim installer and real VLN smoke checks
+
+On Ubuntu 22.04, the explicit installer builds for the active Python and unpacks
+development/runtime packages into a private directory. It never runs a system
+package installation. The active environment must already contain VLAStudio,
+NumPy, requests, torch and CMake 3.x, with a host C++ compiler and NVIDIA EGL.
+
+```bash
+python examples/09_navigation/install_mattersim.py --prefix "$PWD/.mattersim"
+source "$PWD/.mattersim/activate.sh"
+```
+
+This pins MatterSim commit `589d091b111333f9e9f9d6cfd021b2eb68435925` and
+pybind11 2.13.6 for Python 3.10 compatibility. Source edits replace the removed
+OpenCV image-load constant with its equivalent and declare the C++/OpenCV headers
+actually used. The emitted activation file handles Conda Python's older TIFF
+RPATH; `installation.json` records package hashes. Set `connectivity_path` to
+`.mattersim/source/connectivity`. This installer was tested from an empty prefix,
+then its build was used for the actual renderer and framework runs. Habitat uses
+the separate source installation documented above. Neither backend installs on
+import, and environment profiles still perform dependency checks only.
+
+With a fully resolved environment YAML (absolute episode/scene/connectivity
+paths and matching RGB/depth options), verify a small real-asset subset:
+
+```bash
+python examples/09_navigation/verify_vln.py --config /path/to/env.yaml \
+  --episodes 6 --output results/vln-check
+python -m vlastudio.entrypoints.eval_sim -m results/vln-check \
+  -e /path/to/env.yaml --device cpu -bs 0 -n 6 -o results/vln-framework \
+  --env.reuse_env true
+```
+
+`verify_vln.py` uses a privileged shortest-path expert for Habitat and reference
+graph routes for MatterSim. Its replay policy checks that RGB, available depth,
+language and optional candidates reach the inference process. These diagnostic
+plans are tied to the exact episodes/configuration and are never a learned policy
+or a language-navigation benchmark score. The validation sample has **two routes
+with three instructions each**, not six independent routes.
+
+The recorded real-asset check uses MP3D scan `17DRP5sb8fy`, original R2R and
+`R2R_VLNCE_v1-3` annotations, and actual native EGL renderers:
+
+| Check | Direct expert success | Framework replay success | Framework SPL |
+| --- | --- | --- | --- |
+| Habitat-Lab continuous R2R, RGBD | 6/6 | 6/6 | 0.97717064 |
+| MatterSim primitive actions, RGB | 6/6 | 6/6 | 1.0 |
+| MatterSim candidate actions, RGB | 6/6 | 6/6 | 1.0 |
+
+All per-episode success and SPL values match direct execution. Additional native
+checks covered all 75 available continuous training episodes (25 routes) and all
+90 classic R2R training episodes (30 routes) in that scan. Early STOP and timeout
+fail correctly; unreachable candidate IDs are rejected without advancing time;
+terminal observations stay frozen; closing/recreating environments reproduces
+the same RGB frames. Reference routes and goal coordinates remain in the
+diagnostic harness, outside policy observations. A missing semantic descriptor
+warning does not affect these RGBD/navigation checks; semantic sensing is not
+configured.
+
+Scene assets were fetched as a small subset from
+[VLN-Ego-making](https://huggingface.co/datasets/alexzyqi/VLN-Ego-making) (GLB and
+navmesh) and [Matterport3D-Scans](https://huggingface.co/datasets/VLN-Aegis/Matterport3D-Scans)
+(preprocessed RGB skyboxes), with fixed revisions and file hashes. Original
+annotations came from the author-linked R2R and VLN-CE downloads. No raw scene
+assets or full annotation datasets are included in this repository. See
+[runtime evidence](evidence/navigation/vln/runtime.json) for exact metrics,
+versions, source hashes and the limits of this check.
 
 ## Tests and primary sources
 
