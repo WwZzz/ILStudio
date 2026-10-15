@@ -32,6 +32,8 @@ class Bench2DriveEnv(MetaEnv):
         self.config = config
         if not isinstance(getattr(config, 'remove_map_parked_vehicles', True), bool):
             raise ValueError('remove_map_parked_vehicles must be a boolean')
+        if not isinstance(getattr(config, 'repair_bicycle_flow', False), bool):
+            raise ValueError('repair_bicycle_flow must be a boolean')
         original = Path(getattr(config, 'routes', '') or source('bench2drive')/'leaderboard/data/bench2drive_0.0.4_val.xml')
         tree = ET.parse(original)
         routes = list(tree.getroot().findall('route'))
@@ -56,7 +58,7 @@ class Bench2DriveEnv(MetaEnv):
         selected = self.work_dir/'routes.xml'
         ET.ElementTree(root).write(selected, encoding='utf-8', xml_declaration=True)
         self.worker_config = {key: getattr(config, key) for key in ['carla_root', 'graphics_runtime', 'gpu',
-            'startup_timeout', 'step_timeout', 'seed', 'remove_map_parked_vehicles'] if hasattr(config, key)}
+            'startup_timeout', 'step_timeout', 'seed', 'remove_map_parked_vehicles', 'repair_bicycle_flow'] if hasattr(config, key)}
         self.worker_config.update(routes=str(selected), work_dir=str(self.work_dir))
         self.process = self.pipe = None
         self.done, self.completed = True, 0

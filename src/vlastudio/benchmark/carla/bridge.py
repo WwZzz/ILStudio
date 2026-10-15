@@ -66,6 +66,10 @@ def worker(pipe, config):
             from .parking import ParkingCatalog, configure_parking, audited_builder
             parking_catalog = ParkingCatalog(parked_vehicles)
             trace = {}
+            bicycle_reports = {}
+            if config.get('repair_bicycle_flow', False):
+                from .bicycle import install
+                install(bicycle_reports)
             RouteScenario.build_scenarios = audited_builder(RouteScenario.build_scenarios, trace)
 
             class OwnedEvaluator(LeaderboardEvaluator):
@@ -109,6 +113,7 @@ def worker(pipe, config):
             while indexer.peek():
                 route = indexer.get_next_config()
                 trace.clear()
+                bicycle_reports.clear()
                 log.flush()
                 log_start = log.tell()
                 crashed = evaluator._load_and_run_scenario(args, route)
@@ -124,6 +129,8 @@ def worker(pipe, config):
                 report = {**getattr(evaluator, 'initialization_report', {}),
                     'requested_scenarios': sorted(requested), 'initialized_scenarios': sorted(initialized),
                     'scenario_actor_counts': trace.get('actors', {}),
+                    'repair_bicycle_flow': config.get('repair_bicycle_flow', False),
+                    'bicycle_lane_connections': dict(bicycle_reports),
                     'background_parked_objects': trace.get('background_parked_objects', 0)}
                 if 'Skipping scenario ' in text or trace.get('errors') or requested != initialized:
                     skipped = [line for line in text.splitlines() if 'Skipping scenario ' in line]

@@ -77,7 +77,9 @@ authors' full training recipe from scratch.
 ## Closed-loop evaluation
 
 The default evaluation selects the exact official 0.0.4 validation XML: 220
-routes, covering 44 scenario types. The adapter retains the official scenario
+routes. The pinned release file contains 42 distinct scenario types with unequal
+counts, despite the upstream release note describing 44 types with five routes
+each. The adapter evaluates the exact file without resampling. It retains the official scenario
 manager, sensor geometry, 20 Hz simulation timing and statistics manager.
 Only the unused debugging BEV camera is omitted from the SENSORS track.
 Scenario setup errors invalidate a run rather than silently skipping a scenario.
@@ -93,6 +95,19 @@ processes. This initialization compatibility fix is recorded with each episode;
 it does not alter waypoints, requested scenario actors, controls or scoring.
 Set the flag to false to inspect the original map behavior. Missing requested
 scenarios invalidate an attempt and preserve its diagnostics/native record.
+
+The released Town12 map also has a disconnected bicycle lane used by three
+validation routes. Both the original archive's Python 3.7 client and the Python
+3.10 client reproduce this setup failure. `repair_bicycle_flow: false` keeps the
+upstream scenario implementation. Explicitly opting in to `true` connects only
+the missing junction segment using the XML's existing start/end flow locations,
+with a 60 m maximum gap and a 20-degree heading bound. It also gives each bicycle
+an actor-local copy of the path, preserving the scenario's declared continuous
+flow. Each episode records the flag and any repaired connection geometry.
+This changes scenario path construction and must be disclosed as a compatibility
+configuration; its results are not an exact reproduction of the unmodified
+upstream environment. The full-split acceptance decision for this configuration
+is pending. Training weights, ego routes, flow speed and scoring are unchanged.
 
 `evaluate.py` preserves native per-route records in `episodes.jsonl`, writes
 source/model/config hashes to `run.json`, and writes aggregate results only

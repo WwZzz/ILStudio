@@ -1,0 +1,51 @@
+{
+  "source_route_id": "35418",
+  "initialization": {
+    "remove_map_parked_vehicles": true,
+    "disabled_stock_parked_objects": 0,
+    "parking_catalog_reset": true,
+    "requested_scenarios": [
+      "CrossingBicycleFlow_1"
+    ],
+    "initialized_scenarios": [],
+    "scenario_actor_counts": {},
+    "background_parked_objects": 0
+  },
+  "errors": [
+    "\u001b[93mSkipping scenario 'CrossingBicycleFlow_1' due to setup error: Couldn't find a proper plan for the bicycle flow"
+  ],
+  "native_record": {
+    "index": 5,
+    "route_id": "RouteScenario_35418_rep0",
+    "scenario_name": "CrossingBicycleFlow_1",
+    "weather_id": null,
+    "save_name": "RouteScenario_35418_rep0_Town12_CrossingBicycleFlow_1_None_10_16_04_52_27",
+    "status": "Failed - Simulation crashed",
+    "num_infractions": 0,
+    "infractions": {
+      "collisions_layout": [],
+      "collisions_pedestrian": [],
+      "collisions_vehicle": [],
+      "red_light": [],
+      "stop_infraction": [],
+      "outside_route_lanes": [],
+      "min_speed_infractions": [],
+      "yield_emergency_vehicle_infractions": [],
+      "scenario_timeouts": [],
+      "route_dev": [],
+      "vehicle_blocked": [],
+      "route_timeout": []
+    },
+    "scores": {
+      "score_route": 0.0,
+      "score_penalty": 1.0,
+      "score_composed": 0.0
+    },
+    "meta": {
+      "route_length": 0,
+      "duration_game": 0.0,
+      "duration_system": 0.0
+    },
+    "town_name": "Town12"
+  }
+}

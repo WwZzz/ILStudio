@@ -272,3 +272,36 @@ def test_scenario_builder_rejects_swallowed_initialization_failures():
     trace = {}
     assert audited_builder(successful, trace)(scene, None) == 'original result'
     assert trace['initialized'] == {'ParkingExit_1'} and trace['actors']['ParkingExit_1'] == 3
+
+
+def test_continuous_bicycle_flow_keeps_master_plan_for_each_actor():
+    from vlastudio.benchmark.carla.bicycle import nonmutating_spawn
+    flow = SimpleNamespace(_plan=[1, 2, 3, 4])
+    master = flow._plan
+    def spawn(value):
+        value._plan.pop(0)
+        return value._plan
+    first = nonmutating_spawn(spawn)(flow)
+    first.pop(0)
+    second = nonmutating_spawn(spawn)(flow)
+    assert flow._plan is master and master == [1, 2, 3, 4] and second == [2, 3, 4]
+    def failed(value):
+        value._plan.clear()
+        raise RuntimeError('actor setup failed')
+    with pytest.raises(RuntimeError):
+        nonmutating_spawn(failed)(flow)
+    assert flow._plan is master and master == [1, 2, 3, 4]
+
+
+def test_bicycle_repair_does_not_mask_unrelated_or_unconfigured_errors():
+    from vlastudio.benchmark.carla.bicycle import repair_initializer
+    def unrelated(scenario, config): raise ValueError('unrelated setup error')
+    with pytest.raises(ValueError, match='unrelated setup error'):
+        repair_initializer(unrelated, {})(None, None)
+    def disconnected(scenario, config): raise ValueError("Couldn't find a proper plan for the bicycle flow")
+    with pytest.raises(ValueError, match='explicit end_actor_flow'):
+        repair_initializer(disconnected, {})(None, SimpleNamespace(other_parameters={}))
+    original = lambda scenario, config: 'unchanged result'
+    reports = {}
+    assert repair_initializer(original, reports)(None, None) == 'unchanged result'
+    assert reports == {}

@@ -1,0 +1,37 @@
+{
+  "route_id": "35418",
+  "scenario_initialized": true,
+  "compatibility_repairs": {
+    "CrossingBicycleFlow_1": {
+      "gap_meters": 27.121036529541016,
+      "interpolated_waypoints": 13,
+      "start": [
+        863.6945190429688,
+        3929.91455078125,
+        370.4180908203125
+      ],
+      "end": [
+        890.4846801757812,
+        3934.13330078125,
+        370.21795654296875
+      ]
+    }
+  },
+  "physics_steps": 300,
+  "game_seconds": 15.0,
+  "master_plan_waypoints": 39,
+  "master_plan_preserved": true,
+  "unique_bicycle_actors": 6,
+  "moving_bicycle_actors": 5,
+  "maximum_displacement_meters": 65.20494079589844,
+  "maximum_step_displacement_meters": 0.5516976118087769,
+  "maximum_speed_mps": 11.052892684936523,
+  "per_actor_displacement_meters": {
+    "3696": 37.2247200012207,
+    "3697": 15.218069076538086,
+    "3698": 65.20494079589844,
+    "3699": 57.0877799987793,
+    "3700": 26.629533767700195,
+    "3701": 2.628763198852539
+  }
+}

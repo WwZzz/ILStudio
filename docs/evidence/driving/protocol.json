@@ -1,5 +1,5 @@
 {
-  "status": "pending_full_validation",
+  "status": "pending_bicycle_compatibility_protocol_decision",
   "implementation_commit": "0bcf4c7",
   "training": {
     "planner_type": "merge_ctrl_traj",
@@ -14,9 +14,12 @@
   "evaluation": {
     "benchmark": "Bench2Drive 0.0.4 val",
     "routes": 220,
+    "execution_processes": 3,
+    "physical_gpus": 1,
     "traffic_manager_seed": 0,
     "planner_type": "merge_ctrl_traj",
     "remove_map_parked_vehicles": true,
+    "repair_bicycle_flow": false,
     "minimum_success_rate": 0.2,
     "minimum_driving_score": 40
   }

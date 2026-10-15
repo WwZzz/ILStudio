@@ -4,6 +4,7 @@ task: bench2drive
 ctrl_space: vehicle
 ctrl_type: control
 action_order: [steer, throttle, brake, reverse]
+repair_bicycle_flow: false  # Explicit opt-in changes scenario path construction.
 remove_map_parked_vehicles: true  # Bench2Drive respawns parking from its own catalog.
 max_timesteps: 200010  # Allow the official 10000-second scenario timeout at 20 Hz.
 reuse_env: true
