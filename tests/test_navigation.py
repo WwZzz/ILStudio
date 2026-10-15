@@ -128,6 +128,7 @@ def test_mlp_checkpoint_and_batched_discrete_actions(tmp_path):
     assert len(action) == 2
     assert all(0 <= discrete_action(a, 4) < 4 for a in action)
     assert loaded.select_action({'state': torch.from_numpy(obs.state)}).shape == (2, 1, 1)
+    assert 0 <= loaded.predict(MetaObs(state=obs.state[0])) < 4
 
 
 @pytest.mark.parametrize('timestamp', [0, [0, 1], np.array([0, 1])])

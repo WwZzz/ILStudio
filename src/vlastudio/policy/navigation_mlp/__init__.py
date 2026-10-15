@@ -14,7 +14,7 @@ def load_model(args):
 def features(state):
     state = np.asarray(state, dtype=np.float32)
     distance, bearing = state[..., 0], state[..., 1]
-    return np.stack([np.minimum(distance, 10.) / 10., np.sin(bearing), np.cos(bearing)], axis=-1)
+    return np.stack([np.minimum(distance, 10.) / 10., np.sin(bearing), np.cos(bearing)], axis=-1).astype(np.float32)
 
 
 class NavigationMLP(nn.Module):
