@@ -3,6 +3,7 @@ from importlib import import_module
 
 
 _EXPORTS = {
+    "Bench2DriveDataset": (".bench2drive", "Bench2DriveDataset"),
     "R2RDataset": (".navigation", "R2RDataset"),
     "VLNCEDataset": (".navigation", "VLNCEDataset"),
     "HDF5SequenceDataset": (".hdf5_sequence", "HDF5SequenceDataset"),

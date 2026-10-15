@@ -15,12 +15,12 @@ POLICY_PROFILES = {
     'act': 'base', 'mlp': 'base', 'diffusion_policy': 'diffusion_policy',
     'remote': 'remote', 'smolvla': 'smolvla', 'openpi': 'openpi',
     'openvla': 'openvla', 'fastwam': 'fastwam',
-    'vlnce_cma': 'vlnce_cma', 'recurrent_vlnbert': 'base',
+    'vlnce_cma': 'vlnce_cma', 'recurrent_vlnbert': 'base', 'tcp_b2d': 'base',
 }
 ENV_PROFILES = {'aloha': 'aloha', 'libero': 'libero', 'metaworld': 'metaworld',
                 'tabletop_sim': 'tabletop_sim', 'rlbench': 'rlbench',
                 'robotwin': 'robotwin', 'behavior1k': 'behavior1k',
-                'habitat': 'habitat', 'matterport3d': 'matterport3d'}
+                'habitat': 'habitat', 'matterport3d': 'matterport3d', 'carla': 'carla'}
 FIELDS = {'extends', 'python', 'requires_python', 'requirements', 'lockfile', 'lock', 'entrypoint',
           'overrides', 'overlays', 'platforms', 'min_glibc', 'description', 'notes',
           'installers', 'checks'}

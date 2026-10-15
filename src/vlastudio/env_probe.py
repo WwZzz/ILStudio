@@ -18,11 +18,43 @@ IMPORTS = {
     'rlbench': ['pyrep', 'rlbench', 'vlastudio.benchmark.rlbench'],
     'behavior1k': ['omnigibson'],
     'robotwin': ['sapien', 'mplib', 'pytorch3d.ops', 'curobo.wrap.reacher.motion_gen', 'vlastudio.benchmark.robotwin'],
+    'carla': ['carla', 'cv2', 'py_trees', 'vlastudio.benchmark.carla'],
 }
 
 
 def smoke(name):
-    if name == 'aloha':
+    if name == 'carla':
+        from vlastudio.benchmark.carla.server import CarlaServer
+        from queue import Queue
+        import carla
+        import numpy as np
+        with CarlaServer() as server:
+            world = server.connect().get_world()
+            settings = world.get_settings()
+            settings.synchronous_mode, settings.fixed_delta_seconds = True, .05
+            world.apply_settings(settings)
+            vehicle = camera = None
+            try:
+                library = world.get_blueprint_library()
+                vehicle = world.spawn_actor(library.find('vehicle.lincoln.mkz_2020'), world.get_map().get_spawn_points()[0])
+                blueprint = library.find('sensor.camera.rgb')
+                blueprint.set_attribute('image_size_x', '160')
+                blueprint.set_attribute('image_size_y', '90')
+                camera = world.spawn_actor(blueprint, carla.Transform(carla.Location(x=1.5, z=2.)), attach_to=vehicle)
+                frames = Queue()
+                camera.listen(frames.put)
+                vehicle.apply_control(carla.VehicleControl(throttle=.3))
+                for _ in range(20):
+                    world.tick()
+                    image = np.frombuffer(frames.get(timeout=10).raw_data, dtype=np.uint8).reshape(90, 160, 4)
+                assert image[:, :, :3].std() > 1, 'CARLA camera did not render a scene'
+            finally:
+                if camera is not None:
+                    camera.stop()
+                    camera.destroy()
+                if vehicle is not None:
+                    vehicle.destroy()
+    elif name == 'aloha':
         from vlastudio.benchmark.aloha.sim_env import make_sim_env, BOX_POSE
         from vlastudio.benchmark.aloha.utils import sample_box_pose
         BOX_POSE[0] = sample_box_pose()
@@ -140,7 +172,7 @@ def main():
     if '--smoke' in sys.argv:
         executed = False
         # Each simulator has its own process in normal use; do not mix their graphics contexts.
-        simulation = [name for name in checks if name in ('aloha', 'libero', 'metaworld', 'rlbench', 'behavior1k', 'robotwin')]
+        simulation = [name for name in checks if name in ('aloha', 'libero', 'metaworld', 'rlbench', 'behavior1k', 'robotwin', 'carla')]
         import subprocess
         for name in simulation:
             # First Isaac startup can take several minutes to initialize rendering.

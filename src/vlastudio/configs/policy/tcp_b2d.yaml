@@ -1,0 +1,12 @@
+type: vlastudio.policy.tcp_b2d
+name: tcp_b2d
+trainer_class: Trainer
+args:
+  device: cuda
+  pretrained_weight_path: official
+  planner_type: only_traj
+  freeze_batch_norm: true
+  download: true
+  chunk_size: 1
+  action_normalize: identity
+  state_normalize: identity
