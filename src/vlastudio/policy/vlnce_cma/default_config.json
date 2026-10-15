@@ -1,0 +1,37 @@
+{
+  "INSTRUCTION_ENCODER": {
+    "vocab_size": 2504,
+    "embedding_size": 50,
+    "hidden_size": 128,
+    "rnn_type": "LSTM",
+    "bidirectional": true,
+    "final_state_only": false,
+    "sensor_uuid": "instruction",
+    "use_pretrained_embeddings": false,
+    "fine_tune_embeddings": false
+  },
+  "DEPTH_ENCODER": {
+    "cnn_type": "VlnResnetDepthEncoder",
+    "output_size": 128,
+    "backbone": "resnet50",
+    "ddppo_checkpoint": "NONE",
+    "trainable": false
+  },
+  "RGB_ENCODER": {
+    "cnn_type": "TorchVisionResNet50",
+    "output_size": 256,
+    "trainable": false
+  },
+  "STATE_ENCODER": {
+    "hidden_size": 512,
+    "rnn_type": "GRU"
+  },
+  "PROGRESS_MONITOR": {
+    "use": true,
+    "alpha": 1.0
+  },
+  "normalize_rgb": false,
+  "ablate_instruction": false,
+  "ablate_rgb": false,
+  "ablate_depth": false
+}

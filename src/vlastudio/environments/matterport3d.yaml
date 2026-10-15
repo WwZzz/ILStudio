@@ -3,6 +3,6 @@ platforms: [linux]
 description: MatterSim R2R; requires a source-built native renderer and authorized scans.
 notes:
 - Build Matterport3DSimulator and expose its build directory on PYTHONPATH.
-- Ubuntu 22.04 has an explicit isolated installer at examples/09_navigation/mattersim/install.py.
+- Ubuntu 22.04 has an explicit isolated installer at python -m vlastudio.benchmark.matterport3d.install.
 - Install dependencies into the same interpreter and use runtime=current.
 - See docs/navigation.md. Native renderer and scan assets are external prerequisites.

@@ -53,6 +53,12 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
     viewpoint action_id. Goal/teacher/path are never exposed to policy.
     """
     def __init__(self, config):
+        if getattr(config, 'auto_download', False) and not Path(config.episodes).is_file():
+            import copy
+            from vlastudio.utils.navigation_assets import r2r_annotations
+            config = copy.copy(config)
+            split = Path(config.episodes).stem.removeprefix('R2R_')
+            config.episodes = str(r2r_annotations(split))
         self.navigation_options = navigation_options(config, supports_candidates=True)
         import MatterSim
         self.config = config

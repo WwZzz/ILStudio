@@ -1,5 +1,4 @@
 """Convert the authors' Places365 TSV to an indexed, read-only panorama array."""
-import argparse
 import base64
 import csv
 import hashlib
@@ -11,12 +10,9 @@ import zipfile
 import numpy as np
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--archive', required=True)
-    p.add_argument('--sha256', required=True)
-    p.add_argument('--output', required=True)
-    a = p.parse_args()
+def convert_features(archive, output, expected_sha256):
+    from types import SimpleNamespace
+    a = SimpleNamespace(archive=str(archive), output=str(output), sha256=expected_sha256)
     path = Path(a.archive)
     with path.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest() if hasattr(hashlib, 'file_digest') else None
@@ -62,7 +58,3 @@ def main():
         'shape': [count, 36, 2048], 'dtype': 'float32', 'source': 'Official Recurrent-VLN-BERT Places365 ResNet-152 features'}, indent=2)+'\n')
     (out/'index.json').write_text(json.dumps(index)+'\n')
     print('Complete feature store', count, flush=True)
-
-
-if __name__ == '__main__':
-    main()

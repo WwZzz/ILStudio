@@ -4,6 +4,8 @@ The recurrent state is owned by the policy. Goal sensors, reference paths and
 expert actions are never policy inputs. See vendor/PROVENANCE.json.
 """
 from pathlib import Path
+import copy
+import json
 
 import numpy as np
 import torch
@@ -23,6 +25,7 @@ class CategoricalHead(nn.Module):
 class CMAPolicy(nn.Module):
     def __init__(self, model_config):
         super().__init__()
+        self.model_config = copy.deepcopy(model_config)
         observation_space = spaces.Dict({
             'rgb': spaces.Box(0, 255, shape=(224, 224, 3), dtype=np.uint8),
             'depth': spaces.Box(0., 1., shape=(256, 256, 1), dtype=np.float32),
@@ -41,9 +44,27 @@ class CMAPolicy(nn.Module):
         return torch.zeros(batch_size, self.net.num_recurrent_layers,
                            self.net.output_size, device=next(self.parameters()).device)
 
-    def forward(self, observations, hidden, previous_actions, masks):
+    def forward(self, observations=None, hidden=None, previous_actions=None, masks=None, episodes=None, return_loss=True):
+        if episodes is not None:
+            from vlastudio.policy.navigation_training import cma_loss
+            return cma_loss(self, episodes)
         features, hidden = self.net(observations, hidden, previous_actions, masks)
         return self.action_distribution.linear(features), hidden
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.net.rgb_encoder.cnn.eval()
+        self.net.depth_encoder.visual_encoder.eval()
+        return self
+
+    def save_pretrained(self, path, state_dict=None):
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        torch.save({'state_dict': state_dict if state_dict is not None else self.state_dict(),
+                    'model_config': self.model_config}, path/'policy.pt')
+        (path/'config.json').write_text(json.dumps({'ctrl_space': 'navigation', 'ctrl_type': 'discrete',
+                                                  'chunk_size': 1, 'state_dim': 2, 'action_dim': 1}))
+        (path/'policy_metadata.json').write_text(json.dumps({'policy_module': 'policy.vlnce_cma', 'policy_name': 'vlnce_cma'}))
 
     def select_action(self, obs):
         device = next(self.parameters()).device
@@ -71,8 +92,9 @@ class CMAPolicy(nn.Module):
         return self.prev_actions.float().reshape(-1, 1, 1)
 
     @classmethod
-    def from_pretrained(cls, path, device='cpu'):
-        path = Path(path)
+    def from_pretrained(cls, path, device='cpu', download=True):
+        from vlastudio.utils.navigation_assets import resolve_checkpoint
+        path = resolve_checkpoint(path, 'vlnce_cma', download)
         checkpoint = torch.load(path / 'policy.pt' if path.is_dir() else path,
                                 map_location='cpu', weights_only=True)
         model = cls(checkpoint['model_config'])
@@ -81,4 +103,23 @@ class CMAPolicy(nn.Module):
 
 
 def load_model(args):
-    return {'model': CMAPolicy.from_pretrained(args.model_name_or_path, getattr(args, 'device', 'cpu'))}
+    if getattr(args, 'is_training', False):
+        reference = getattr(args, 'pretrained_weight_path', None)
+        if reference:
+            model = CMAPolicy.from_pretrained(reference, download=getattr(args, 'download', True))
+        else:
+            config = json.loads(Path(__file__).with_name('default_config.json').read_text())
+            model = CMAPolicy(config)
+    else:
+        model = CMAPolicy.from_pretrained(args.model_name_or_path, getattr(args, 'device', 'cpu'), getattr(args, 'download', True))
+    return {'model': model}
+
+
+def get_data_collator(args, model_components):
+    if not getattr(args, 'is_training', False):
+        return None
+    from vlastudio.policy.navigation_training import collate_trajectories
+    return collate_trajectories
+
+
+from vlastudio.policy.navigation_training import Trainer

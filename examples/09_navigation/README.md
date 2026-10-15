@@ -13,4 +13,4 @@ Both learned examples continue training from released weights.
 
 [Installation and interfaces](../../docs/navigation.md) ·
 [Data and weights](../../docs/navigation_assets.md) ·
-[Recorded results](../../docs/evidence/navigation/paper/README.md)
+[Recorded results](../../docs/evidence/navigation/standard-interface/README.md)

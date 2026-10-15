@@ -4,41 +4,32 @@ Run from the repository root on Linux with Python 3.10 and an NVIDIA GPU.
 
 ## Setup
 
-Install [Habitat-Sim and Habitat-Lab](../../../docs/navigation.md#install-habitat-sim-on-python-310),
-then prepare the [MP3D data and CMA weights](../../../docs/navigation_assets.md#cma-checkpoint).
-Set dataset paths in [`config/`](config/).
+Install [Habitat-Sim and Habitat-Lab](../../../docs/navigation.md#install-habitat-sim-on-python-310), then:
 
 ```bash
 python -m pip install -e . 'gym==0.23.0' 'yacs==0.1.8'
 ```
 
-## Evaluate released weights
+Set the MP3D scene root in `config/task.yaml` and `config/val_unseen.yaml`.
+Standard annotations and configured pretrained weights download and cache automatically.
 
-```bash
-python examples/09_navigation/habitat/evaluate.py
-```
-
-## Train and evaluate
+## Train
 
 ```bash
 python examples/09_navigation/habitat/train.py
-python examples/09_navigation/habitat/evaluate.py \
-  --model checkpoints/example09/cma-trained/epoch-4 \
-  --output results/example09_cma_trained
 ```
 
-The policy receives RGB, depth and instruction tokens, and outputs STOP,
-FORWARD or LEFT/RIGHT. Training continues from the released weights on 256 routes.
+The script uses `vla.load_dataset`, `vla.load_policy` and `vla.train`.
+For a short run, add `--steps 2`. Change training settings in `config/training.yaml`.
 
-## Results
+## Evaluate
 
-Full `val_unseen`: 1,839 instruction episodes, 11 scenes.
+```bash
+python examples/09_navigation/habitat/evaluate.py
+python examples/09_navigation/habitat/evaluate.py \
+  --model checkpoints/example09/cma --output results/example09_cma_trained
+```
 
-| Checkpoint | SR | SPL |
-|---|---:|---:|
-| Author-corrected reference | 29% | 27% |
-| Released weights via VLAStudio | 30.13% | 27.98% |
-| VLAStudio continuation | **29.85%** | **27.72%** |
-
-For the public-scene PointNav sample, see the [quick start](../../../docs/navigation.md#train-and-accept-a-simple-policy).
-Detailed protocols and checkpoint hashes are in the [acceptance report](../../../docs/evidence/navigation/paper/README.md).
+The first command loads released weights automatically. The second uses the trained checkpoint.
+The policy takes RGB, depth and instruction tokens, and outputs STOP, FORWARD or LEFT/RIGHT.
+[Recorded full-split results and checkpoint provenance](../../../docs/evidence/navigation/standard-interface/README.md).

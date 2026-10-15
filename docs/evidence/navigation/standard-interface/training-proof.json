@@ -1,0 +1,68 @@
+{
+  "vlnce_cma": {
+    "standard_api": "vlastudio.load_dataset + load_policy + train",
+    "global_step": 2,
+    "parameter_delta_l2": 0.0028510239860839166,
+    "model_sha256": "96f8dd3b043b3eebefadafdd382b33cef9812f3ca680207d8e1522c8ce44770c",
+    "strict_reload_equal": true,
+    "checkpoint": "${NAVIGATION_ROOT}/standard-interface/vlnce_cma",
+    "history": [
+      {
+        "epoch": 0.3333333333333333,
+        "grad_norm": 7.1677327156066895,
+        "learning_rate": 1e-06,
+        "loss": 1.016,
+        "step": 1
+      },
+      {
+        "epoch": 0.6666666666666666,
+        "grad_norm": 8.480324745178223,
+        "learning_rate": 1e-06,
+        "loss": 1.1077,
+        "step": 2
+      },
+      {
+        "epoch": 0.6666666666666666,
+        "step": 2,
+        "total_flos": 0.0,
+        "train_loss": 1.06187242269516,
+        "train_runtime": 31.6679,
+        "train_samples_per_second": 0.063,
+        "train_steps_per_second": 0.063
+      }
+    ]
+  },
+  "recurrent_vlnbert": {
+    "standard_api": "vlastudio.load_dataset + load_policy + train",
+    "global_step": 2,
+    "parameter_delta_l2": 0.0016401078237276976,
+    "model_sha256": "953736e8eb6fab39a92c26dd32c63fde36c6f96beedba022dec8f9f038593602",
+    "strict_reload_equal": true,
+    "checkpoint": "${NAVIGATION_ROOT}/standard-interface/recurrent_vlnbert",
+    "history": [
+      {
+        "epoch": 0.3333333333333333,
+        "grad_norm": 10.14449405670166,
+        "learning_rate": 1e-07,
+        "loss": 0.3043,
+        "step": 1
+      },
+      {
+        "epoch": 0.6666666666666666,
+        "grad_norm": 10.249747276306152,
+        "learning_rate": 1e-07,
+        "loss": 0.1719,
+        "step": 2
+      },
+      {
+        "epoch": 0.6666666666666666,
+        "step": 2,
+        "total_flos": 0.0,
+        "train_loss": 0.23811136931180954,
+        "train_runtime": 3.6038,
+        "train_samples_per_second": 0.555,
+        "train_steps_per_second": 0.555
+      }
+    ]
+  }
+}

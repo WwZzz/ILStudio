@@ -1,75 +1,66 @@
-# Navigation assets
+# Navigation data and pretrained weights
 
-Use existing authorized local or mounted data. Scene geometry, panoramas,
-annotations, visual features and model weights are separate assets. This example
-does not download MP3D scenes or accept data terms automatically.
+Example 09 uses the standard VLAStudio dataset and training interfaces:
 
-## Data layout
+```python
+import vlastudio as vla
 
-Set data paths in the selected simulator folder's `config/`. A typical layout is:
-
-```text
-/datasets/
-  scene_datasets/mp3d/<scan>/<scan>.glb    # Habitat geometry and matching navmesh
-  R2R_VLNCE_v1-3_preprocessed/
-    train/train.json.gz
-    train/train_gt.json.gz
-    val_unseen/val_unseen.json.gz
-  R2R/
-    R2R_train.json
-    R2R_val_unseen.json
+dataset = vla.load_dataset("navigation.r2r")  # or navigation.vlnce
+policy = vla.load_policy("recurrent_vlnbert")  # or vlnce_cma
+vla.train(policy, dataset, "path/to/training.yaml", output_dir="checkpoints/navigation")
 ```
 
-For native MatterSim image rendering, provide its preprocessed RGB skyboxes under
-`<scan>/matterport_skybox_images`. The VLN-BERT paper config instead uses cached
-panorama features and sets `rendering_enabled: false`, `depth_enabled: false`.
-Habitat GLBs alone do not supply MatterSim skybox images.
+`load_dataset` creates a configuration handle. When training materializes the
+configured dataset, it downloads missing standard annotations/features and builds
+its replay cache. `load_model` downloads and converts weights only when
+`pretrained_weight_path` is configured. No separate preparation command is needed.
 
-Official download instructions: [VLN-CE](https://github.com/jacobkrantz/VLN-CE/tree/729d141b2ee10628061ada74dd3a5b9f70faeba5),
-[Recurrent VLN-BERT data and weights](https://github.com/YicongHong/Recurrent-VLN-BERT/tree/ad147f464ae81ef0a9eeb29dc0a0cbbcddcb1f3e).
-The recorded QZ run used `internnav:scene-n1`, mounted at
-`/inspire/dataset/internnav/scene-n1`; use this directory for `habitat.dataset.scenes_dir`.
-Availability depends on the instance's dataset mounts.
+## Datasets
 
-## CMA checkpoint
+- `R2RDataset`: original R2R route/instruction records, all instructions per selected
+  route, real MatterSim graph replay and current-viewpoint Places365 features.
+- `VLNCEDataset`: original preprocessed VLN-CE annotations and `train_gt` expert
+  actions, real Habitat RGBD replay, and optional frozen-encoder feature caching.
 
-Place the authors' `cma-pm-da-aug.pth` under `assets/`, then convert it:
+Both implement the standard dataset contract, including `action`, `state`,
+`is_pad`, `raw_lang` and episode IDs. R2R exposes stable simulator action IDs in
+`action`; separate `labels` index the candidate tensor for classification loss.
+Training labels and progress supervision never enter inference observations.
 
-```bash
-python examples/09_navigation/habitat/prepare_weights.py \
-  --source assets/cma-pm-da-aug.pth \
-  --sha256 06278fdbb52ad8c453b404dacb079fb353252056314b1c567a381df77e6827a3 \
-  --output checkpoints/example09/cma-official
-```
+Datasets accept `dataset_dir`, `cache_dir`, `download` and `max_trajectories`.
+R2R also accepts `connectivity_path` and `feature_store`; VLN-CE accepts
+`scenes_dir` and `feature_checkpoint`. The CMA preset caches features with the
+same frozen official encoder as its pretrained policy. Set `feature_checkpoint`
+to null to use raw RGBD instead. Pretrained encoder choice must match the policy.
 
-Conversion verifies the source hash and uses restricted tensor loading, preserving
-the original checkpoint. The converted directory contains the model and framework
-metadata required by evaluation and fine-tuning.
+MP3D geometry uses the existing authorized scene directory or mount; it is not
+bundled or republished. On the recorded QZ instance, the scene root is
+`/inspire/dataset/internnav/scene-n1`, containing `mp3d/<scan>/<scan>.glb` and navmeshes.
+The published VLN-BERT feature protocol does not require rendering skybox images.
 
-## Recurrent VLN-BERT checkpoint and features
+R2R annotations use the [official source](https://github.com/peteanderson80/Matterport3DSimulator/tree/master/tasks/R2R/data).
+If Dropbox is unreachable, the loader uses a
+[pinned public metadata mirror](https://huggingface.co/datasets/thomas-yanxin/r2r-metadata/tree/6fe3b2d84de51c6e788fdc361d4f160728228a79),
+checking both file hashes and exact semantic equality with the original ordered
+records. VLN-CE uses the [authors' preprocessed release](https://github.com/jacobkrantz/VLN-CE).
+Existing standard datasets suffice; this workflow does not require uploading another copy.
 
-Prepare the authors' `ResNet-152-places365.zip`, the PREVALENT checkpoint
-`snap/VLNBERT-PREVALENT-final/state_dict/best_val_unseen` from their official
-`snap.zip`, and the BERT uncased `vocab.txt`. Convert features before the model:
+## Models and caches
 
-```bash
-python examples/09_navigation/mattersim/prepare_features.py \
-  --archive assets/ResNet-152-places365.zip \
-  --sha256 791344c4987de20ff792f80159a7f9e229310f421f59e4494c564b938c5bab8d \
-  --output data/example09_places365
+`pretrained_weight_path` accepts `official`, a local converted checkpoint or a
+Hugging Face model repository. The loader checks published source hashes and uses
+restricted tensor loading for conversion. Null initializes the model without
+fetching pretrained weights; random VLN-BERT initialization requires a local BERT
+`vocabulary` path. Set `download: false` to require local assets.
 
-python examples/09_navigation/mattersim/prepare_weights.py \
-  --source assets/snap/VLNBERT-PREVALENT-final/state_dict/best_val_unseen \
-  --sha256 612fccc817d104ef09de4df70c081ddd692cbb85c219785c7bbfc627507c3ee0 \
-  --vocabulary assets/vocab.txt --feature-store data/example09_places365 \
-  --output checkpoints/example09/vlnbert-official
-```
+`VLASTUDIO_CACHE` controls the shared asset/model cache. The dataset-only
+`cache_dir` passed to `vla.load_dataset` controls downloaded data and replay caches.
+Model checkpoints retain the resolved feature-store path for independent inference.
 
-The indexed feature store contains 10,567 panoramas, each 36×2,048 float32 values.
-The model config records its absolute feature-store path; update `feature_store`
-in the converted model's `config.json` if you move that store. Conversion also
-checks the BERT vocabulary hash and strictly loads all navigator tensors.
+DAgger is optional online expert relabeling at learner-visited states. Standard
+expert demonstrations are available, so Example 09 uses offline supervised
+training without a separate collection step. Optional diagnostics and PointNav
+scripts remain under `scripts/navigation`, outside the example.
 
-Source hashes and runtime details are retained in the
-[recorded acceptance evidence](evidence/navigation/paper/README.md).
-Return to [Example 09](../examples/09_navigation/README.md) to train and evaluate.
+[Example 09](../examples/09_navigation/README.md) ·
+[Standard-interface training and full benchmark evidence](evidence/navigation/standard-interface/README.md)

@@ -1,0 +1,12 @@
+.......................................................s.s.............. [ 71%]
+.............................                                            [100%]
+=============================== warnings summary ===============================
+tests/test_navigation_training.py::test_cma_supervised_loss_backward_and_save_round_trip
+  ${NAVIGATION_ROOT}/env-standard/lib/python3.10/site-packages/torch/utils/checkpoint.py:1399: FutureWarning: `torch.cpu.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cpu', args...)` instead.
+    with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_navigation_candidates.py:184: could not import 'fastapi': No module named 'fastapi'
+SKIPPED [1] tests/test_navigation_candidates.py:212: could not import 'fastapi': No module named 'fastapi'
+99 passed, 2 skipped, 1 warning in 7.82s

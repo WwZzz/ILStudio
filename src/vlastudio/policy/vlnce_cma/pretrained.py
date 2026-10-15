@@ -3,7 +3,6 @@
 Uses PyTorch's restricted weights-only loader, with the legacy Habitat config
 mapped to a known data-only dictionary class. No unrestricted pickle load.
 """
-import argparse
 import copy
 import hashlib
 import json
@@ -31,12 +30,9 @@ def plain(value):
     raise TypeError(f'Unexpected config value: {type(value).__name__}')
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--source', required=True)
-    parser.add_argument('--sha256', required=True)
-    parser.add_argument('--output', required=True)
-    args = parser.parse_args()
+def convert_checkpoint(source, output, expected_sha256):
+    from types import SimpleNamespace
+    args = SimpleNamespace(source=str(source), output=str(output), sha256=expected_sha256)
     source = Path(args.source)
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     if digest != args.sha256:
@@ -71,7 +67,3 @@ def main():
         'ctrl_space': 'navigation', 'ctrl_type': 'discrete'}], 'state': {'r2r_vlnce': 'identity'},
         'action': {'r2r_vlnce': 'identity'}}))
     print(f'Converted {len(checkpoint["state_dict"])} tensors; original checkpoint SHA256={digest}')
-
-
-if __name__ == '__main__':
-    main()

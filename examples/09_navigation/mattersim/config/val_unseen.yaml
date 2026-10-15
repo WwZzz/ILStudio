@@ -22,3 +22,5 @@ success_distance: 3.0
 # The paper scores the final viewpoint, including at the decision budget.
 # explicit_stop_success is reported separately from this R2R success metric.
 success_requires_stop: false
+
+auto_download: true

@@ -18,9 +18,10 @@ class RecurrentVLNBERT(nn.Module):
         super().__init__()
         from transformers import BertTokenizer
         self.tokenizer = BertTokenizer(vocab_file=str(vocabulary), do_lower_case=True)
-        store = Path(feature_store)
-        self.feature_index = json.loads((store/'index.json').read_text())
-        self.features = np.load(store/'features.npy', mmap_mode='r')
+        self.vocabulary = Path(vocabulary)
+        self.feature_store = Path(feature_store) if feature_store else None
+        self.download = True
+        self.features = self.feature_index = None
         self.navigator = VLNBERT(feature_size=2176)
         self.reset()
 
@@ -42,6 +43,11 @@ class RecurrentVLNBERT(nn.Module):
         return hidden, language, mask
 
     def candidate_inputs(self, navigation, states):
+        if self.features is None:
+            from vlastudio.utils.navigation_assets import panorama_features
+            store = panorama_features(self.feature_store, self.download)
+            self.feature_index = json.loads((store/'index.json').read_text())
+            self.features = np.load(store/'features.npy', mmap_mode='r')
         device = next(self.parameters()).device
         lengths = [len(row['candidates'])+1 for row in navigation]
         features = np.zeros((len(navigation), max(lengths), 2176), dtype=np.float32)
@@ -88,15 +94,66 @@ class RecurrentVLNBERT(nn.Module):
                             device=device, dtype=torch.float32).reshape(-1, 1, 1)
 
     @classmethod
-    def from_pretrained(cls, path, device='cpu', feature_store=None):
-        path = Path(path)
+    def from_pretrained(cls, path, device='cpu', feature_store=None, download=True):
+        from vlastudio.utils.navigation_assets import resolve_checkpoint
+        path = resolve_checkpoint(path, 'recurrent_vlnbert', download)
         config = json.loads((path/'config.json').read_text())
-        model = cls(feature_store or config['feature_store'], path/'vocab.txt')
+        model = cls(feature_store or config.get('feature_store'), path/'vocab.txt')
+        model.download = download
         checkpoint = torch.load(path/'policy.pt', map_location='cpu', weights_only=True)
         model.navigator.load_state_dict(checkpoint['state_dict'], strict=True)
         return model.to(device).eval()
 
+    def forward(self, episodes, return_loss=True):
+        from vlastudio.policy.navigation_training import vlnbert_loss
+        return vlnbert_loss(self, episodes)
+
+    def save_pretrained(self, path, state_dict=None):
+        import shutil
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        state = {k.removeprefix('navigator.'): v for k, v in state_dict.items()} if state_dict is not None else self.navigator.state_dict()
+        torch.save({'state_dict': state}, path/'policy.pt')
+        (path/'config.json').write_text(json.dumps({'ctrl_space': 'navigation', 'ctrl_type': 'candidate_viewpoint',
+            'chunk_size': 1, 'state_dim': 3, 'action_dim': 1,
+            'feature_store': str(self.feature_store.resolve()) if self.feature_store else None}))
+        (path/'policy_metadata.json').write_text(json.dumps({'policy_module': 'policy.recurrent_vlnbert', 'policy_name': 'recurrent_vlnbert'}))
+        if self.vocabulary.resolve() != (path/'vocab.txt').resolve():
+            shutil.copyfile(self.vocabulary, path/'vocab.txt')
+
 
 def load_model(args):
+    if getattr(args, 'is_training', False):
+        reference = getattr(args, 'pretrained_weight_path', None)
+        if reference:
+            model = RecurrentVLNBERT.from_pretrained(reference, feature_store=getattr(args, 'feature_store', None), download=getattr(args, 'download', True))
+        else:
+            vocabulary = getattr(args, 'vocabulary', None)
+            if not vocabulary or not Path(vocabulary).is_file():
+                raise ValueError('Training without pretrained weights requires a local vocabulary path')
+            model = RecurrentVLNBERT(getattr(args, 'feature_store', None), vocabulary)
+            model.download = getattr(args, 'download', True)
+        if not getattr(args, 'feature_store', None):
+            from vlastudio.utils.navigation_assets import dataset_root
+            model.feature_store = dataset_root()/'places365'
+            if getattr(args, 'task', None):
+                from vlastudio.configs.loader import ConfigLoader
+                task, _ = ConfigLoader(args=args, unknown_args=getattr(args, 'unknown_args', [])).load_task(args.task)
+                for dataset in task.get('datasets', []):
+                    store = dataset.get('args', {}).get('feature_store')
+                    if store:
+                        model.feature_store = Path(store).expanduser()
+                        break
+        return {'model': model}
     return {'model': RecurrentVLNBERT.from_pretrained(args.model_name_or_path,
-        getattr(args, 'device', 'cpu'), getattr(args, 'feature_store', None))}
+        getattr(args, 'device', 'cpu'), getattr(args, 'feature_store', None), getattr(args, 'download', True))}
+
+
+def get_data_collator(args, model_components):
+    if not getattr(args, 'is_training', False):
+        return None
+    from vlastudio.policy.navigation_training import collate_trajectories
+    return collate_trajectories
+
+
+from vlastudio.policy.navigation_training import Trainer

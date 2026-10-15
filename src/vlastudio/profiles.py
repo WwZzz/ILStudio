@@ -197,7 +197,7 @@ def merge_component_runtimes(profile, config, path):
 
 
 def dataset_environment(config, path, *, check_platform=True, python=None):
-    """Shared loaders need no simulator, even for LIBERO/RLBench recordings."""
+    """Resolve dataset dependencies; navigation replay also needs its native backend."""
     profile = environment_for({}, path, str(recipe('data')), check_platform=check_platform)
     fixed_python = python is not None
     if python:
@@ -219,6 +219,11 @@ def dataset_environment(config, path, *, check_platform=True, python=None):
                 profile = combine_profiles(profile, environment_for({}, path, str(recipe('rlds')), check_platform=check_platform))
             elif module.endswith('.WrappedLerobotDataset') or module.startswith('data_utils.datasets.libero_lerobot'):
                 profile = combine_profiles(profile, {'python': profile['python'], 'requirements': ['lerobot==0.3.3']})
+            elif module.endswith('.R2RDataset'):
+                profile = combine_profiles(profile, environment_for({}, path, str(recipe('matterport3d')), check_platform=check_platform))
+            elif module.endswith('.VLNCEDataset'):
+                for family in ['habitat', 'vlnce_cma']:
+                    profile = combine_profiles(profile, environment_for({}, path, str(recipe(family)), check_platform=check_platform))
             for key, child in value.items():
                 if key != 'runtime':
                     visit(child)

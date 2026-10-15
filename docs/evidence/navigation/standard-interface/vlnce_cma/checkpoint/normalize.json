@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "datasets": [
+    {
+      "dataset_id": "r2r_vlnce",
+      "ctrl_space": "navigation",
+      "ctrl_type": "discrete"
+    }
+  ],
+  "state": {
+    "r2r_vlnce": "identity"
+  },
+  "action": {
+    "r2r_vlnce": "identity"
+  }
+}

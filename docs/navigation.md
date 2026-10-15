@@ -1,7 +1,7 @@
 # Navigation simulators
 
 Start with [Example 09 — Navigation](../examples/09_navigation/README.md) for
-setup, PointNav training, and full CMA / VLN-BERT workflows.
+setup and standard CMA / VLN-BERT dataset, training and evaluation workflows.
 This guide covers simulator installation and interface details.
 
 Navigation adapters share VLAStudio's `MetaObs` / `MetaAction`, config resolution,
@@ -10,7 +10,7 @@ are optional: importing VLAStudio does not import or install them.
 
 | Config name | Backend | Task | Runtime status |
 | --- | --- | --- | --- |
-| `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Real training and evaluation in Example 09 |
+| `habitat.habitat_pointnav` | Habitat-Sim 0.3.3 | Continuous GPS/compass PointNav | Optional PointNav tools under scripts/navigation |
 | `habitat.habitat_vlnce` | Habitat-Lab 0.3.3 | Continuous R2R with RGBD and language | Real MP3D / original VLN-CE episodes and framework replay verified |
 | `habitat.habitat_vlnce_cma` | Habitat-Lab 0.3.3 | Continuous R2R, CMA paper sensors/actions | Full 1,839-episode learned-model validation completed |
 | `matterport3d.matterport_r2r` | Matterport3DSimulator | Classic discrete-viewpoint R2R | Real MP3D RGB renderer, primitive actions and framework replay verified |
@@ -22,7 +22,7 @@ It is a modern task port, not a reproduction of the original VLN-CE 0.1.7
 leaderboard. PointNav acceptance does not establish instruction following or
 generalization to unseen scenes. The initial real-asset checks below cover one MP3D scan
 and integration behavior; they are not full-benchmark language-policy results.
-`habitat/verify.py --lab` checks the native
+`scripts/navigation/verify.py --lab` checks the native
 PointNav renderer and Habitat-Lab R2R API with a clearly marked synthetic episode
 on a public test scene; that fixture is not a benchmark score.
 
@@ -47,7 +47,7 @@ python -m habitat_sim.utils.datasets_download --uids habitat_test_scenes --data-
 If Git LFS is unavailable, download the selected official test scene directly:
 
 ```bash
-python examples/09_navigation/habitat/download_test_scene.py
+python scripts/navigation/download_test_scene.py
 ```
 
 The build needs EGL/OpenGL and JPEG development headers, plus working NVIDIA EGL
@@ -63,14 +63,14 @@ export LIBRARY_PATH="$PWD/.native-navigation/lib"
 ```
 
 Run those commands before the source build and keep the prefix available.
-Use `--no-render` in Example 09 for a navmesh-only run when no EGL renderer is
+Use `--no-render` in `scripts/navigation/pointnav.py` for a navmesh-only run when no EGL renderer is
 available; this remains real Habitat collision/navigation simulation, but does
 not verify image rendering. Renderer status is saved in the result configuration.
 
 ## Train and accept a simple policy
 
 ```bash
-python examples/09_navigation/habitat/pointnav.py \
+python scripts/navigation/pointnav.py \
   --scene data/scene_datasets/habitat-test-scenes/skokloster-castle.glb \
   --output results/navigation
 ```
@@ -133,10 +133,10 @@ For a small reproducible check, unpack only the first two scenes from the mounte
 minival archive (59,974,964 bytes, including their navigation meshes):
 
 ```bash
-python examples/09_navigation/habitat/prepare_mounted_hm3d.py \
+python scripts/navigation/prepare_mounted_hm3d.py \
   --archive /inspire/dataset/hm3d/v1/hm3d-minival-habitat-v0.2.tar \
   --output data/hm3d-smoke
-python examples/09_navigation/habitat/pointnav.py \
+python scripts/navigation/pointnav.py \
   --scene data/hm3d-smoke/00800-TEEsavR23oF/TEEsavR23oF.basis.glb \
   --output results/navigation-hm3d
 ```
@@ -350,7 +350,7 @@ package installation. The active environment must already contain VLAStudio,
 NumPy, requests, torch and CMake 3.x, with a host C++ compiler and NVIDIA EGL.
 
 ```bash
-python examples/09_navigation/mattersim/install.py --prefix "$PWD/.mattersim"
+python -m vlastudio.benchmark.matterport3d.install --prefix "$PWD/.mattersim"
 source "$PWD/.mattersim/activate.sh"
 ```
 
@@ -368,7 +368,7 @@ With a fully resolved environment YAML (absolute episode/scene/connectivity
 paths and matching RGB/depth options), verify a small real-asset subset:
 
 ```bash
-python examples/09_navigation/tools/verify_vln.py --config /path/to/env.yaml \
+python scripts/navigation/verify_vln.py --config /path/to/env.yaml \
   --episodes 6 --output results/vln-check
 python -m vlastudio.entrypoints.eval_sim -m results/vln-check \
   -e /path/to/env.yaml --device cpu -bs 0 -n 6 -o results/vln-framework \

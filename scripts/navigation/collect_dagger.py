@@ -17,7 +17,7 @@ import yaml
 
 from vlastudio.benchmark.habitat import HabitatLabEnv
 from vlastudio.policy.vlnce_cma import CMAPolicy
-from train import sha
+from vlastudio.utils.navigation_assets import sha256 as sha
 
 
 def main():

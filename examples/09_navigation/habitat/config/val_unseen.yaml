@@ -31,3 +31,5 @@ candidate_source: none
 actions: [stop, move_forward, turn_left, turn_right]
 return_instruction_tokens: true
 max_timesteps: 500
+
+auto_download: true

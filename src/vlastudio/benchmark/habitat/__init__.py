@@ -162,6 +162,15 @@ class HabitatLabEnv(MetaEnv):
         kwargs = {'config_paths': config.habitat_config} if getattr(config, 'legacy_config', False) else {
             'config_path': config.habitat_config}
         overrides = list(getattr(config, 'habitat_overrides', []) or [])
+        if getattr(config, 'auto_download', False) and not getattr(config, 'legacy_config', False):
+            values = dict(x.split('=', 1) for x in overrides if '=' in x)
+            data_path = values.get('habitat.dataset.data_path', '')
+            if not data_path or not Path(data_path).is_file():
+                from vlastudio.utils.navigation_assets import vlnce_annotations
+                split = values.get('habitat.dataset.split', 'val_unseen')
+                annotation = vlnce_annotations(split)
+                overrides = [x for x in overrides if not x.startswith('habitat.dataset.data_path=')]
+                overrides.append(f'habitat.dataset.data_path={annotation.resolve()}')
         if getattr(config, 'max_timesteps', None) is not None:
             key = 'ENVIRONMENT.MAX_EPISODE_STEPS' if getattr(config, 'legacy_config', False) else 'habitat.environment.max_episode_steps'
             overrides += [key, str(int(config.max_timesteps))] if getattr(config, 'legacy_config', False) else [f'{key}={int(config.max_timesteps)}']

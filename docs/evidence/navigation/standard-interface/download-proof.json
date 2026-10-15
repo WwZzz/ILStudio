@@ -1,0 +1,12 @@
+{
+  "r2r_train_records": 4675,
+  "canonical_sha256": "d548fc336babe3703737f22a3fceb71ec018d93ad40e5057b3331d9be53cc81d",
+  "downloaded_sha256": "795d37a5359ab3b3a43cf422f60a3abb0de7810e1f6b0ca025b82cb0b791e351",
+  "offline_reuse": true,
+  "source": {
+    "mirror": "https://huggingface.co/datasets/thomas-yanxin/r2r-metadata/resolve/6fe3b2d84de51c6e788fdc361d4f160728228a79/train.jsonl",
+    "mirror_sha256": "e433d1ff5f139bc3ac10af6a2796c7e97d7973d1c6bccda3a79a609d2b83ee75",
+    "official_sha256": "30af70d96ea217778ba0d1b3085a774a13f36266fef39a13dbe8b03516fbf988",
+    "canonical_sha256": "d548fc336babe3703737f22a3fceb71ec018d93ad40e5057b3331d9be53cc81d"
+  }
+}
