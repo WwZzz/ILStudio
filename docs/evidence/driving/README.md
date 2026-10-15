@@ -49,8 +49,11 @@ The opt-in bicycle repair initializes all four bicycle-route configurations:
 one native path stays unchanged, and three receive the same bounded 27.12 m
 junction connection. An isolated native witness recorded 300 physics steps,
 6 generated bicycles, 5 with valid motion over 3 m, maximum speed 11.05 m/s,
-and maximum per-frame displacement 0.552 m. A single-route learned-policy
-compatibility diagnostic is separate from formal acceptance. Using patched
+and maximum per-frame displacement 0.552 m. The trained-policy compatibility
+diagnostic completed 3,999 actions over 200.05 simulated seconds with the requested
+scenario initialized. It failed at the official tick cap (DS/route completion
+17.47, SR 0/1); this verifies an operating closed loop, not policy acceptance.
+It is separate from formal acceptance. Using patched
 scenario construction for formal acceptance requires an explicit protocol choice.
 
 The canonical release XML has 220 routes and 42 distinct scenario types with
@@ -63,6 +66,9 @@ each; the integration uses the actual released route IDs without resampling.
 [Route-file audit](validation-release-audit.json) ·
 [Offline repair coverage](interface/bicycle-offline-repair.json) ·
 [Native repair witness](interface/bicycle-native-repair.json)
+
+[Single-route diagnostic metrics](interface/bicycle-policy-check.json) ·
+[Complete diagnostic episode](interface/bicycle-policy-episode.json)
 
 The single-route check retains 20 low-speed records. The official SR calculation
 excludes `min_speed_infractions`, and their DS penalty is disabled upstream;

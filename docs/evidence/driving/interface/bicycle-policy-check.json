@@ -1,0 +1,17 @@
+{
+  "model_sha256": "a39f05ffe006319dc18b155912075805c308eca8f88fcc2db9ec3cdb399ef1b6",
+  "config_sha256": "1dde2efe01bb3a1f0dc931f7c67a722b756154bbfd4b34709c0ef26650cbf5d8",
+  "planner_type": "merge_ctrl_traj",
+  "adapter_sha256": "452327a932fe7297c93e624c6374005b168d616c3cb096a7ef9e29dfadf87c7e",
+  "model_config_sha256": "245456bbf93a54e088df14f72cd5105b7dc675b4b6d1e7c13f1ab99dbc825055",
+  "benchmark_revision": "7ec25d1c9f7522d923ce5f3420986cef1cb2d956",
+  "model_code_revision": "8a08b07883f10b7d83f6bf5dd475bda91a91c50a",
+  "training_data_revision": "d84ae18cf20a88b9220df1bc15c073d8824b7ac1",
+  "routes_sha256": "885debbc3d87f14351b521d8da0dc9d25fcee1f0d926ed1c92cc9ff62504ca45",
+  "routes": 1,
+  "complete_official_val_split": false,
+  "success_rate": 0.0,
+  "driving_score": 17.47,
+  "route_completion": 17.47,
+  "elapsed_seconds": 770.1678643729538
+}
