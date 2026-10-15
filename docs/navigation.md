@@ -35,6 +35,12 @@ cd ../..
 python -m habitat_sim.utils.datasets_download --uids habitat_test_scenes --data-path data
 ```
 
+If Git LFS is unavailable, download the selected official test scene directly:
+
+```bash
+python examples/09_navigation/download_test_scene.py
+```
+
 The build needs EGL/OpenGL and JPEG development headers, plus working NVIDIA EGL
 drivers when RGBD rendering is enabled. If headers are unavailable on a shared
 host, install them in a task-owned prefix, without changing system packages:

@@ -18,6 +18,7 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
     """0 STOP, 1 FORWARD, 2 LEFT, 3 RIGHT. State = distance, bearing."""
     def __init__(self, config):
         import habitat_sim
+        import magnum as mn
         self.hs = habitat_sim
         self.config = config
         scene = Path(config.scene).expanduser().resolve()
@@ -40,7 +41,7 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
                 sensor.uuid = name
                 sensor.sensor_type = kind
                 sensor.resolution = [getattr(config, 'image_size', 128)] * 2
-                sensor.position = [0, 1.25, 0]
+                sensor.position = mn.Vector3(0., 1.25, 0.)
                 sensors.append(sensor)
         agent_cfg.sensor_specifications = sensors
         agent_cfg.action_space = {
@@ -80,8 +81,8 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
             low = getattr(self.config, 'min_distance', 1.0)
             high = getattr(self.config, 'max_distance', 5.0)
             for _ in range(10000):
-                start = self.env.pathfinder.get_random_navigable_point()
-                self.goal = self.env.pathfinder.get_random_navigable_point()
+                start = np.asarray(self.env.pathfinder.get_random_navigable_point(), dtype=np.float32)
+                self.goal = np.asarray(self.env.pathfinder.get_random_navigable_point(), dtype=np.float32)
                 distance = self.distance(start)
                 if low <= distance <= high:
                     break
@@ -150,6 +151,9 @@ class HabitatLabEnv(MetaEnv):
         self.config = config
         self.steps = 0
         self.done = False
+        self.actions = list(getattr(config, 'actions', ['stop', 'move_forward', 'turn_left', 'turn_right']))
+        if getattr(config, 'legacy_config', False):
+            self.actions = [action.upper() for action in self.actions]
         kwargs = {'config_paths': config.habitat_config} if getattr(config, 'legacy_config', False) else {
             'config_path': config.habitat_config}
         if getattr(config, 'habitat_overrides', None):
@@ -178,16 +182,15 @@ class HabitatLabEnv(MetaEnv):
                        depth=depth[None] if depth is not None else None)
 
     def meta2act(self, action):
-        return discrete_action(action, len(getattr(self.config, 'actions', ['STOP', 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT'])))
+        return discrete_action(action, len(self.actions))
 
     def step(self, action):
         from dataclasses import asdict
         if self.done:
             return asdict(self.prev_obs), 0.0, True, dict(self.last_info)
         action = self.meta2act(action)
-        actions = getattr(self.config, 'actions', ['STOP', 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT'])
         self.steps += 1
-        obs = self.env.step(actions[action])
+        obs = self.env.step(self.actions[action])
         self.done = bool(self.env.episode_over)
         metrics = dict(self.env.get_metrics())
         # Require the configured task to expose true success; never infer it from done.

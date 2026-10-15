@@ -1,5 +1,6 @@
 type: benchmark.habitat
 name: habitat_pointnav
+task: pointnav
 backend: sim
 scene: data/scene_datasets/habitat-test-scenes/skokloster-castle.glb
 ctrl_space: navigation

@@ -68,6 +68,9 @@ def main():
     parser.add_argument('--test-episodes', type=int, default=100)
     parser.add_argument('--updates', type=int, default=1500)
     parser.add_argument('--rounds', type=int, default=3)
+    parser.add_argument('--train-seed', type=int, default=0)
+    parser.add_argument('--validation-seed', type=int, default=100000)
+    parser.add_argument('--test-seed', type=int, default=200000)
     parser.add_argument('--threshold', type=float, default=0.30)
     parser.add_argument('--no-render', action='store_true')
     args = parser.parse_args()
@@ -87,8 +90,8 @@ def main():
                              render=not args.no_render, image_size=128, seed=0)
     # Fix all splits before training; use validation only for model selection.
     splits = {name: make_episodes(config, seed, count) for name, seed, count in [
-        ('train', 0, args.train_episodes), ('validation', 100000, args.val_episodes),
-        ('test', 200000, args.test_episodes)]}
+        ('train', args.train_seed, args.train_episodes), ('validation', args.validation_seed, args.val_episodes),
+        ('test', args.test_seed, args.test_episodes)]}
     identities = [{json.dumps((e['start'], e['goal'], e['yaw'])) for e in split} for split in splits.values()]
     assert all(not identities[i].intersection(identities[j]) for i in range(3) for j in range(i))
     write_json(output / 'episodes.json', splits)
@@ -102,7 +105,7 @@ def main():
     env = HabitatNavigationEnv(config)
     try:
         for round_index in range(args.rounds):
-            for episode in splits['train']:
+            for episode_index, episode in enumerate(splits['train']):
                 obs = env.reset(episode)
                 while not env.done:
                     try:
@@ -116,6 +119,9 @@ def main():
                     action = teacher if round_index == 0 or rng.random() < 0.3 else model.predict(obs)
                     env.step(action)
                     obs = env.prev_obs
+                if (episode_index + 1) % 50 == 0:
+                    print(json.dumps({'stage': 'collect', 'round': round_index,
+                                      'episodes': episode_index + 1, 'samples': len(y)}), flush=True)
             inputs = torch.as_tensor(np.stack(x))
             labels = torch.tensor(y, dtype=torch.long)
             counts = torch.bincount(labels, minlength=4).clamp_min(1).float()
@@ -166,6 +172,7 @@ def main():
     source_hashes = {str(p.relative_to(Path(__file__).resolve().parents[2])): hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in source_files}
     result = {'task': 'gps_compass_pointnav', 'scene': config.scene,
+              'scene_sha256': hashlib.sha256(Path(config.scene).read_bytes()).hexdigest(),
               'protocol': 'same-scene held-out starts/goals; 1-5m geodesic; STOP within 0.2m; 80 steps',
               'not_measured': ['R2R', 'VLN-CE language following', 'unseen-scene generalization'],
               'configuration': vars(config), 'arguments': vars(args), 'revision': revision,

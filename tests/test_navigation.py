@@ -154,7 +154,7 @@ def test_habitat_lab_adapter_preserves_instruction_and_uses_task_success(monkeyp
         def reset(self):
             return {'rgb': np.zeros((2, 2, 3), dtype=np.uint8), 'depth': np.ones((2, 2, 1))}
         def step(self, action):
-            assert action == 'STOP'
+            assert action == 'stop'
             self.episode_over = True
             return self.reset()
         def get_metrics(self):

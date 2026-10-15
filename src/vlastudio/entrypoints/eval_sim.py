@@ -258,7 +258,7 @@ if __name__=='__main__':
                             eval_result[key] = sum([eri.get(key, []) for eri in all_eval_results], [])
                         # For scalar metrics that look like rates/averages, compute average
                         elif isinstance(first_result[key], (int, float)):
-                            if 'rate' in key or 'avg' in key or 'calvin_success' in key:
+                            if key in ('spl', 'soft_spl') or 'rate' in key or 'avg' in key or 'calvin_success' in key:
                                 # Weighted average by number of samples
                                 total_weight = sum(eri['total'] for eri in all_eval_results)
                                 eval_result[key] = sum(eri.get(key, 0) * eri['total'] for eri in all_eval_results) / max(total_weight, 1)
