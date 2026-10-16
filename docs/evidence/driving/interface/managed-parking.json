@@ -1,0 +1,11 @@
+{
+  "disabled_stock_parked_cars": 1116,
+  "scenario_names": [
+    "ParkingExit_1"
+  ],
+  "scenario_actor_counts": [
+    3
+  ],
+  "ego_position": "Location(x=154.436996, y=691.268188, z=126.933022)",
+  "spawn_failures": []
+}

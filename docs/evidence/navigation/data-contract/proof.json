@@ -1,0 +1,215 @@
+{
+  "scope": "Data contract refactor; short training, not a repeated benchmark",
+  "tokenizer": {
+    "train": {
+      "episodes": 10819,
+      "mismatches": 0
+    },
+    "val_seen": {
+      "episodes": 778,
+      "mismatches": 0
+    },
+    "val_unseen": {
+      "episodes": 1839,
+      "mismatches": 0
+    }
+  },
+  "habitat": {
+    "episode_id": "1074",
+    "frames": 50,
+    "raw_lang": "Walk straight through the living room with the couch on your right. Go through the doorway into the bedroom at the end of the walkway. In the bedroom take a left and stop in the entry way just before the rug. ",
+    "fields": [
+      "raw_lang",
+      "reasoning",
+      "action",
+      "state",
+      "is_pad",
+      "image_is_pad",
+      "navigation",
+      "frame_ids",
+      "action_frame_ids",
+      "timestamp",
+      "episode_id",
+      "__index__",
+      "image",
+      "depth",
+      "supervision"
+    ],
+    "shapes": {
+      "action": [
+        50,
+        1
+      ],
+      "state": [
+        50,
+        0
+      ],
+      "is_pad": [
+        50
+      ],
+      "image_is_pad": [
+        50
+      ],
+      "frame_ids": [
+        50
+      ],
+      "action_frame_ids": [
+        50
+      ],
+      "image": [
+        1,
+        50,
+        3,
+        224,
+        224
+      ],
+      "depth": [
+        1,
+        50,
+        256,
+        256
+      ]
+    },
+    "training": {
+      "standard_api": "load_dataset + load_policy + train",
+      "global_step": 2,
+      "parameter_delta_l2": 0.002883168914946429,
+      "strict_reload_equal": true,
+      "checkpoint_sha256": "a3f506aa25a139c5734e7d7ffa1ccbd28ed6b017c48ebcc2c95e36da41a7451e",
+      "history": [
+        {
+          "epoch": 0.3333333333333333,
+          "grad_norm": 8.161650657653809,
+          "learning_rate": 1e-06,
+          "loss": 1.04,
+          "step": 1
+        },
+        {
+          "epoch": 0.6666666666666666,
+          "grad_norm": 5.81996488571167,
+          "learning_rate": 1e-06,
+          "loss": 0.8174,
+          "step": 2
+        },
+        {
+          "epoch": 0.6666666666666666,
+          "step": 2,
+          "total_flos": 0.0,
+          "train_loss": 0.9286833107471466,
+          "train_runtime": 2.2459,
+          "train_samples_per_second": 0.891,
+          "train_steps_per_second": 0.891
+        }
+      ]
+    },
+    "inference": {
+      "offline_saved_checkpoint": true,
+      "raw_lang_input": true,
+      "action": 2,
+      "action_shape": [
+        1,
+        1,
+        1
+      ],
+      "source_input_equivalence": true
+    }
+  },
+  "mattersim": {
+    "episode_id": "2464_0",
+    "frames": 5,
+    "raw_lang": "Exit the room and turn left into the bathroom. ",
+    "fields": [
+      "raw_lang",
+      "reasoning",
+      "action",
+      "state",
+      "is_pad",
+      "image_is_pad",
+      "navigation",
+      "frame_ids",
+      "action_frame_ids",
+      "timestamp",
+      "episode_id",
+      "__index__",
+      "visual_features",
+      "visual_feature_source"
+    ],
+    "shapes": {
+      "action": [
+        5,
+        1
+      ],
+      "state": [
+        5,
+        3
+      ],
+      "is_pad": [
+        5
+      ],
+      "image_is_pad": [
+        5
+      ],
+      "frame_ids": [
+        5
+      ],
+      "action_frame_ids": [
+        5
+      ],
+      "visual_features": [
+        5,
+        36,
+        2048
+      ]
+    },
+    "rgb_mode_shape": [
+      1,
+      5,
+      3,
+      128,
+      128
+    ],
+    "training": {
+      "standard_api": "load_dataset + load_policy + train",
+      "global_step": 2,
+      "parameter_delta_l2": 0.001634077157219544,
+      "strict_reload_equal": true,
+      "checkpoint_sha256": "3bed6db27297659ea36b05fdc59fbec08acb8a041ec51e3264bd425ee2d7d8d8",
+      "history": [
+        {
+          "epoch": 0.3333333333333333,
+          "grad_norm": 16.275569915771484,
+          "learning_rate": 1e-07,
+          "loss": 0.4073,
+          "step": 1
+        },
+        {
+          "epoch": 0.6666666666666666,
+          "grad_norm": 12.672605514526367,
+          "learning_rate": 1e-07,
+          "loss": 0.4507,
+          "step": 2
+        },
+        {
+          "epoch": 0.6666666666666666,
+          "step": 2,
+          "total_flos": 0.0,
+          "train_loss": 0.42902062833309174,
+          "train_runtime": 10.0153,
+          "train_samples_per_second": 0.2,
+          "train_steps_per_second": 0.2
+        }
+      ]
+    },
+    "inference": {
+      "offline_saved_checkpoint": true,
+      "raw_lang_input": true,
+      "action": 24,
+      "action_shape": [
+        1,
+        1,
+        1
+      ],
+      "source_input_equivalence": true
+    }
+  }
+}

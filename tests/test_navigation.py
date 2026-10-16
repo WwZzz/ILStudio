@@ -271,10 +271,10 @@ def test_preprocessed_instruction_tokens_are_explicit_and_unmodified():
     env.env = SimpleNamespace(current_episode=SimpleNamespace(instruction={
         'instruction_text': 'Find the stairs.', 'instruction_tokens': [15, 4, 9, 0, 0]}))
     obs = env.obs2meta({})
-    assert obs.navigation['instruction_tokens'] == [15, 4, 9, 0, 0]
+    assert obs.reasoning['navigation']['instruction_tokens'] == [15, 4, 9, 0, 0]
     assert obs.raw_lang == 'Find the stairs.'
     env.config.return_instruction_tokens = False
-    assert 'instruction_tokens' not in env.obs2meta({}).navigation
+    assert 'instruction_tokens' not in env.obs2meta({}).reasoning['navigation']
     env.config.return_instruction_tokens = True
     del env.env.current_episode.instruction['instruction_tokens']
     with pytest.raises(ValueError, match='tokens are missing'):

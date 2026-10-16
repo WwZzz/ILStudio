@@ -34,6 +34,8 @@ class CMAPolicy(nn.Module):
         self.net.instruction_encoder.embedding_layer.weight.requires_grad_(
             bool(model_config['INSTRUCTION_ENCODER'].get('fine_tune_embeddings', False)))
         self.action_distribution = CategoricalHead(self.net.output_size, 4)
+        from .tokenizer import InstructionTokenizer
+        self.instruction_tokenizer = InstructionTokenizer()
         self.reset()
 
     def reset(self):
@@ -63,8 +65,9 @@ class CMAPolicy(nn.Module):
         torch.save({'state_dict': state_dict if state_dict is not None else self.state_dict(),
                     'model_config': self.model_config}, path/'policy.pt')
         (path/'config.json').write_text(json.dumps({'ctrl_space': 'navigation', 'ctrl_type': 'discrete',
-                                                  'chunk_size': 1, 'state_dim': 2, 'action_dim': 1}))
+                                                  'chunk_size': 1, 'state_dim': 0, 'action_dim': 1}))
         (path/'policy_metadata.json').write_text(json.dumps({'policy_module': 'policy.vlnce_cma', 'policy_name': 'vlnce_cma'}))
+        self.instruction_tokenizer.save(path)
 
     def select_action(self, obs):
         device = next(self.parameters()).device
@@ -76,10 +79,7 @@ class CMAPolicy(nn.Module):
             raise ValueError('CMA requires one normalized 256x256 depth camera')
         if not torch.isfinite(depth).all() or depth.min() < 0 or depth.max() > 1:
             raise ValueError('CMA depth must be finite and normalized to [0,1] using 0-10m')
-        rows = obs.get('navigation')
-        if not rows or any('instruction_tokens' not in row for row in rows):
-            raise ValueError('CMA requires return_instruction_tokens=true and the original R2R vocabulary')
-        tokens = torch.as_tensor([row['instruction_tokens'] for row in rows], device=device, dtype=torch.long)
+        tokens = torch.tensor([self.instruction_tokenizer(text) for text in obs['raw_lang']], device=device)
         masks = (torch.as_tensor(obs['timestamp'], device=device).reshape(-1, 1) > 0)
         if self.hidden is None or self.hidden.shape[0] != rgb.shape[0]:
             self.hidden = self.initial_state(rgb.shape[0])
@@ -98,6 +98,10 @@ class CMAPolicy(nn.Module):
         checkpoint = torch.load(path / 'policy.pt' if path.is_dir() else path,
                                 map_location='cpu', weights_only=True)
         model = cls(checkpoint['model_config'])
+        model.instruction_tokenizer.download = download
+        vocabulary = path/'instruction_vocab.json' if path.is_dir() else path.with_name('instruction_vocab.json')
+        if vocabulary.exists():
+            model.instruction_tokenizer.vocabulary = json.loads(vocabulary.read_text())
         model.load_state_dict(checkpoint['state_dict'], strict=True)
         return model.to(device).eval()
 
@@ -112,7 +116,19 @@ def load_model(args):
             model = CMAPolicy(config)
     else:
         model = CMAPolicy.from_pretrained(args.model_name_or_path, getattr(args, 'device', 'cpu'), getattr(args, 'download', True))
+    model.instruction_tokenizer.download = getattr(args, 'download', True)
+    if getattr(args, 'vocabulary', None):
+        from .tokenizer import InstructionTokenizer
+        model.instruction_tokenizer = InstructionTokenizer(json.loads(Path(args.vocabulary).read_text()),
+                                                          getattr(args, 'download', True))
     return {'model': model}
+
+
+def get_data_processor(args, model_components):
+    if not getattr(args, 'is_training', False):
+        return None
+    from vlastudio.policy.navigation_processing import NavigationProcessor
+    return NavigationProcessor(model_components['model'], 'cma')
 
 
 def get_data_collator(args, model_components):

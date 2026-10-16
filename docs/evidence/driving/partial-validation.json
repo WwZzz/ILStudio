@@ -1,0 +1,19 @@
+{
+  "status": "incomplete_upstream_scenario_initialization_failure",
+  "accepted": false,
+  "completed_routes": 23,
+  "required_routes": 220,
+  "successes": 6,
+  "success_rate_so_far": 0.2608695652173913,
+  "driving_score_so_far": 48.32009130434783,
+  "model_sha256": "a39f05ffe006319dc18b155912075805c308eca8f88fcc2db9ec3cdb399ef1b6",
+  "adapter_sha256": "cbf5d6e56b6aa293a496ad05e17e0bc9434ab08ca6ec1c3b85a26c8a8ea232d9",
+  "invalid_route_id": "35418",
+  "scenario": "CrossingBicycleFlow_1",
+  "reason": "Official Town12 bicycle lane has no successor at junction; original CARLA Python3.7 client reproduces the same failure",
+  "stopped_owned_pids": [
+    1764148,
+    2182625
+  ],
+  "all_records_preserved": true
+}

@@ -3,12 +3,12 @@ This module contains classes for transforming datasets. Each transform is a call
 that takes a standard ILSTD data sample and returns a transformed data sample.
 The format of the standard ILSTD data sample is a dictionary with the following keys:
 sample = {
-    'image': image_data, # torch.Tensor(k, c, h, w)
+    'image': image_data, # pixels or features; reasoning.image_type declares representation
     'state': state_data, # torch.Tensor(state_dim, )
     'action': action_data, # torch.Tensor(chunk_size, action_dim)
     'is_pad': is_pad, # torch.Tensor(chunk_size, action_dim), dtype=bool
     'raw_lang': raw_lang, # str
-    'reasoning': reasoning, # Anything
+    'reasoning': reasoning, # reserved metadata; navigation samples use a dictionary
     'timestamp': timestamp,  # float or int
     'episode_id': episode_id, # int
     'dataset_id': dataset_id, # str or int
@@ -22,6 +22,7 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
+from vlastudio.utils.observations import is_feature_image
 
 class MapTransformPipeline(Dataset):
     def __init__(self, dataset: Dataset, transforms: Sequence[Callable]=None, add_dataset_id: bool=True):
@@ -114,7 +115,7 @@ class ActionSmoothingTransform:
 
 class ImageToFloat:
     def __call__(self, x):
-        if 'image' not in x:
+        if x.get('image') is None or is_feature_image(x):
             return x
         is_uint8 = (x['image'].dtype == torch.uint8 or x['image'].max()>1.0)
         if is_uint8: x['image'] = x['image'] / 255.0
@@ -123,7 +124,7 @@ class ImageToFloat:
 
 class ImageToUint8:
     def __call__(self, x):
-        if 'image' not in x:
+        if x.get('image') is None or is_feature_image(x):
             return x
         if x['image'].dtype == torch.float32 or x['image'].dtype == torch.float64:
             x['image'] = (x['image'] * 255.0).clamp(0, 255)
@@ -138,7 +139,7 @@ class ImageColorJitterTransform:
         self.hue = hue
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = F.adjust_brightness(x['image'], self.brightness)
             x['image'] = F.adjust_contrast(x['image'], self.contrast)
             x['image'] = F.adjust_saturation(x['image'], self.saturation)
@@ -151,7 +152,7 @@ class ImageRandomCropTransform:
         self.transform = transforms.RandomCrop(size)
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = self.transform(x['image'])
         return x
         
@@ -161,7 +162,7 @@ class ImageResizeTransform:
         self.transform = transforms.Resize(size)
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = self.transform(x['image'])
         return x
 
@@ -171,7 +172,7 @@ class ImagePadTransform:
         self.transform = transforms.Pad(padding=size, fill=0, padding_mode='constant')
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = self.transform(x['image'])
         return x
 
@@ -181,7 +182,7 @@ class ImageRotateTransform:
         self.transform = transforms.RandomRotation(degrees=degrees, expand=expand)
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = self.transform(x['image'])
         return x
 
@@ -192,7 +193,7 @@ class ImageGaussianBlurTransform:
         self.transform = transforms.GaussianBlur(kernel_size=kernel_size, sigma=sigma)
 
     def __call__(self, x):
-        if 'image' in x:
+        if x.get('image') is not None and not is_feature_image(x):
             x['image'] = self.transform(x['image'])
         return x
 
@@ -236,7 +237,7 @@ class ImageExpander:
         self.return_mask = return_mask
 
     def __call__(self, x):
-        if 'image' not in x:
+        if x.get('image') is None or is_feature_image(x):
             return x
         
         image = x['image']  # (n, c, h, w)

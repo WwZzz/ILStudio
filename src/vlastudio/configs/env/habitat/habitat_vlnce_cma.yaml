@@ -29,5 +29,6 @@ ctrl_type: discrete
 action_mode: primitive
 candidate_source: none
 actions: [stop, move_forward, turn_left, turn_right]
-return_instruction_tokens: true
+return_instruction_tokens: false
+state_source: none
 max_timesteps: 500

@@ -1,5 +1,10 @@
 # Navigation through the standard VLAStudio interfaces
 
+This archive records the earlier dataset representation. The later
+[temporal data contract checks](../data-contract/README.md) validate dataset-owned
+multi-frame sampling, raw observations and data-layer caches. The full-split
+metrics below have not been rerun for that refactor; archived receipts are unchanged.
+
 Both Example 09 training entries now use `vla.load_dataset`, `vla.load_policy`
 and `vla.train`. The following checks were run on real MatterSim and Habitat,
 using the normal training worker, optimizer, scheduler and checkpoint saving.

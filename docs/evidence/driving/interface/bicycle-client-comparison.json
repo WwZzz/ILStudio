@@ -1,0 +1,18 @@
+{
+  "original_client_python": "3.7.16",
+  "current_client_python": "3.10.14",
+  "observations_identical": true,
+  "original_client_source": "CARLA_0.9.15 official native archive cp37 wheel",
+  "opendrive_sha256": "26fa53d4902ac3397d35f948969f0c77c1bf023755ede2c67edf00bef817151f",
+  "route_id": "35418",
+  "successful_next_steps_before_dead_end": 5,
+  "last_waypoint": {
+    "road": 264,
+    "lane": -3,
+    "section": 0,
+    "s": 72.94499206542963,
+    "junction": false,
+    "location": "Location(x=863.694519, y=3929.914551, z=370.418091)",
+    "type": "Biking"
+  }
+}

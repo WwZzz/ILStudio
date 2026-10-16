@@ -1,0 +1,75 @@
+[
+  {
+    "route_id": "36360",
+    "initialized": true,
+    "plan_waypoints": 37,
+    "repairs": {},
+    "junction_waypoints": 11
+  },
+  {
+    "route_id": "35418",
+    "initialized": true,
+    "plan_waypoints": 39,
+    "repairs": {
+      "CrossingBicycleFlow_1": {
+        "gap_meters": 27.121036529541016,
+        "interpolated_waypoints": 13,
+        "start": [
+          863.6945190429688,
+          3929.91455078125,
+          370.4180908203125
+        ],
+        "end": [
+          890.4846801757812,
+          3934.13330078125,
+          370.21795654296875
+        ]
+      }
+    },
+    "junction_waypoints": 13
+  },
+  {
+    "route_id": "35907",
+    "initialized": true,
+    "plan_waypoints": 39,
+    "repairs": {
+      "CrossingBicycleFlow_1": {
+        "gap_meters": 27.121036529541016,
+        "interpolated_waypoints": 13,
+        "start": [
+          863.6945190429688,
+          3929.91455078125,
+          370.4180908203125
+        ],
+        "end": [
+          890.4846801757812,
+          3934.13330078125,
+          370.21795654296875
+        ]
+      }
+    },
+    "junction_waypoints": 13
+  },
+  {
+    "route_id": "35623",
+    "initialized": true,
+    "plan_waypoints": 39,
+    "repairs": {
+      "CrossingBicycleFlow_1": {
+        "gap_meters": 27.121036529541016,
+        "interpolated_waypoints": 13,
+        "start": [
+          863.6945190429688,
+          3929.91455078125,
+          370.4180908203125
+        ],
+        "end": [
+          890.4846801757812,
+          3934.13330078125,
+          370.21795654296875
+        ]
+      }
+    },
+    "junction_waypoints": 13
+  }
+]

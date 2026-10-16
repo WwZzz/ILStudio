@@ -621,6 +621,7 @@ class SHMPolicyServer(BaseServer):
             timestep=safe_concat('timestep'),
             raw_lang=batch_observation_metadata(mobs_list, 'raw_lang'),
             navigation=batch_observation_metadata(mobs_list, 'navigation'),
+            reasoning=batch_observation_metadata(mobs_list, 'reasoning'),
         )
         return batched
 

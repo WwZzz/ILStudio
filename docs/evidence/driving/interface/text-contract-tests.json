@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-16",
+  "platform": "Windows CPU",
+  "python": "3.10.21",
+  "torch": "2.4.0+cpu",
+  "scope": [
+    "test_driving.py",
+    "test_navigation.py",
+    "test_navigation_training.py",
+    "test_navigation_candidates.py",
+    "test_vlnce_cma.py",
+    "test_environment_guidance.py"
+  ],
+  "passed": 126,
+  "skipped": 2,
+  "failed": 0,
+  "note": "Focused regression suite. Optional full default-runtime tests require additional unrelated diffusion/MuJoCo dependencies and are not part of this receipt."
+}

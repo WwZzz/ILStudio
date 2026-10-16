@@ -1,0 +1,15 @@
+type: vlastudio.benchmark.carla.create_env
+name: carla_bench2drive
+task: bench2drive
+ctrl_space: vehicle
+ctrl_type: control
+action_order: [steer, throttle, brake, reverse]
+repair_bicycle_flow: false  # Explicit opt-in changes scenario path construction.
+remove_map_parked_vehicles: true  # Avoid duplicating the benchmark's managed parking.
+max_timesteps: 200010  # Let the official scenario manager terminate each route.
+reuse_env: true
+record_video: false
+gpu: 0
+seed: 0
+startup_timeout: 180.0
+step_timeout: 600.0

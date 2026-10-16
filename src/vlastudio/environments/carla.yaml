@@ -1,0 +1,25 @@
+extends: remote.yaml
+requires_python: '>=3.10,<3.11'
+platforms: [linux]
+min_glibc: '2.27'
+description: CARLA 0.9.15 and official Bench2Drive 0.0.4 closed-loop scenarios.
+requirements:
+- carla==0.9.15
+- py-trees==0.8.3
+- networkx>=2.8,<4
+- shapely>=1.8,<2
+- pygame==2.5.2
+- dictor
+- tabulate
+- pexpect
+- transforms3d
+- ephem
+- xmlschema==1.0.18
+- simple-watchdog-timer
+- setuptools<81
+installers: [carla]
+checks: [carla]
+notes:
+- Environment creation installs the pinned CARLA server and additional maps into the shared cache.
+- Requires NVIDIA Vulkan graphics support in addition to CUDA.
+- Standard dataset downloads and pretrained model loading run lazily inside their owning classes.

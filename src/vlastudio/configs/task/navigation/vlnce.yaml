@@ -6,10 +6,13 @@ datasets:
     max_trajectories: 256
     download: true
     scenes_dir: data/scene_datasets
-    feature_checkpoint: official
+    sample_mode: episode
+cache:
+  level: processor
+  num_workers: 0
 meta:
   action_dim: 1
-  state_dim: 2
+  state_dim: 0
   chunk_size: 1
   action_normalize: identity
   state_normalize: identity

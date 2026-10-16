@@ -10,6 +10,28 @@ import zipfile
 import numpy as np
 
 
+class PanoramaFeatureStore:
+    """Shared data asset reader; no model, training logic or writable policy cache."""
+    signature = 'places365-resnet152-36x2048-v1'
+
+    def __init__(self, path=None, download=True):
+        self.path, self.download = path, download
+        self._features = self._index = None
+
+    def read(self, scan_id, viewpoint_id):
+        if self._features is None:
+            from vlastudio.utils.navigation_assets import panorama_features
+            root = panorama_features(self.path, self.download)
+            self._index = json.loads((root/'index.json').read_text())
+            self._features = np.load(root/'features.npy', mmap_mode='r')
+            if self._features.ndim != 3 or self._features.shape[1:] != (36, 2048) or self._features.dtype != np.float32:
+                raise ValueError('Panorama data must be float32 [viewpoints,36,2048]')
+        return self._features[self._index[scan_id+'_'+viewpoint_id]].copy()
+
+    def __getstate__(self):
+        return {**self.__dict__, '_features': None, '_index': None}
+
+
 def convert_features(archive, output, expected_sha256):
     from types import SimpleNamespace
     a = SimpleNamespace(archive=str(archive), output=str(output), sha256=expected_sha256)

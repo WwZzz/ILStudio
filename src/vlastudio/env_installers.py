@@ -19,6 +19,8 @@ LICENSES = {
 }
 REQUIRED = {'rlbench': ['coppeliasim-edu'], 'behavior1k': ['nvidia-isaac-sim']}
 SYSTEM_PACKAGES = {
+    'carla': ['libvulkan1', 'libegl1', 'libgl1', 'libglib2.0-0', 'libx11-6',
+              'libxcb1', 'libxcb-randr0', 'libxcb-xfixes0', 'libxcb-shape0', 'libdrm2'],
     'robotwin': ['build-essential', 'libvulkan1', 'libgl1', 'libegl1', 'libglib2.0-0'],
     'rlbench': ['build-essential', 'xvfb', 'xauth', 'libgl1', 'libglu1-mesa', 'libxkbcommon-x11-0', 'libxcb-xinerama0'],
     'behavior1k': ['libgl1', 'libegl1', 'libglu1-mesa', 'libxrender1', 'libsm6', 'libice6', 'libxt6', 'libvulkan1'],
@@ -33,7 +35,7 @@ def describe(profile):
 
 def preflight(profile, accepted=(), system_packages=False):
     for name in profile.get('installers', []):
-        if name not in ('rlbench', 'behavior1k', 'libero', 'robotwin'):
+        if name not in ('rlbench', 'behavior1k', 'libero', 'robotwin', 'carla'):
             raise ValueError(f'Unknown native installer {name!r}')
         for license_id in REQUIRED.get(name, []):
             if license_id not in accepted:
@@ -149,6 +151,14 @@ def prepare(profile, cache, env, pip, execute, *, accepted=()):
 
 
 def finish(profile, cache, python, env, execute, *, pip, accepted=(), assets=False):
+    if 'carla' in profile.get('installers', []):
+        root = Path(env.get('VLASTUDIO_RUNTIME_CARLA_ROOT', cache/'driving/runtimes/carla-0.9.15'))
+        if not (env.get('VLASTUDIO_RUNTIME_CARLA_ROOT') and (root/'CarlaUE4.sh').is_file()):
+            command = [python, '-m', 'vlastudio.benchmark.carla.install', '--prefix', str(root)]
+            if env.get('UV_OFFLINE') == '1':
+                command.append('--offline')
+            execute(command)
+        env['VLASTUDIO_RUNTIME_CARLA_ROOT'] = str(root)
     if 'behavior1k' in profile.get('installers', []):
         # Upstream resolves app icons and companion files relative to its repository.
         pip(['-e', str(Path(env['VLASTUDIO_RUNTIME_BEHAVIOR_ROOT']) / 'OmniGibson')])

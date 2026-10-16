@@ -1,0 +1,25 @@
+{
+  "scope": "engineering_subset_20_not_official_full_split",
+  "routes": 20,
+  "scenario_types": 20,
+  "towns": 5,
+  "successes": 3,
+  "failed_routes": 17,
+  "success_rate": 0.15,
+  "driving_score": 31.243779999999997,
+  "accepted": false,
+  "all_requested_scenarios_initialized": true,
+  "train_validation_route_ids_disjoint": true,
+  "all_native_metrics_recomputed": true,
+  "author_formula_verified_with_subset_denominator": true,
+  "official_full_220_comparison": false,
+  "actual_wall_seconds": 4148.258967161179,
+  "model_sha256": "a39f05ffe006319dc18b155912075805c308eca8f88fcc2db9ec3cdb399ef1b6",
+  "adapter_sha256": "452327a932fe7297c93e624c6374005b168d616c3cb096a7ef9e29dfadf87c7e",
+  "routes_sha256": "885debbc3d87f14351b521d8da0dc9d25fcee1f0d926ed1c92cc9ff62504ca45",
+  "protocol_sha256": "c7d9e3409e68f4f367d1c1173a24696010202777cb0f04b51ffa997850ec0048",
+  "compatibility": {
+    "remove_map_parked_vehicles": true,
+    "repair_bicycle_flow": true
+  }
+}

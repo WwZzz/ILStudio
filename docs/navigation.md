@@ -196,7 +196,8 @@ post-collision movement. Stopped or timed-out episodes remain terminal until res
 ## Candidate observations and action configuration
 
 Candidate generation and candidate selection are separate responsibilities.
-The policy owns visual features, learned waypoint proposals, ranking and the
+Visual assets and feature caches belong to the data layer. The policy owns
+learned waypoint proposals, ranking and the
 final decision. An environment can optionally expose native navigability as an
 affordance sensor. This changes the information available to the policy, so it
 must be declared in the environment configuration rather than enabled implicitly.
@@ -236,7 +237,7 @@ Panorama construction and visual encoders belong to the policy/observation
 processing pipeline. All-neighbor candidates are rejected in primitive mode so
 that the original FORWARD action keeps its camera-FOV semantics.
 
-When enabled, `MetaObs.navigation` contains the control contract and a ragged
+When enabled, `MetaObs.reasoning["navigation"]` contains the control contract and a ragged
 `candidates` list. Each candidate contains only `action_id`, `viewpoint_id`,
 `relative_heading`, `relative_elevation` and `distance`. Angles use MatterSim's
 native radians (heading positive to the right, elevation positive upward);
@@ -258,6 +259,7 @@ reuse an open-loop sequence against changing candidate sets.
 Candidate metadata survives vector observation assembly, shared-memory and
 HTTP serialization, per-client batching and the standard `MetaPolicy` sample
 conversion. Batched metadata is a list of dictionaries, one per observation;
+the `reasoning` dictionary is preserved without stacking ragged candidate lists.
 policies handle any padding/masks they need. Existing PointNav policies ignore
 this optional metadata and continue using their two state values.
 

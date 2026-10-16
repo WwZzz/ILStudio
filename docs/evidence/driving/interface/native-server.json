@@ -1,0 +1,14 @@
+{
+  "server_version": "0.9.15",
+  "client_version": "0.9.15",
+  "town": "Carla/Maps/Town10HD_Opt",
+  "physics_steps": 20,
+  "frame": 35,
+  "rgb_shape": [
+    90,
+    160,
+    3
+  ],
+  "rgb_std": 49.31736912879602,
+  "speed_mps": 0.07347619533538818
+}

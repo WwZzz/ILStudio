@@ -17,6 +17,8 @@ python -m pip install -e .
 | 06 Custom robot | Existing base; GUI modes need Tkinter and a display |
 | 07 LIBERO-Plus | SmolVLA + LIBERO-Plus; setup reuses its cached environment |
 | 08 FastWAM | FastWAM + LIBERO; setup reuses its cached environment |
+| [09 Navigation](09_navigation/README.md) | Habitat / MatterSim |
+| [10 Autonomous driving](10_autonomous_driving/README.md) | CARLA / Bench2Drive |
 
 Do not reinstall base for each example. Install additional components once, then
 activate the prepared environment and run the Python files. Sources, datasets,

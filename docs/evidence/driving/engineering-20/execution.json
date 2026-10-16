@@ -1,0 +1,51 @@
+{
+  "scope": "engineering_subset_20_not_official_full_split",
+  "started_unix": 1792121407.761586,
+  "complete": true,
+  "parts": [
+    {
+      "pid": 99599,
+      "route_ids": [
+        "26537",
+        "25538",
+        "13674",
+        "7841",
+        "35418",
+        "15071",
+        "9395"
+      ],
+      "config": "${DRIVING_ROOT}/engineering-validation-20/part-1.yaml",
+      "output": "${DRIVING_ROOT}/engineering-validation-20/part-1"
+    },
+    {
+      "pid": 100868,
+      "route_ids": [
+        "11658",
+        "2520",
+        "17564",
+        "33202",
+        "24519",
+        "16502",
+        "4621"
+      ],
+      "config": "${DRIVING_ROOT}/engineering-validation-20/part-2.yaml",
+      "output": "${DRIVING_ROOT}/engineering-validation-20/part-2"
+    },
+    {
+      "pid": 102482,
+      "route_ids": [
+        "17749",
+        "11177",
+        "25215",
+        "2299",
+        "24151",
+        "15483"
+      ],
+      "config": "${DRIVING_ROOT}/engineering-validation-20/part-3.yaml",
+      "output": "${DRIVING_ROOT}/engineering-validation-20/part-3"
+    }
+  ],
+  "protocol_sha256": "c7d9e3409e68f4f367d1c1173a24696010202777cb0f04b51ffa997850ec0048",
+  "accepted": false,
+  "finished_unix": 1792125556.020553
+}

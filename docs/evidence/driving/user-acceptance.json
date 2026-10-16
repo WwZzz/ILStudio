@@ -1,0 +1,18 @@
+{
+  "accepted": true,
+  "scope": "basic_framework_integration",
+  "decision_date": "2026-10-16",
+  "basis": "User accepts SR15% and DS31.24 for integration and does not require further training to meet the original gate.",
+  "routes": 20,
+  "successes": 3,
+  "success_rate": 0.15,
+  "driving_score": 31.24378,
+  "all_requested_scenarios_initialized": true,
+  "original_numeric_gate_passed": false,
+  "official_full_220_comparison": false,
+  "original_audit": "engineering-20/independent-audit.json",
+  "compatibility": {
+    "remove_map_parked_vehicles": true,
+    "repair_bicycle_flow": true
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "scope": "engineering_subset_20_not_official_full_split",
+  "selection": "Four predeclared groups, five distinct scenario types each; SHA256(seed:type:id) minimum within each type, except required bicycle35418 and Town15 parking26537 regression cases. No selection by observed policy score.",
+  "seed": 20261016,
+  "routes_sha256": "885debbc3d87f14351b521d8da0dc9d25fcee1f0d926ed1c92cc9ff62504ca45",
+  "thresholds": {
+    "success_rate": 0.2,
+    "driving_score": 40,
+    "initialization_errors": 0
+  },
+  "repair_bicycle_flow": true,
+  "remove_map_parked_vehicles": true,
+  "model_sha256": "a39f05ffe006319dc18b155912075805c308eca8f88fcc2db9ec3cdb399ef1b6",
+  "routes": [
+    {
+      "route_id": "26537",
+      "town": "Town15",
+      "scenario_type": "ParkingExit",
+      "coverage_group": "special_cases"
+    },
+    {
+      "route_id": "11658",
+      "town": "Town12",
+      "scenario_type": "EnterActorFlow",
+      "coverage_group": "traffic_manoeuvres"
+    },
+    {
+      "route_id": "17749",
+      "town": "Town12",
+      "scenario_type": "DynamicObjectCrossing",
+      "coverage_group": "vulnerable_road_users"
+    },
+    {
+      "route_id": "25538",
+      "town": "Town04",
+      "scenario_type": "YieldToEmergencyVehicle",
+      "coverage_group": "special_cases"
+    },
+    {
+      "route_id": "2520",
+      "town": "Town12",
+      "scenario_type": "ConstructionObstacle",
+      "coverage_group": "special_cases"
+    },
+    {
+      "route_id": "11177",
+      "town": "Town12",
+      "scenario_type": "VehicleTurningRoutePedestrian",
+      "coverage_group": "vulnerable_road_users"
+    },
+    {
+      "route_id": "13674",
+      "town": "Town12",
+      "scenario_type": "PedestrianCrossing",
+      "coverage_group": "vulnerable_road_users"
+    },
+    {
+      "route_id": "17564",
+      "town": "Town12",
+      "scenario_type": "SequentialLaneChange",
+      "coverage_group": "traffic_manoeuvres"
+    },
+    {
+      "route_id": "25215",
+      "town": "Town15",
+      "scenario_type": "Accident",
+      "coverage_group": "special_cases"
+    },
+    {
+      "route_id": "7841",
+      "town": "Town12",
+      "scenario_type": "NonSignalizedJunctionRightTurn",
+      "coverage_group": "ordinary_intersections"
+    },
+    {
+      "route_id": "33202",
+      "town": "Town13",
+      "scenario_type": "ControlLoss",
+      "coverage_group": "special_cases"
+    },
+    {
+      "route_id": "2299",
+      "town": "Town12",
+      "scenario_type": "HighwayCutIn",
+      "coverage_group": "traffic_manoeuvres"
+    },
+    {
+      "route_id": "35418",
+      "town": "Town12",
+      "scenario_type": "CrossingBicycleFlow",
+      "coverage_group": "vulnerable_road_users"
+    },
+    {
+      "route_id": "24519",
+      "town": "Town05",
+      "scenario_type": "ParkingCrossingPedestrian",
+      "coverage_group": "vulnerable_road_users"
+    },
+    {
+      "route_id": "24151",
+      "town": "Town13",
+      "scenario_type": "MergerIntoSlowTraffic",
+      "coverage_group": "traffic_manoeuvres"
+    },
+    {
+      "route_id": "15071",
+      "town": "Town12",
+      "scenario_type": "VanillaSignalizedTurnEncounterGreenLight",
+      "coverage_group": "ordinary_intersections"
+    },
+    {
+      "route_id": "16502",
+      "town": "Town12",
+      "scenario_type": "VanillaNonSignalizedTurn",
+      "coverage_group": "ordinary_intersections"
+    },
+    {
+      "route_id": "15483",
+      "town": "Town12",
+      "scenario_type": "VanillaSignalizedTurnEncounterRedLight",
+      "coverage_group": "ordinary_intersections"
+    },
+    {
+      "route_id": "9395",
+      "town": "Town12",
+      "scenario_type": "OppositeVehicleTakingPriority",
+      "coverage_group": "traffic_manoeuvres"
+    },
+    {
+      "route_id": "4621",
+      "town": "Town12",
+      "scenario_type": "SignalizedJunctionLeftTurn",
+      "coverage_group": "ordinary_intersections"
+    }
+  ],
+  "official_full_220_deferred": true,
+  "previous_results_excluded": true
+}

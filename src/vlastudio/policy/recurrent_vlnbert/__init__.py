@@ -21,7 +21,7 @@ class RecurrentVLNBERT(nn.Module):
         self.vocabulary = Path(vocabulary)
         self.feature_store = Path(feature_store) if feature_store else None
         self.download = True
-        self.features = self.feature_index = None
+        self._feature_data = None
         self.navigator = VLNBERT(feature_size=2176)
         self.reset()
 
@@ -42,12 +42,14 @@ class RecurrentVLNBERT(nn.Module):
         hidden, language = self.navigator('language', sentence=ids, attention_mask=mask.long(), lang_mask=mask.long())
         return hidden, language, mask
 
-    def candidate_inputs(self, navigation, states):
-        if self.features is None:
-            from vlastudio.utils.navigation_assets import panorama_features
-            store = panorama_features(self.feature_store, self.download)
-            self.feature_index = json.loads((store/'index.json').read_text())
-            self.features = np.load(store/'features.npy', mmap_mode='r')
+    def candidate_inputs(self, navigation, states, panoramas=None):
+        if panoramas is None:
+            if self._feature_data is None:
+                from vlastudio.data_utils.datasets.navigation_features import PanoramaFeatureStore
+                self._feature_data = PanoramaFeatureStore(self.feature_store, self.download)
+            panoramas = [self._feature_data.read(row['scan_id'], row['viewpoint_id']) for row in navigation]
+        if isinstance(panoramas, torch.Tensor):
+            panoramas = panoramas.detach().cpu().numpy()
         device = next(self.parameters()).device
         lengths = [len(row['candidates'])+1 for row in navigation]
         features = np.zeros((len(navigation), max(lengths), 2176), dtype=np.float32)
@@ -55,9 +57,8 @@ class RecurrentVLNBERT(nn.Module):
         for i, row in enumerate(navigation):
             if row.get('candidate_view_alignment') != 'panoramic':
                 raise ValueError('Recurrent VLN-BERT requires candidate_view_alignment=panoramic')
-            key = row['scan_id']+'_'+row['viewpoint_id']
             # Only the panorama at the currently observed viewpoint is read.
-            panorama = self.features[self.feature_index[key]]
+            panorama = panoramas[i]
             for j, candidate in enumerate(row['candidates']):
                 features[i, j, :2048] = panorama[candidate['source_view_index']]
                 features[i, j, 2048:] = angle_features(candidate['relative_heading'], candidate['elevation'])
@@ -67,8 +68,8 @@ class RecurrentVLNBERT(nn.Module):
         mask = torch.arange(max(lengths), device=device)[None] < torch.tensor(lengths, device=device)[:, None]
         return torch.from_numpy(features).to(device), torch.from_numpy(heading_features).to(device), mask, actions
 
-    def navigate(self, language, hidden, language_mask, navigation, states):
-        candidates, angles, valid, action_ids = self.candidate_inputs(navigation, states)
+    def navigate(self, language, hidden, language_mask, navigation, states, panoramas=None):
+        candidates, angles, valid, action_ids = self.candidate_inputs(navigation, states, panoramas)
         sentence = torch.cat([hidden[:, None], language[:, 1:]], dim=1)
         self.navigator.vln_bert.config.directions = candidates.shape[1]
         hidden, logits = self.navigator('visual', sentence=sentence,
@@ -78,7 +79,9 @@ class RecurrentVLNBERT(nn.Module):
 
     @torch.inference_mode()
     def select_action(self, obs):
-        rows = obs['navigation']
+        metadata = obs.get('reasoning')
+        rows = [row['navigation'] for row in metadata] if metadata else obs['navigation']
+        panoramas = obs.get('image') if metadata and all(row.get('image_type') == 'features' for row in metadata) else None
         reset = torch.as_tensor(obs['timestamp']).reshape(-1) == 0
         device = next(self.parameters()).device
         if self.hidden is None or self.hidden.shape[0] != len(rows):
@@ -88,7 +91,7 @@ class RecurrentVLNBERT(nn.Module):
             hidden, language, mask = self.encode_instructions([obs['raw_lang'][i] for i in indices])
             self.hidden[indices], self.language[indices], self.language_mask[indices] = hidden, language, mask
         self.hidden, logits, action_ids = self.navigate(self.language, self.hidden,
-            self.language_mask, rows, obs['state'])
+            self.language_mask, rows, obs['state'], panoramas)
         selected = logits.argmax(-1).tolist()
         return torch.tensor([ids[index] for ids, index in zip(action_ids, selected)],
                             device=device, dtype=torch.float32).reshape(-1, 1, 1)
@@ -133,20 +136,16 @@ def load_model(args):
                 raise ValueError('Training without pretrained weights requires a local vocabulary path')
             model = RecurrentVLNBERT(getattr(args, 'feature_store', None), vocabulary)
             model.download = getattr(args, 'download', True)
-        if not getattr(args, 'feature_store', None):
-            from vlastudio.utils.navigation_assets import dataset_root
-            model.feature_store = dataset_root()/'places365'
-            if getattr(args, 'task', None):
-                from vlastudio.configs.loader import ConfigLoader
-                task, _ = ConfigLoader(args=args, unknown_args=getattr(args, 'unknown_args', [])).load_task(args.task)
-                for dataset in task.get('datasets', []):
-                    store = dataset.get('args', {}).get('feature_store')
-                    if store:
-                        model.feature_store = Path(store).expanduser()
-                        break
         return {'model': model}
     return {'model': RecurrentVLNBERT.from_pretrained(args.model_name_or_path,
         getattr(args, 'device', 'cpu'), getattr(args, 'feature_store', None), getattr(args, 'download', True))}
+
+
+def get_data_processor(args, model_components):
+    if not getattr(args, 'is_training', False):
+        return None
+    from vlastudio.policy.navigation_processing import NavigationProcessor
+    return NavigationProcessor(model_components['model'], 'vlnbert')
 
 
 def get_data_collator(args, model_components):

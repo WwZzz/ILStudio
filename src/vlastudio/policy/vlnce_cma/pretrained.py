@@ -61,7 +61,7 @@ def convert_checkpoint(source, output, expected_sha256):
                 'source_sha256': digest}, output / 'policy.pt')
     (output / 'source_config.json').write_text(json.dumps(config, indent=2) + '\n')
     (output / 'config.json').write_text(json.dumps({'ctrl_space': 'navigation', 'ctrl_type': 'discrete',
-        'chunk_size': 1, 'state_dim': 2, 'action_dim': 1}))
+        'chunk_size': 1, 'state_dim': 0, 'action_dim': 1}))
     (output / 'policy_metadata.json').write_text(json.dumps({'policy_module': 'policy.vlnce_cma', 'policy_name': 'vlnce_cma'}))
     (output / 'normalize.json').write_text(json.dumps({'datasets': [{'dataset_id': 'r2r_vlnce',
         'ctrl_space': 'navigation', 'ctrl_type': 'discrete'}], 'state': {'r2r_vlnce': 'identity'},

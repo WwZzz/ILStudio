@@ -1,0 +1,8 @@
+{
+  "source": "R2R_VLNCE_v1-3_preprocessed/train/train.json.gz: instruction_vocab.word_list",
+  "release": "https://github.com/jacobkrantz/VLN-CE",
+  "archive_sha256": "3171f5bed90c81d7eb4db9554955b6229ec1fe96d808c9340582ba33eafdb4de",
+  "instruction_vocab_json_sha256": "7f5d9d485000a38822ba67d4395543b4900fc5e3e3be9a207a4d6d97adad62b6",
+  "words": 2504,
+  "purpose": "Encode original instruction text without requiring a simulator or annotation download. Checkpoints also save this vocabulary."
+}
