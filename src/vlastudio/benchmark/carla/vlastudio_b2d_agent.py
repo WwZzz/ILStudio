@@ -5,7 +5,7 @@ import carla
 from team_code.tcp_b2d_agent import TCPAgent
 from TCP.config import GlobalConfig
 from vlastudio.benchmark.carla import bridge
-from vlastudio.utils.driving import COMMANDS, command_index, compose_images, local_points, observation_state
+from vlastudio.utils.driving import compose_images, driving_observation, local_points
 
 
 def get_entry_point():
@@ -46,9 +46,8 @@ class VLAStudioDrivingAgent(TCPAgent):
         values = self.tick(input_data)
         if self.step < self.config.seq_len:
             return carla.VehicleControl()
-        state = observation_state(values['speed'], values['target_point'], values['next_command'])
-        observation = {'state': state, 'image': values['rgb'].transpose(2, 0, 1)[None].copy(),
-                       'raw_lang': COMMANDS[command_index(values['next_command'])],
+        observation = {**driving_observation(values['speed'], values['target_point'], values['next_command']),
+                       'image': values['rgb'].transpose(2, 0, 1)[None].copy(),
                        'timestep': self.step-self.config.seq_len}
         bridge.AGENT_PIPE.send(('observation', observation))
         command, value = bridge.AGENT_PIPE.recv()

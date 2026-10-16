@@ -1,0 +1,31 @@
+{
+  "source_revision": "8a08b07883f10b7d83f6bf5dd475bda91a91c50a",
+  "torch": "2.4.0+cpu",
+  "device": "cpu",
+  "weights": "random initialization; no official checkpoint download",
+  "canonical_commands_checked": 6,
+  "new_and_original_nine_input_predictions_bitwise_equal": true,
+  "all_output_heads_compared": [
+    "pred_speed",
+    "pred_value_traj",
+    "pred_features_traj",
+    "pred_wp",
+    "pred_value_ctrl",
+    "pred_features_ctrl",
+    "action_index",
+    "future_feature",
+    "future_action_index"
+  ],
+  "real_network_supervised_backward_and_optimizer_step": true,
+  "backbone_weight_changed": true,
+  "loss": 12.244840621948242,
+  "state_shape": [
+    6,
+    1
+  ],
+  "network_input_shape": [
+    6,
+    9
+  ],
+  "purpose": "input equivalence and training correctness; not driving performance"
+}

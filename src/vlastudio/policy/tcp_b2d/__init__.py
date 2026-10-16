@@ -19,7 +19,8 @@ class TCPConfig(PretrainedConfig):
         self.planner_type, self.download = planner_type, download
         self.freeze_batch_norm = freeze_batch_norm
         self.ctrl_space, self.ctrl_type = 'vehicle', 'control'
-        self.state_dim, self.action_dim, self.chunk_size = 9, 4, 1
+        self.state_dim, self.action_dim, self.chunk_size = 1, 4, 1
+        self.network_state_dim = 9
         self.action_order = ['steer', 'throttle', 'brake', 'reverse']
 
 
@@ -31,6 +32,8 @@ class TCPPolicy(PreTrainedModel):
         from .upstream import network
         self.navigator = network(config.download)
         self.controllers = {}
+        from .inputs import TCPDataProcessor
+        self.data_processor = TCPDataProcessor()
 
     def reset(self):
         self.controllers.clear()
@@ -56,7 +59,11 @@ class TCPPolicy(PreTrainedModel):
                     module.eval()
         return self
 
-    def predict(self, image, state):
+    def predict(self, image, state, raw_lang=None):
+        from .inputs import network_state
+        return self._predict(image, network_state(state, raw_lang))
+
+    def _predict(self, image, state):
         if image.ndim == 5:
             image = image[:, 0]
         if tuple(image.shape[1:]) != (3, 256, 900) or state.shape[-1] != 9:
@@ -68,9 +75,9 @@ class TCPPolicy(PreTrainedModel):
         measured[:, 0] /= 12.
         return self.navigator((image-mean)/std, measured, measured[:, 1:3])
 
-    def forward(self, image, state, waypoints=None, action_index=None, future_action_index=None,
+    def forward(self, image, state, raw_lang=None, tcp_state=None, waypoints=None, action_index=None, future_action_index=None,
                 expert_features=None, expert_value=None, future_features=None, return_loss=True):
-        prediction = self.predict(image, state)
+        prediction = self._predict(image, tcp_state) if tcp_state is not None else self.predict(image, state, raw_lang)
         if waypoints is None:
             return prediction
         loss = F.l1_loss(prediction['pred_wp'], waypoints.float())
@@ -88,10 +95,13 @@ class TCPPolicy(PreTrainedModel):
     @torch.inference_mode()
     def select_action(self, obs):
         from .upstream import modules
+        from .inputs import network_state
         device = self.device
         state = torch.as_tensor(obs['state'], device=device, dtype=torch.float32)
+        state = (torch.as_tensor(obs['tcp_state'], device=device, dtype=torch.float32)
+                 if 'tcp_state' in obs else network_state(state, obs.get('raw_lang')))
         image = torch.as_tensor(obs['image'], device=device)
-        prediction = self.predict(image, state)
+        prediction = self._predict(image, state)
         resets = torch.as_tensor(obs['timestamp']).reshape(-1).cpu().tolist()
         module, _ = modules(self.config.download)
         controls = []
@@ -154,13 +164,23 @@ def load_model(args):
     return {'model': model}
 
 
+def get_data_processor(args, model_components):
+    from .inputs import TCPDataProcessor
+    return TCPDataProcessor()
+
+
 def get_data_collator(args, model_components):
     if not getattr(args, 'is_training', False):
         return None
-    keys = ['image', 'state', 'waypoints', 'action_index', 'future_action_index',
+    keys = ['image', 'state', 'tcp_state', 'waypoints', 'action_index', 'future_action_index',
             'expert_features', 'expert_value', 'future_features']
     def collate(samples):
-        return {key: torch.as_tensor(np.stack([row[key] for row in samples])) for key in keys}
+        from .inputs import TCPDataProcessor
+        processor = TCPDataProcessor()
+        samples = [row if 'tcp_state' in row else processor(row) for row in samples]
+        batch = {key: torch.as_tensor(np.stack([row[key] for row in samples])) for key in keys}
+        batch['raw_lang'] = [row['raw_lang'] for row in samples]
+        return batch
     return collate
 
 

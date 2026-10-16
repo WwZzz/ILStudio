@@ -1,8 +1,10 @@
 """Coordinate and camera conventions shared by Bench2Drive training and inference."""
+import json
 import numpy as np
 
 COMMANDS = ['turn left', 'turn right', 'go straight', 'follow the lane',
             'change to the left lane', 'change to the right lane']
+TARGET_PREFIX = 'Local route waypoint in meters (ego frame; x=forward, y=right): '
 
 
 def action_table():
@@ -31,9 +33,13 @@ def local_points(points, position, compass):
     return (np.asarray(points)-np.asarray(position))@rotation.T
 
 
-def observation_state(speed, target, command):
-    one_hot = np.eye(6, dtype=np.float32)[command_index(command)]
-    return np.concatenate([[speed], target, one_hot]).astype(np.float32)
+def driving_observation(speed, target, command):
+    """Expose measured ego state and a complete textual navigation task."""
+    point = np.asarray(target, dtype=np.float32)
+    if point.shape != (2,) or not np.isfinite(point).all():
+        raise ValueError('Route target must contain two finite ego-frame coordinates')
+    text = COMMANDS[command_index(command)]+'\n'+TARGET_PREFIX+json.dumps(point.tolist(), allow_nan=False)
+    return {'state': np.asarray([speed], dtype=np.float32), 'raw_lang': text}
 
 
 def compose_images(images, *, jpeg=False, jpeg_workers=3):

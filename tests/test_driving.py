@@ -13,7 +13,7 @@ torch = pytest.importorskip('torch')
 
 from vlastudio.benchmark.base import MetaAction
 from vlastudio.benchmark.carla import Bench2DriveEnv, route_metrics
-from vlastudio.utils.driving import action_table, local_points, observation_state
+from vlastudio.utils.driving import COMMANDS, action_table, driving_observation, local_points
 
 
 def test_official_success_excludes_only_min_speed():
@@ -46,8 +46,11 @@ def test_declared_action_order_is_enforced_before_startup():
 def test_driving_coordinates_and_commands():
     np.testing.assert_allclose(local_points([[3, 2]], [1, 2], np.pi/2), [[2, 0]], atol=1e-6)
     np.testing.assert_allclose(local_points([[1, 0]], [0, 0], 0), [[0, 1]], atol=1e-6)
-    state = observation_state(3, [2, 1], -1)
-    np.testing.assert_equal(state, [3, 2, 1, 0, 0, 0, 1, 0, 0])
+    observation = driving_observation(3, [2, 1], -1)
+    np.testing.assert_equal(observation['state'], [3])
+    assert observation['raw_lang'].startswith('follow the lane\n')
+    assert observation['raw_lang'].endswith('[2.0, 1.0]')
+    assert 'navigation' not in observation
     assert len(action_table()) == 39 and action_table()[-1][3]
 
 
@@ -59,6 +62,53 @@ def test_parallel_camera_conversion_preserves_exact_policy_pixels():
     sequential = compose_images(images, jpeg=True, jpeg_workers=1)
     parallel = compose_images(images, jpeg=True, jpeg_workers=3)
     np.testing.assert_array_equal(sequential, parallel)
+
+
+def test_text_adapter_reconstructs_all_six_original_tcp_inputs():
+    from vlastudio.policy.tcp_b2d.inputs import network_state
+    observations = [driving_observation(i+.5, [i, -i], i+1) for i in range(6)]
+    state = torch.tensor(np.stack([row['state'] for row in observations]))
+    packed = network_state(state, [row['raw_lang'] for row in observations])
+    expected = torch.cat([state, torch.tensor([[i, -i] for i in range(6)]), torch.eye(6)], dim=1)
+    torch.testing.assert_close(packed, expected)
+    assert [row['raw_lang'].split('\n')[0] for row in observations] == COMMANDS
+    # Route geometry stays per observation; it must not broadcast across a batch.
+    torch.testing.assert_close(packed[:, 1:3], expected[:, 1:3])
+
+
+@pytest.mark.parametrize('invalid', ['text', 'frame', 'unit', 'axes', 'missing_target', 'nonfinite'])
+def test_tcp_rejects_ambiguous_or_missing_task_conditions(invalid):
+    from vlastudio.policy.tcp_b2d.inputs import network_state
+    sample = driving_observation(2, [10, -3], 1)
+    if invalid == 'text': sample['raw_lang'] = 'Drive somewhere nice.'
+    elif invalid == 'frame': sample['raw_lang'] = sample['raw_lang'].replace('ego frame', 'world frame')
+    elif invalid == 'unit': sample['raw_lang'] = sample['raw_lang'].replace('meters', 'centimeters')
+    elif invalid == 'axes': sample['raw_lang'] = sample['raw_lang'].replace('x=forward, y=right', 'x=right, y=forward')
+    elif invalid == 'missing_target': sample['raw_lang'] = 'turn left'
+    else: sample['raw_lang'] = sample['raw_lang'].replace('[10.0, -3.0]', '[NaN, -3.0]')
+    with pytest.raises(ValueError):
+        network_state(torch.tensor(sample['state'])[None], sample['raw_lang'])
+
+
+def test_training_and_environment_share_text_and_geometry_contract():
+    from vlastudio.policy.tcp_b2d import get_data_collator, get_data_processor
+    from vlastudio.benchmark.base import MetaObs, MetaPolicy
+    from dataclasses import asdict
+    live = driving_observation(2, [10, -3], 1)
+    live['image'] = np.zeros((1, 3, 2, 2), dtype=np.uint8)
+    meta = MetaObs(**live)
+    meta.to_batch()
+    sample = MetaPolicy(None).normed_mobs_to_samples(meta)[0]
+    sample.update(waypoints=np.zeros((4, 2)), action_index=0, future_action_index=np.zeros(4),
+                  expert_features=np.zeros(1536), expert_value=0., future_features=np.zeros((4, 1536)))
+    batch = get_data_collator(SimpleNamespace(is_training=True), {})([sample])
+    assert batch['raw_lang'] == [live['raw_lang']]
+    policy = MetaPolicy(SimpleNamespace(data_processor=get_data_processor(None, {}), data_collator=None))
+    inference = policy.meta2obs([sample])
+    torch.testing.assert_close(inference['tcp_state'], batch['tcp_state'])
+    assert tuple(batch['tcp_state'].shape) == (1, 9)
+    assert tuple(batch['state'].shape) == (1, 1)
+    assert 'action_index' not in asdict(meta)
 
 
 def test_terminal_observation_and_negative_warmup_have_no_training_actions(tmp_path):
@@ -83,6 +133,10 @@ def test_terminal_observation_and_negative_warmup_have_no_training_actions(tmp_p
     assert len(dataset) == 6
     sample = dataset[0]
     assert sample['frame_id'] == '00000'
+    np.testing.assert_equal(sample['state'], [3])
+    assert sample['raw_lang'].startswith('follow the lane\n')
+    from vlastudio.policy.tcp_b2d.inputs import encode_task
+    np.testing.assert_allclose(encode_task(sample['state'], sample['raw_lang'])[1:3], [30, 0], atol=1e-5)
     np.testing.assert_allclose(sample['waypoints'], [[5, 0], [10, 0], [15, 0], [20, 0]], atol=1e-5)
     np.testing.assert_equal(sample['future_features'][:, 0], [5, 10, 15, 20])
     np.testing.assert_equal(sample['action'], [[0, 0, 1, 0]])
@@ -107,7 +161,7 @@ def test_batchnorm_freeze_keeps_training_gradients_and_checkpoint_contract(tmp_p
     loaded = TCPPolicy.from_pretrained(tmp_path)
     assert all(torch.equal(value, loaded.state_dict()[key]) for key, value in model.state_dict().items())
     config = json.loads((tmp_path/'config.json').read_text())
-    assert (config['action_dim'], config['state_dim']) == (4, 9)
+    assert (config['action_dim'], config['state_dim'], config['network_state_dim']) == (4, 1, 9)
     assert json.loads((tmp_path/'normalize.json').read_text())['action']['bench2drive'] == 'identity'
 
 
@@ -132,10 +186,11 @@ def test_official_fused_controls_and_braking_preserve_input_state(monkeypatch):
         logits = torch.zeros(1, 39)
         logits[:, chosen[0]] = 1
         return {'pred_wp': torch.zeros(1, 4, 2), 'action_index': logits}
-    monkeypatch.setattr(model, 'predict', predict)
-    state = torch.tensor([[.2, 3, 4, 0, 0, 0, 1, 0, 0]])
+    monkeypatch.setattr(model, '_predict', predict)
+    state = torch.tensor([[.2]])
     original = state.clone()
-    observation = {'state': state, 'image': torch.zeros(1), 'timestamp': torch.tensor([0])}
+    observation = {**driving_observation(.2, [3, 4], 4), 'state': state,
+                   'image': torch.zeros(1), 'timestamp': torch.tensor([0])}
     np.testing.assert_allclose(model.select_action(observation).numpy(), [[[-.05, .5, 0, 0]]], atol=1e-6)
     assert torch.equal(state, original)
     chosen[0] = 0

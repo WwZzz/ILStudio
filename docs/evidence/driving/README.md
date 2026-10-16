@@ -1,14 +1,31 @@
 # Driving evidence
 
-**20-route engineering acceptance did not meet the thresholds; full 220-route validation is deferred.** To reduce
+**Basic integration accepted by the user; original performance thresholds were not met.** To reduce
 runtime, the user approved a fixed 20-route engineering gate: SR ≥20%, Driving
 Score ≥40, and zero initialization errors. The selection covers 20 scenario types
-across six towns, including the known Town15 parking and Town12 bicycle cases.
+across five towns, including the known Town15 parking and Town12 bicycle cases.
 The optional bicycle compatibility repair is enabled and disclosed. Full official
 220-route comparison is deferred. The route list and selection rule were frozen
 before this evaluation in [engineering-20-protocol.json](engineering-20-protocol.json).
 Previous partial runs and diagnostics are excluded. The execution protocol is in
 [protocol.json](protocol.json).
+
+The completed run achieved SR 15% (3/20) and DS 31.2438 with all requested
+scenarios initialized. The user accepted this for basic framework integration
+and removed the requirement to improve it to SR 20% / DS 40. The original audit
+and `acceptance.json` remain unchanged: their `accepted: false` describes the
+original numerical gate. The later decision is recorded separately in
+[user-acceptance.json](user-acceptance.json). Full-split comparison remains deferred.
+These metrics predate the public text/navigation input refactor; that refactor
+preserves the internal TCP input numerically and is checked separately, without
+claiming another 20-route evaluation.
+
+The updated public sample keeps speed in `state` and places the command and local
+route waypoint together in `raw_lang`. TCP's data processor parses this into its
+private nine-value input. [CPU network check](interface/text-input-cpu.json)
+compares every output head against the original numeric input for all six commands
+with bitwise-equal predictions and runs a real supervised backward/optimizer step.
+That check uses random weights and is not another driving-performance result.
 
 | Check | Recorded observation |
 |---|---|

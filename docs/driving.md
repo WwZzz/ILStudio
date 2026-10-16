@@ -50,12 +50,20 @@ Negative warmup frames and terminal observations without an expert action are
 excluded. Future targets stay within a single route.
 
 Live policy inputs are the three front RGB cameras composed into a
-`(1,3,256,900)` panorama and a nine-value state:
-`[speed_mps, next_point_x, next_point_y, command_one_hot_6]`. The next point and
+`(1,3,256,900)` panorama, `state=[speed_mps]`, and complete task text in `raw_lang`.
+The text includes the command and local route waypoint, explicitly declaring
+meters, ego frame and forward/right axes. The next point and
 command come from the supplied navigation route, GNSS and IMU, using the authors'
 route planner. Other actors' privileged state, expert actions and future ego
-positions are not policy inputs. The baseline uses categorical driving commands;
-it is not a free-form language-conditioned VLA model.
+positions are not policy inputs. TCP's data processor parses the task text,
+converts its canonical command into indicators and constructs a private nine-value
+`tcp_state` input containing speed, target XY and six command indicators.
+The dataset and live environment never encode a command one-hot into `state`.
+A language policy can consume the same `raw_lang` directly; this TCP adapter
+itself supports only its six declared instructions with the waypoint text template.
+
+[Seven-framework comparison and complete sample](driving_data_contract.md) ·
+[Example data composition](../examples/10_autonomous_driving/carla/README.md#what-is-in-a-training-sample).
 
 The environment declares `ctrl_space: vehicle`, `ctrl_type: control` and
 `action_order: [steer, throttle, brake, reverse]`. Controls have ranges
@@ -106,8 +114,8 @@ an actor-local copy of the path, preserving the scenario's declared continuous
 flow. Each episode records the flag and any repaired connection geometry.
 This changes scenario path construction and must be disclosed as a compatibility
 configuration; its results are not an exact reproduction of the unmodified
-upstream environment. The full-split acceptance decision for this configuration
-is pending. Training weights, ego routes, flow speed and scoring are unchanged.
+upstream environment. The user approved this configuration for the fixed 20-route
+engineering check. Training weights, ego routes, flow speed and scoring are unchanged.
 
 `evaluate.py` preserves native per-route records in `episodes.jsonl`, writes
 source/model/config hashes to `run.json`, and writes aggregate results only
@@ -121,10 +129,14 @@ The authors exclude `min_speed_infractions` from SR and disable their DS penalty
 those records are nevertheless retained. Completing a route, reaching a time
 limit or exiting a process does not by itself pass the task.
 
-The agreed full-split integration gate is **SR ≥20% and DS ≥40** for a policy
-fine-tuned through VLAStudio. This gate requires all 220 distinct held-out routes;
-single-route smoke results do not meet it. The authors' 0.0.4 TCP reference is
-DS 51.44 and SR 26.36%.
+The initial performance gate was SR ≥20% and DS ≥40; the user later selected a
+fixed 20-route engineering subset. That run completed all requested scenarios
+with **SR 15% (3/20), DS 31.2438**. The user accepted these results for basic
+integration, without requiring more training to reach the earlier thresholds.
+This is not full-split performance acceptance or paper-metric reproduction.
+Original numeric-gate failures and native records are preserved in the
+[evidence](evidence/driving/README.md). The authors' full 0.0.4 TCP reference is
+DS 51.44 and SR 26.36%; it cannot be compared directly to the selected subset.
 
 ## Pinned upstream assets
 

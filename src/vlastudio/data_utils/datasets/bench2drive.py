@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 
-from vlastudio.utils.driving import COMMANDS, action_table, command_index, compose_images, local_points, observation_state
+from vlastudio.utils.driving import action_table, compose_images, driving_observation, local_points
 from vlastudio.utils.driving_assets import B2D_DATA_REVISION, cache_root, extract, hf_asset
 
 
@@ -126,9 +126,9 @@ class Bench2DriveDataset(Dataset):
         # Expert discrete actions are the authors' 39 throttle/steer/brake choices.
         action_index = int(experts[frame, -1])
         throttle, steer, brake, reverse = action_table()[action_index]
-        return {'image': compose_images(images)[None], 'state': observation_state(row[5], target, row[6]),
+        return {'image': compose_images(images)[None], **driving_observation(row[5], target, row[6]),
                 'action': np.asarray([[steer, throttle, brake, float(reverse)]], dtype=np.float32),
-                'is_pad': np.zeros(1, dtype=bool), 'raw_lang': COMMANDS[command_index(row[6])],
+                'is_pad': np.zeros(1, dtype=bool),
                 'waypoints': waypoints, 'action_index': action_index,
                 'future_action_index': experts[future, -1].astype(np.int64),
                 'expert_features': experts[frame, :-2].copy(), 'expert_value': experts[frame, -2].copy(),

@@ -1,5 +1,5 @@
 {
-  "status": "engineering_thresholds_not_met",
+  "status": "accepted_for_basic_integration_by_user",
   "implementation_commit": "0bcf4c7",
   "candidate_implementation_commit": "3492d28",
   "training": {
@@ -28,5 +28,6 @@
     "fixed_routes": "engineering-20-protocol.json",
     "result": "engineering-20/independent-audit.json"
   },
-  "official_full_220_deferred": true
+  "official_full_220_deferred": true,
+  "acceptance_decision": "user-acceptance.json"
 }

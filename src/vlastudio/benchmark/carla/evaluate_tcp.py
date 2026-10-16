@@ -83,6 +83,7 @@ def main(default_config=None):
             observation = asdict(env.reset())
             while True:
                 inputs = {'state': observation['state'][None], 'image': observation['image'][None],
+                          'raw_lang': [observation['raw_lang']],
                           'timestamp': np.asarray([observation['timestep']])}
                 action = model.select_action(inputs)[0, 0].cpu().numpy()
                 observation, _, done, information = env.step(action)

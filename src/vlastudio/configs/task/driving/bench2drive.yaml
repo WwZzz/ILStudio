@@ -7,7 +7,7 @@ datasets:
     download: true
 meta:
   action_dim: 4
-  state_dim: 9
+  state_dim: 1
   chunk_size: 1
   action_normalize: identity
   state_normalize: identity
