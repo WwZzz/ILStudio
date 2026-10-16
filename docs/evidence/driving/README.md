@@ -1,10 +1,14 @@
 # Driving evidence
 
-**Full validation has not passed.** The original run stopped at an upstream
-`CrossingBicycleFlow` initialization error. The agreed acceptance gate requires a TCP policy
-fine-tuned through VLAStudio to reach SR ≥20% and Driving Score ≥40 on all 220
-official Bench2Drive 0.0.4 validation routes. Small interface checks below do not
-establish that result. The fixed protocol is in [protocol.json](protocol.json).
+**Engineering acceptance is running; full validation has not passed.** To reduce
+runtime, the user approved a fixed 20-route engineering gate: SR ≥20%, Driving
+Score ≥40, and zero initialization errors. The selection covers 20 scenario types
+across six towns, including the known Town15 parking and Town12 bicycle cases.
+The optional bicycle compatibility repair is enabled and disclosed. Full official
+220-route comparison is deferred. The route list and selection rule were frozen
+before this evaluation in [engineering-20-protocol.json](engineering-20-protocol.json).
+Previous partial runs and diagnostics are excluded. The execution protocol is in
+[protocol.json](protocol.json).
 
 | Check | Recorded observation |
 |---|---|
@@ -53,8 +57,8 @@ and maximum per-frame displacement 0.552 m. The trained-policy compatibility
 diagnostic completed 3,999 actions over 200.05 simulated seconds with the requested
 scenario initialized. It failed at the official tick cap (DS/route completion
 17.47, SR 0/1); this verifies an operating closed loop, not policy acceptance.
-It is separate from formal acceptance. Using patched
-scenario construction for formal acceptance requires an explicit protocol choice.
+It is separate from engineering acceptance. The user approved the labelled
+compatibility configuration for the new fixed 20-route evaluation.
 
 The canonical release XML has 220 routes and 42 distinct scenario types with
 unequal counts. The upstream release note describes 44 types with five routes

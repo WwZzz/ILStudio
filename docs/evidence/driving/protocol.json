@@ -1,5 +1,5 @@
 {
-  "status": "pending_bicycle_compatibility_protocol_decision",
+  "status": "engineering_20_running",
   "implementation_commit": "0bcf4c7",
   "candidate_implementation_commit": "3492d28",
   "training": {
@@ -14,14 +14,18 @@
   },
   "evaluation": {
     "benchmark": "Bench2Drive 0.0.4 val",
-    "routes": 220,
+    "routes": 20,
     "execution_processes": 3,
     "physical_gpus": 1,
     "traffic_manager_seed": 0,
     "planner_type": "merge_ctrl_traj",
     "remove_map_parked_vehicles": true,
-    "repair_bicycle_flow": false,
+    "repair_bicycle_flow": true,
     "minimum_success_rate": 0.2,
-    "minimum_driving_score": 40
-  }
+    "minimum_driving_score": 40,
+    "scope": "engineering_subset_20_not_official_full_split",
+    "maximum_initialization_errors": 0,
+    "fixed_routes": "engineering-20-protocol.json"
+  },
+  "official_full_220_deferred": true
 }
