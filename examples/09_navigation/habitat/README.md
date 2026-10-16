@@ -31,44 +31,58 @@ python examples/09_navigation/habitat/evaluate.py \
 ```
 
 The first command loads released weights automatically. The second uses the trained checkpoint.
-The policy takes RGB, depth and instruction tokens, and outputs STOP, FORWARD or LEFT/RIGHT.
+The policy takes RGB, depth and original instruction text, and outputs STOP, FORWARD or LEFT/RIGHT.
 [Recorded full-split results and checkpoint provenance](../../../docs/evidence/navigation/standard-interface/README.md).
 
 ## Data composition
 
 `VLNCEDataset` reads official `train.json.gz` episodes (scene/start pose, instruction
-text and original vocabulary tokens) and `train_gt.json.gz` expert action sequences.
+text) and `train_gt.json.gz` expert action sequences.
 It replays the recorded actions in Habitat using the authorized MP3D scenes and
 caches the resulting RGB/depth observations. No policy-generated demonstrations
 or DAgger collection are needed. One item is an entire instruction trajectory of
-length `T`; the training collator pads trajectories and constructs sequence masks.
+length `T` with `sample_mode: episode`, the example default. The dataset owns
+temporal sampling and action alignment, following `HDF5SequenceDataset` (FastWAM).
+The collator keeps variable-length episodes separate.
 
 Illustrative sample, with arrays shown symbolically:
 
 ```python
 {
     "raw_lang": "Leave the bedroom and stop by the stairs.",
-    "instruction": token_ids,       # original annotation vocabulary; (L,)
     "action": [[1], [1], [2], [1], [0]],  # example T=5; expert labels
-    "state": zeros,                 # (T,2), placeholder; no goal distance/bearing
+    "state": empty_state,           # (T,0); no supplied proprioception
     "is_pad": [False] * T,
-    "rgb_features": rgb_features,   # (T,...), cached RGB encoder output
-    "depth_features": depth_features, # (T,...), cached depth encoder output
-    "progress": expert_progress,    # (T,), auxiliary training target only
+    "image": rgb,                   # uint8 (1,T,3,224,224)
+    "depth": normalized_depth,      # float32 (1,T,256,256), range [0,1]
+    "image_is_pad": [False] * T,
+    "supervision": {                # training-only measurements, not inputs
+        "distance_to_goal": distances,          # (T,)
+        "initial_distance_to_goal": initial_distances, # (T,)
+    },
     "episode_id": "example_episode",
 }
 ```
 
-With `feature_checkpoint: official` (the example default), visual features are
-computed using that checkpoint and cached; training uses these features, rather
-than recomputing/updating the visual encoders on every batch. Without a feature
-checkpoint the item instead contains `rgb` `(T,H,W,3)` and `depth` `(T,H,W,1)`.
-Changing annotation/config/encoder provenance creates a different replay cache.
+The dataset stores raw replay observations in its data cache; it does not load a
+policy or checkpoint. CMA's processor tokenizes `raw_lang` with its packaged
+2504-word release vocabulary, adapts tensor layouts and computes the auxiliary
+progress target. With frozen visual encoders it computes features; the standard
+data task cache persists these processed samples. The processor owns no cache
+directory. Changing encoder weights invalidates this processed cache while raw
+RGB/depth remain reusable. Trainable encoders receive RGB/depth tensors instead.
+
+For fixed windows set dataset args `sample_mode: window`, `chunk_size: 32`.
+By default this loads 32 observations and their 32 actions. `image_offsets`
+selects observation offsets independently, as in FastWAM; CMA requires one
+observation per action. Windows never cross episodes: final frames/actions are
+repeated with `image_is_pad`/`is_pad` marking padding. A single observation has
+`image` `(1,3,H,W)`; multiple observations have `(1,T,3,H,W)`. Whole episodes
+preserve recurrent history from reset and are the baseline training default.
 
 Action IDs are `0=STOP`, `1=MOVE_FORWARD`, `2=TURN_LEFT`, `3=TURN_RIGHT`.
 The configured primitives move 0.25 m or rotate 15 degrees. At evaluation the
-environment returns current RGB/depth, `raw_lang`, original instruction tokens in
-`navigation`, and a timestep. The learned VLN configuration does not expose goal
-coordinates, expert actions, progress or the reference path. Its two-value state
-is a compatibility placeholder, not a navigation target. The policy owns its
+environment returns current RGB/depth, `raw_lang`, an empty state and a timestep.
+The learned VLN configuration does not expose goal coordinates, expert actions,
+progress, annotation tokens or the reference path. The policy owns its
 recurrent memory and previous-action history.

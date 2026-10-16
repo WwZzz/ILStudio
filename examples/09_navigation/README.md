@@ -26,11 +26,13 @@ There is no supplied numeric local destination point in these two VLN examples.
 
 | Example | A dataset item | Main visual input | Supervision |
 |---|---|---|---|
-| [Habitat / CMA](habitat/README.md#data-composition) | One instruction and its full expert sequence | Replayed RGB/depth or cached encoder features | STOP/FORWARD/LEFT/RIGHT and training-only progress |
-| [MatterSim / VLN-BERT](mattersim/README.md#data-composition) | One instruction and its graph-path sequence | Cached panorama features and candidate angles | Correct candidate at each step, then STOP |
+| [Habitat / CMA](habitat/README.md#data-composition) | One instruction and its full expert sequence | Raw replayed RGB/depth | STOP/FORWARD/LEFT/RIGHT and training-only distance measurements |
+| [MatterSim / VLN-BERT](mattersim/README.md#data-composition) | One instruction and its graph-path sequence | Published panorama features and raw candidate geometry, or rendered RGB | Simulator action IDs, ending in STOP |
 
-Both expose original text as `raw_lang`. The example-specific caches retain the
-tokens/features their released baselines require. Candidate lists in MatterSim
+Both expose original text as `raw_lang`. Datasets own multi-frame loading,
+temporal alignment and raw data caches, following the FastWAM sequence dataset.
+Policy processors convert these samples into model inputs; the shared data task
+cache can store their outputs. Candidate lists in MatterSim
 describe reachable neighbors; they do not identify the correct next neighbor.
 The policy chooses from them. Per-folder READMEs show exact sample layouts and
 explain how training labels differ from live observations.

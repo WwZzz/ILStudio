@@ -52,10 +52,13 @@ def test_replay_cache_does_not_change_training_rng(tmp_path):
             random.seed(987)
             np.random.seed(987)
             torch.manual_seed(987)
-            return {'action': torch.tensor([[0]]), 'episode_id': episode['episode_id']}
+            yield {'action': torch.tensor([[0]]), 'state': torch.empty(0),
+                   'raw_lang': 'Stop.', 'navigation': {}}
 
     dataset = Fixture()
     dataset.episodes = [{'episode_id': '1'}]
+    dataset.episode_lengths = [1]
+    dataset._sampling('episode', 1, None)
     dataset._cache({'fixture': 1}, tmp_path)
     random.seed(17)
     np.random.seed(17)

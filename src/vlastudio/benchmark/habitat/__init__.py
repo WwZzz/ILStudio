@@ -197,6 +197,8 @@ class HabitatLabEnv(MetaEnv):
         if isinstance(instruction, dict):
             text = instruction.get('instruction_text', '')
         state = np.asarray(obs.get('pointgoal_with_gps_compass', obs.get('pointgoal', [0., 0.])), dtype=np.float32)
+        if getattr(self.config, 'state_source', None) == 'none':
+            state = np.empty(0, dtype=np.float32)
         depth = np.asarray(obs['depth']) if 'depth' in obs else None
         if depth is not None and depth.ndim == 3:
             depth = depth[..., 0]
