@@ -1,5 +1,5 @@
 {
-  "status": "engineering_20_running",
+  "status": "engineering_thresholds_not_met",
   "implementation_commit": "0bcf4c7",
   "candidate_implementation_commit": "3492d28",
   "training": {
@@ -25,7 +25,8 @@
     "minimum_driving_score": 40,
     "scope": "engineering_subset_20_not_official_full_split",
     "maximum_initialization_errors": 0,
-    "fixed_routes": "engineering-20-protocol.json"
+    "fixed_routes": "engineering-20-protocol.json",
+    "result": "engineering-20/independent-audit.json"
   },
   "official_full_220_deferred": true
 }

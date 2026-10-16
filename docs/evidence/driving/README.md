@@ -1,6 +1,6 @@
 # Driving evidence
 
-**Engineering acceptance is running; full validation has not passed.** To reduce
+**20-route engineering acceptance did not meet the thresholds; full 220-route validation is deferred.** To reduce
 runtime, the user approved a fixed 20-route engineering gate: SR ≥20%, Driving
 Score ≥40, and zero initialization errors. The selection covers 20 scenario types
 across six towns, including the known Town15 parking and Town12 bicycle cases.
@@ -79,3 +79,5 @@ excludes `min_speed_infractions`, and their DS penalty is disabled upstream;
 the route has no other infractions. The complete native record is preserved.
 Private experiment paths are replaced with `${DRIVING_ROOT}`. Source archives,
 data shards, native libraries and model weights are not included in Git.
+
+Engineering result: 3/20 successes, SR 15.00%, Driving Score 31.2438; all requested scenarios initialized. [Independent audit](engineering-20/independent-audit.json) · [All episodes](engineering-20/episodes.json) · [Failed routes](engineering-20/failed-routes.json). This uses the disclosed parking and bicycle compatibility settings and is not an official full-split result.
