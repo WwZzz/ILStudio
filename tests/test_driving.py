@@ -99,8 +99,8 @@ def test_training_and_environment_share_text_and_geometry_contract():
     meta = MetaObs(**live)
     meta.to_batch()
     sample = MetaPolicy(None).normed_mobs_to_samples(meta)[0]
-    sample.update(waypoints=np.zeros((4, 2)), action_index=0, future_action_index=np.zeros(4),
-                  expert_features=np.zeros(1536), expert_value=0., future_features=np.zeros((4, 1536)))
+    sample['reasoning'] = {'supervision': dict(waypoints=np.zeros((4, 2)), action_index=0, future_action_index=np.zeros(4),
+                  expert_features=np.zeros(1536), expert_value=0., future_features=np.zeros((4, 1536)))}
     batch = get_data_collator(SimpleNamespace(is_training=True), {})([sample])
     assert batch['raw_lang'] == [live['raw_lang']]
     policy = MetaPolicy(SimpleNamespace(data_processor=get_data_processor(None, {}), data_collator=None))
@@ -132,16 +132,27 @@ def test_terminal_observation_and_negative_warmup_have_no_training_actions(tmp_p
     dataset = Bench2DriveDataset(dataset_dir=tmp_path, download=False)
     assert len(dataset) == 6
     sample = dataset[0]
-    assert sample['frame_id'] == '00000'
+    assert sample['reasoning']['frame_id'] == '00000'
     np.testing.assert_equal(sample['state'], [3])
     assert sample['raw_lang'].startswith('follow the lane\n')
     from vlastudio.policy.tcp_b2d.inputs import encode_task
     np.testing.assert_allclose(encode_task(sample['state'], sample['raw_lang'])[1:3], [30, 0], atol=1e-5)
-    np.testing.assert_allclose(sample['waypoints'], [[5, 0], [10, 0], [15, 0], [20, 0]], atol=1e-5)
-    np.testing.assert_equal(sample['future_features'][:, 0], [5, 10, 15, 20])
+    np.testing.assert_allclose(sample['reasoning']['supervision']['waypoints'], [[5, 0], [10, 0], [15, 0], [20, 0]], atol=1e-5)
+    np.testing.assert_equal(sample['reasoning']['supervision']['future_features'][:, 0], [5, 10, 15, 20])
     np.testing.assert_equal(sample['action'], [[0, 0, 1, 0]])
     assert sample['image'].shape == (1, 3, 256, 900)
     assert sample['image'][0, 0, 100, 0] == 30 and sample['image'][0, 0, 100, -1] == 90
+    assert set(sample) <= {'image', 'state', 'raw_lang', 'action', 'is_pad', 'reasoning', 'episode_id', 'timestamp', '__index__'}
+    from vlastudio.policy.tcp_b2d import get_data_collator
+    collate = get_data_collator(SimpleNamespace(is_training=True), {})
+    legacy = {**sample, **sample['reasoning']['supervision']}
+    legacy.pop('reasoning')
+    old, current = collate([legacy]), collate([sample])
+    for key in old:
+        if isinstance(old[key], torch.Tensor):
+            torch.testing.assert_close(current[key], old[key], rtol=0, atol=0)
+        else:
+            assert current[key] == old[key]
 
 
 def test_batchnorm_freeze_keeps_training_gradients_and_checkpoint_contract(tmp_path, monkeypatch):

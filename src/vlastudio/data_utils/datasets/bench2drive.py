@@ -129,8 +129,9 @@ class Bench2DriveDataset(Dataset):
         return {'image': compose_images(images)[None], **driving_observation(row[5], target, row[6]),
                 'action': np.asarray([[steer, throttle, brake, float(reverse)]], dtype=np.float32),
                 'is_pad': np.zeros(1, dtype=bool),
-                'waypoints': waypoints, 'action_index': action_index,
-                'future_action_index': experts[future, -1].astype(np.int64),
-                'expert_features': experts[frame, :-2].copy(), 'expert_value': experts[frame, -2].copy(),
-                'future_features': experts[future, :-2].copy(),
-                'episode_id': route.name, 'frame_id': identifiers[frame]}
+                'reasoning': {'image_type': 'rgb', 'frame_id': identifiers[frame], 'supervision': {
+                    'waypoints': waypoints, 'action_index': action_index,
+                    'future_action_index': experts[future, -1].astype(np.int64),
+                    'expert_features': experts[frame, :-2].copy(), 'expert_value': experts[frame, -2].copy(),
+                    'future_features': experts[future, :-2].copy()}},
+                'episode_id': route.name, 'timestamp': frame, '__index__': int(index)}

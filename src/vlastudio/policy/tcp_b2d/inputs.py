@@ -30,7 +30,11 @@ def encode_task(state, text):
 class TCPDataProcessor:
     def __call__(self, sample):
         # Keep public state intact; only this policy consumes the private vector.
-        return {**sample, 'tcp_state': encode_task(sample['state'], sample.get('raw_lang'))}
+        reasoning = sample.get('reasoning')
+        supervision = reasoning.get('supervision', {}) if isinstance(reasoning, dict) else {}
+        keys = ('waypoints', 'action_index', 'future_action_index', 'expert_features', 'expert_value', 'future_features')
+        targets = {key: supervision[key] for key in keys if key in supervision}
+        return {**sample, **targets, 'tcp_state': encode_task(sample['state'], sample.get('raw_lang'))}
 
 
 def network_state(state, raw_lang):

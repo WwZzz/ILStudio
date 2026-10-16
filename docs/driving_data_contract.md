@@ -42,13 +42,13 @@ For CARLA, the target here is from the supplied route and current localization.
 
 | Field | Meaning | Policy input? |
 |---|---|---|
-| `image`, optional `depth` / `pc` | Available sensor observations; dimensions, camera order and units are task-specific | Yes |
+| `image`, optional `depth` / `pc` | Sensor pixels or precomputed image features; `reasoning.image_type` distinguishes RGB/features | Yes |
 | `state` | Measured ego variables declared by the task; this preset supplies only `[speed_mps]` | Yes |
 | `raw_lang` | Complete task condition: original language where available; for driving, deterministic command text plus exact local route waypoint and coordinate convention | Yes |
-| `navigation` | Optional simulator protocol/candidate metadata, used by the VLN backends; driving does not require a duplicate target here | Backend-specific |
+| `reasoning.navigation` | Optional simulator protocol/candidate metadata, used by the VLN backends; driving does not require a duplicate target here | Backend-specific |
 | `action`, `is_pad` | Demonstrated action and padding mask in the declared control space | Training target |
-| Future waypoints, expert features/value/actions | Additional training supervision; not observations of the current world | Training targets only |
-| Episode/frame IDs | Alignment, split verification and provenance | Metadata |
+| `reasoning.supervision` | Future waypoints and expert features/value/actions; additional training supervision | Training targets only |
+| `episode_id`, `timestamp`, `reasoning.frame_id` | Alignment, split verification and provenance | Metadata |
 
 Future backends can declare additional task conditions such as route points or a
 mission goal, including their frames/units. They must not invent a local target
@@ -69,14 +69,20 @@ sample = {
         "Local route waypoint in meters (ego frame; x=forward, y=right): [12.0, -4.0]"),
     "action": [[-0.3, 0.3, 0.0, 0.0]],  # steer, throttle, brake, reverse
     "is_pad": [False],
-    "waypoints": float_array,           # (4, 2), future expert positions
-    "action_index": 12,                 # expert class, training label only
-    "future_action_index": int_array,   # (4,)
-    "expert_features": float_array,     # (1536,)
-    "expert_value": 0.5,
-    "future_features": float_array,     # (4, 1536)
+    "reasoning": {
+        "image_type": "rgb",
+        "frame_id": "00042",
+        "supervision": {
+            "waypoints": float_array,           # (4, 2), future expert positions
+            "action_index": 12,                 # expert class, training label only
+            "future_action_index": int_array,   # (4,)
+            "expert_features": float_array,     # (1536,)
+            "expert_value": 0.5,
+            "future_features": float_array,     # (4, 1536)
+        },
+    },
     "episode_id": "Scenario_TownXX_RouteID_WeatherID",
-    "frame_id": "00042",
+    "timestamp": 42,
 }
 ```
 
@@ -99,6 +105,8 @@ canonical command to one-hot, and builds a private `tcp_state` containing
 and target dimensions/finiteness. Coordinates are JSON numbers produced from
 float32 values without decimal truncation. The public `state_dim` is 1; the
 pretrained TCP network still receives 9 values and its weight shapes are unchanged.
+It also adapts `reasoning.supervision` into the private training-loss arguments;
+these auxiliary labels do not become extra top-level public dataset fields.
 TCP rejects unsupported free-form text or missing target declarations rather than
 guessing a command or silently using a zero target.
 Other language policies can consume `raw_lang` directly; this does not by itself

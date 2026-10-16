@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 
 import torch
+from vlastudio.utils.observations import is_feature_image
 
 
 class NavigationProcessor:
@@ -29,13 +30,16 @@ class NavigationProcessor:
         count = int(valid.sum())
         if not count or not valid[:count].all() or valid[count:].any():
             raise ValueError('Navigation windows require contiguous valid actions before padding')
-        if len(sample['frame_ids']) < count or not torch.equal(sample['frame_ids'][:count], sample['action_frame_ids'][:count]):
+        reasoning = sample['reasoning']
+        if len(reasoning['frame_ids']) < count or not torch.equal(reasoning['frame_ids'][:count], reasoning['action_frame_ids'][:count]):
             raise ValueError('These recurrent baselines require an observation for each expert action')
         return self._cma(sample, count) if self.kind == 'cma' else self._vlnbert(sample, count)
 
     def _cma(self, sample, count):
         model = self.model
-        supervision = sample['supervision']
+        if is_feature_image(sample):
+            raise ValueError('CMA requires RGB pixels and depth, not precomputed panorama features')
+        supervision = sample['reasoning']['supervision']
         initial = supervision['initial_distance_to_goal'][:count]
         row = {'raw_lang': sample['raw_lang'], 'episode_id': sample['episode_id'],
                'instruction': torch.tensor(model.instruction_tokenizer(sample['raw_lang'])),
@@ -59,10 +63,10 @@ class NavigationProcessor:
         return dict(row, rgb_features=torch.stack(rgb_features), depth_features=torch.stack(depth_features))
 
     def _vlnbert(self, sample, count):
-        if 'visual_features' not in sample:
+        if not is_feature_image(sample) or sample['image'].ndim != 3 or sample['image'].shape[1:] != (36, 2048):
             raise ValueError('Recurrent VLN-BERT training requires dataset visual_mode=features')
         features, angles, masks, actions = self.model.candidate_inputs(
-            sample['navigation'][:count], sample['state'][:count], sample['visual_features'][:count])
+            sample['reasoning']['navigation'][:count], sample['state'][:count], sample['image'][:count])
         targets = []
         for action, candidates in zip(sample['action'][:count].flatten().tolist(), actions):
             if action not in candidates:

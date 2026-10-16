@@ -32,12 +32,14 @@ class MetaObs:
     state_ee : np.ndarray = None
     state_joint: np.ndarray = None
     state_obj: np.ndarray = None
-    image: np.ndarray = None # (K, C, H, W)
+    image: np.ndarray = None # Pixels (K,C,H,W) or features; reasoning declares representation.
     depth: np.ndarray = None # (K, H, W)
     pc: np.array = None # (n, 3)
     raw_lang: str = ''
     timestep: int = -1
-    # Optional navigation contract and simulator candidates; a list when batched.
+    # Standard extension metadata; a list of dictionaries when batched.
+    reasoning: Optional[dict | list] = None
+    # Read compatibility for earlier navigation clients. New producers use reasoning.
     navigation: Optional[dict | list] = None
     
     def __getitem__(self, key):
@@ -50,6 +52,8 @@ class MetaObs:
                 setattr(self, k, self[k][np.newaxis, :])
         if isinstance(self.navigation, dict):
             self.navigation = [self.navigation]
+        if isinstance(self.reasoning, dict):
+            self.reasoning = [self.reasoning]
     
 META_OBS_KEYS = [f.name for f in fields(MetaObs)]
 META_ACT_KEYS = [f.name for f in fields(MetaAction)]
@@ -63,8 +67,8 @@ def observation_metadata_rows(mobs, attribute):
         if len(value) != count:
             raise ValueError(f'{attribute} must have one entry per observation')
         return value
-    if attribute == 'navigation' and value is not None and count != 1:
-        raise ValueError('Batched navigation metadata must be a list, one dictionary per observation')
+    if attribute in ('navigation', 'reasoning') and value is not None and count != 1:
+        raise ValueError(f'Batched {attribute} metadata must be a list, one dictionary per observation')
     return [value] * count
 
 
@@ -192,7 +196,7 @@ class MetaPolicy:
         
         for key in keys:
             values = [s[key] for s in samples]
-            if key == 'navigation':
+            if key in ('navigation', 'reasoning'):
                 batch[key] = values  # Preserve ragged candidates and missing rows.
                 continue
             
@@ -235,14 +239,21 @@ class MetaPolicy:
         
         samples = []
         navigation = observation_metadata_rows(normed_mobs, 'navigation')
+        reasoning = observation_metadata_rows(normed_mobs, 'reasoning')
         for i in range(batch_size):
             sample = {}
+            if reasoning[i] is not None:
+                sample['reasoning'] = reasoning[i]
             if normed_mobs.navigation is not None:
                 sample['navigation'] = navigation[i]
             
             # Image: keep original format, let policy's data_processor handle resize
             if normed_mobs.image is not None:
-                if normed_mobs.image.ndim == 5:  # (batch, cameras, C, H, W)
+                from vlastudio.utils.observations import is_feature_image
+                if is_feature_image(sample):
+                    image = normed_mobs.image
+                    sample['image'] = image[i] if image.ndim >= 3 else image
+                elif normed_mobs.image.ndim == 5:  # (batch, cameras, C, H, W)
                     sample['image'] = normed_mobs.image[i]  # (cameras, C, H, W)
                 elif normed_mobs.image.ndim == 4:  # (batch, C, H, W) or (cameras, C, H, W)
                     if batch_size > 1:
@@ -273,10 +284,12 @@ class MetaPolicy:
                 sample['timestamp'] = timestep[i] if timestep.ndim > 0 and timestep.shape[0] == batch_size else timestep
             # Construct observations, convert arrays to tensors
             if sample.get('image') is not None:
+                from vlastudio.utils.observations import is_feature_image
                 # Safety check: ensure images are uint8 with values in [0, 255]
                 from vlastudio.data_utils.utils import ensure_uint8_image
-                sample['image'] = ensure_uint8_image(sample['image'])   # (cameras, C, H, W)
-                sample['image'] = torch.from_numpy(sample['image'])  # (cameras, C, H, W)
+                if not is_feature_image(sample):
+                    sample['image'] = ensure_uint8_image(sample['image'])
+                sample['image'] = torch.as_tensor(sample['image'])
             else:
                 sample['image'] = None
             sample['state'] = torch.from_numpy(sample['state']).float() if 'state' in sample else None  # (state_dim,)

@@ -1,5 +1,9 @@
 # Navigation temporal data contract verification
 
+This archive predates the subsequent [standard image/reasoning interface](../reasoning-interface/README.md).
+Its original sample-layout receipts remain unchanged; the linked checks cover
+the current layout and preserve the same short-run weight hashes.
+
 The navigation datasets load temporal samples themselves, following FastWAM's
 `HDF5SequenceDataset`: full episodes or fixed windows, aligned actions/states,
 observation offsets and boundary padding masks. Public samples contain original

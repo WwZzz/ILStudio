@@ -119,7 +119,7 @@ class HabitatNavigationEnv(NavigationEpisode, MetaEnv):
                        image=obs['rgb'][None, ..., :3].transpose(0, 3, 1, 2).copy() if 'rgb' in obs else None,
                        depth=obs['depth'][None].copy() if 'depth' in obs else None,
                        raw_lang='Navigate to the point goal and stop.', timestep=self.steps,
-                       navigation=dict(self.navigation_options))
+                       reasoning={'navigation': dict(self.navigation_options), 'image_type': 'rgb'})
 
     def meta2act(self, action):
         return discrete_action(action, 4)
@@ -209,7 +209,7 @@ class HabitatLabEnv(MetaEnv):
                 raise ValueError('Configured instruction tokens are missing from this episode')
             navigation['instruction_tokens'] = list(tokens)
         return MetaObs(state=state, raw_lang=text, timestep=self.steps,
-                       navigation=navigation,
+                       reasoning={'navigation': navigation, 'image_type': 'rgb'},
                        image=np.asarray(obs['rgb'])[None, ..., :3].transpose(0, 3, 1, 2).copy() if 'rgb' in obs else None,
                        depth=depth[None] if depth is not None else None)
 

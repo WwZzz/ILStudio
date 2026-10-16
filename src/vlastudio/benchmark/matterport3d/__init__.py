@@ -194,12 +194,12 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
                 navigation['candidate_view_alignment'] = 'panoramic'
         return MetaObs(state=features, image=None if image is None else image[None].transpose(0, 3, 1, 2),
                        depth=depth, raw_lang=self.episode['instruction'], timestep=self.steps,
-                       navigation=navigation)
+                       reasoning={'navigation': navigation, 'image_type': 'rgb'})
 
     def _candidate_location(self, action, state):
         target = self.action_viewpoints[action]
         if getattr(self, 'candidate_view_alignment', 'preserve') == 'panoramic' and not any(
-                row['action_id'] == action for row in self.prev_obs.navigation['candidates']):
+                row['action_id'] == action for row in self.prev_obs.reasoning['navigation']['candidates']):
             raise ValueError('Selected viewpoint is absent from the latest panoramic candidates')
         for index, location in enumerate(state.navigableLocations[1:], 1):
             if location.viewpointId == target:
@@ -228,7 +228,7 @@ class MatterportNavigationEnv(NavigationEpisode, MetaEnv):
         if getattr(self, 'navigation_options', {}).get('action_mode') == 'candidate_viewpoint':
             if action:
                 if getattr(self, 'candidate_view_alignment', 'preserve') == 'panoramic':
-                    candidate = next(row for row in self.prev_obs.navigation['candidates'] if row['action_id'] == action)
+                    candidate = next(row for row in self.prev_obs.reasoning['navigation']['candidates'] if row['action_id'] == action)
                     view = candidate['source_view_index']
                     while self.env.getState()[0].viewIndex // 12 != view // 12:
                         current_level = self.env.getState()[0].viewIndex // 12

@@ -47,9 +47,18 @@ from that same route. Example values below are illustrative:
         "Local route waypoint in meters (ego frame; x=forward, y=right): [12.0, -4.0]"),
     "action": [[-0.3, 0.3, 0, 0]],    # expert steer/throttle/brake/reverse
     "is_pad": [False],
-    # Training-only: waypoints (4,2), action_index, future_action_index (4,),
-    # expert_features (1536,), expert_value, future_features (4,1536).
-    "episode_id": "Scenario_TownXX_RouteID_WeatherID", "frame_id": "00042",
+    "reasoning": {
+        "image_type": "rgb", "frame_id": "00042",
+        "supervision": {            # training labels only
+            "waypoints": future_positions,     # (4,2)
+            "action_index": expert_class,
+            "future_action_index": future_classes, # (4,)
+            "expert_features": features,       # (1536,)
+            "expert_value": value,
+            "future_features": future_features, # (4,1536)
+        },
+    },
+    "episode_id": "Scenario_TownXX_RouteID_WeatherID", "timestamp": 42,
 }
 ```
 

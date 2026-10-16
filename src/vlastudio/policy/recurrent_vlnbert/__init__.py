@@ -68,8 +68,8 @@ class RecurrentVLNBERT(nn.Module):
         mask = torch.arange(max(lengths), device=device)[None] < torch.tensor(lengths, device=device)[:, None]
         return torch.from_numpy(features).to(device), torch.from_numpy(heading_features).to(device), mask, actions
 
-    def navigate(self, language, hidden, language_mask, navigation, states):
-        candidates, angles, valid, action_ids = self.candidate_inputs(navigation, states)
+    def navigate(self, language, hidden, language_mask, navigation, states, panoramas=None):
+        candidates, angles, valid, action_ids = self.candidate_inputs(navigation, states, panoramas)
         sentence = torch.cat([hidden[:, None], language[:, 1:]], dim=1)
         self.navigator.vln_bert.config.directions = candidates.shape[1]
         hidden, logits = self.navigator('visual', sentence=sentence,
@@ -79,7 +79,9 @@ class RecurrentVLNBERT(nn.Module):
 
     @torch.inference_mode()
     def select_action(self, obs):
-        rows = obs['navigation']
+        metadata = obs.get('reasoning')
+        rows = [row['navigation'] for row in metadata] if metadata else obs['navigation']
+        panoramas = obs.get('image') if metadata and all(row.get('image_type') == 'features' for row in metadata) else None
         reset = torch.as_tensor(obs['timestamp']).reshape(-1) == 0
         device = next(self.parameters()).device
         if self.hidden is None or self.hidden.shape[0] != len(rows):
@@ -89,7 +91,7 @@ class RecurrentVLNBERT(nn.Module):
             hidden, language, mask = self.encode_instructions([obs['raw_lang'][i] for i in indices])
             self.hidden[indices], self.language[indices], self.language_mask[indices] = hidden, language, mask
         self.hidden, logits, action_ids = self.navigate(self.language, self.hidden,
-            self.language_mask, rows, obs['state'])
+            self.language_mask, rows, obs['state'], panoramas)
         selected = logits.argmax(-1).tolist()
         return torch.tensor([ids[index] for ids, index in zip(action_ids, selected)],
                             device=device, dtype=torch.float32).reshape(-1, 1, 1)

@@ -111,15 +111,15 @@ def test_distance_uses_snapshot_before_native_state_mutation(monkeypatch, tmp_pa
 def test_candidates_are_opt_in_and_do_not_choose_an_action(monkeypatch, tmp_path):
     env = make_matterport(monkeypatch, tmp_path)
     obs = env.reset()
-    assert obs.navigation['candidate_source'] == 'none'
-    assert 'candidates' not in obs.navigation
+    assert obs.reasoning['navigation']['candidate_source'] == 'none'
+    assert 'candidates' not in obs.reasoning['navigation']
     env.close()
     env = make_matterport(monkeypatch, tmp_path, candidate_source='simulator')
     obs = env.reset()
-    assert len(obs.navigation['candidates']) == 1
+    assert len(obs.reasoning['navigation']['candidates']) == 1
     assert env.env.settings['setRestrictedNavigation'] == (True,)
     assert env.env.actions == []
-    assert set(obs.navigation['candidates'][0]) == {
+    assert set(obs.reasoning['navigation']['candidates'][0]) == {
         'action_id', 'viewpoint_id', 'relative_heading', 'relative_elevation', 'distance'}
     env.step(1)  # Still the original primitive FORWARD action.
     assert env.env.current == 'b'
@@ -130,7 +130,7 @@ def test_stable_candidate_ids_survive_reordering_and_validate_current_reachabili
         ctrl_type='candidate_viewpoint', candidate_source='simulator', candidate_scope='all_neighbors')
     obs = env.reset()
     assert env.env.settings['setRestrictedNavigation'] == (False,)
-    ids = {c['viewpoint_id']: c['action_id'] for c in obs.navigation['candidates']}
+    ids = {c['viewpoint_id']: c['action_id'] for c in obs.reasoning['navigation']['candidates']}
     assert len(ids) == 2 and env.env.actions == []
     with pytest.raises(ValueError, match='ctrl_type=candidate_viewpoint'):
         env.step(MetaAction(ctrl_space='navigation', ctrl_type='discrete', action=np.array([ids['c']])))

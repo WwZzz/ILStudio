@@ -49,7 +49,7 @@ def _plain(value):
 
 
 def _frame(observation, action):
-    navigation = dict(observation.get('navigation') or {})
+    navigation = dict((observation.get('reasoning') or {}).get('navigation') or observation.get('navigation') or {})
     # Original annotation tokens are not a public model input contract.
     navigation.pop('instruction_tokens', None)
     sample = {key: observation[key] for key in ['image', 'depth', 'state', 'raw_lang']
@@ -141,26 +141,27 @@ class _NavigationDataset(Dataset):
         actions = [frames[min(int(i), length-1)] for i in action_indices]
         images = [frames[min(int(i), length-1)] for i in image_indices]
         first = actions[0]
-        sample = dict(raw_lang=first['raw_lang'], reasoning='',
+        reasoning = dict(image_type='rgb',
+                         image_is_pad=torch.from_numpy(image_indices >= length),
+                         navigation=[row['navigation'] for row in images],
+                         frame_ids=torch.from_numpy(np.minimum(image_indices, length-1)),
+                         action_frame_ids=torch.from_numpy(np.minimum(action_indices, length-1)))
+        sample = dict(raw_lang=first['raw_lang'], reasoning=reasoning,
                       action=torch.cat([row['action'] for row in actions]),
                       state=torch.stack([row['state'] for row in actions]).float(),
                       is_pad=torch.from_numpy(action_indices >= length),
-                      image_is_pad=torch.from_numpy(image_indices >= length),
-                      navigation=[row['navigation'] for row in images],
-                      frame_ids=torch.from_numpy(np.minimum(image_indices, length-1)),
-                      action_frame_ids=torch.from_numpy(np.minimum(action_indices, length-1)),
                       timestamp=start, episode_id=first['episode_id'], __index__=int(index))
         for key in ('image', 'depth'):
             if key in first:
                 values = torch.stack([row[key] for row in images], dim=1)  # K,T,..., like HDF5SequenceDataset
                 sample[key] = values[:, 0] if len(images) == 1 else values
         if 'supervision' in first:
-            sample['supervision'] = {key: torch.tensor([row['supervision'][key] for row in actions])
+            reasoning['supervision'] = {key: torch.tensor([row['supervision'][key] for row in actions])
                                      for key in first['supervision']}
         if getattr(self, 'visual_mode', None) == 'features':
-            sample['visual_features'] = torch.stack([torch.from_numpy(self.feature_store.read(
+            sample['image'] = torch.stack([torch.from_numpy(self.feature_store.read(
                 row['navigation']['scan_id'], row['navigation']['viewpoint_id'])) for row in images])
-            sample['visual_feature_source'] = self.feature_store.signature
+            reasoning.update(image_type='features', visual_feature_source=self.feature_store.signature)
         return sample
 
     def close(self):
@@ -221,7 +222,7 @@ class R2RDataset(_NavigationDataset):
         env.index = self._indices[episode['episode_id']]
         observation = asdict(env.reset())
         for step, viewpoint in enumerate(episode['path']):
-            navigation = observation['navigation']
+            navigation = observation['reasoning']['navigation']
             if navigation['viewpoint_id'] != viewpoint:
                 raise RuntimeError('Replay left the annotated R2R reference path')
             if step == len(episode['path'])-1:

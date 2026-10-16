@@ -350,7 +350,7 @@ def organize_obs(obs: np.ndarray):
     all_keys = list(all_obs_dict[0].keys())
     res = {k:[vi[k] for vi in all_obs_dict] for k in all_keys}
     for k in res:
-        if k == 'navigation':
+        if k in ('navigation', 'reasoning'):
             if all(value is None for value in res[k]):
                 res[k] = None
             continue

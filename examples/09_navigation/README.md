@@ -31,6 +31,10 @@ There is no supplied numeric local destination point in these two VLN examples.
 
 Both expose original text as `raw_lang`. Datasets own multi-frame loading,
 temporal alignment and raw data caches, following the FastWAM sequence dataset.
+RGB pixels and precomputed visual features both use `image`;
+`reasoning.image_type` distinguishes their representations. Extra metadata,
+including candidates, source provenance, frame alignment and auxiliary supervision,
+lives in the reserved `reasoning` dictionary. Depth remains a separate modality.
 Policy processors convert these samples into model inputs; the shared data task
 cache can store their outputs. Candidate lists in MatterSim
 describe reachable neighbors; they do not identify the correct next neighbor.

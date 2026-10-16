@@ -34,6 +34,12 @@ to select installed scan IDs. Both support `sample_mode: episode` (full
 trajectories) or `sample_mode: window` with `chunk_size` and `image_offsets`.
 As with FastWAM, datasets load and align temporal observations/actions and
 return padding masks. Model processors do not construct sequences.
+The top-level contract uses `image`, `depth`, `state`, `action`, `is_pad`,
+`raw_lang`, `reasoning` and standard sample identifiers. Precomputed panorama
+features use `image` as float32 `[T,36,2048]`, with `reasoning.image_type: features`;
+RGB uses `reasoning.image_type: rgb`. Candidate metadata, feature provenance,
+observation masks/frame IDs and auxiliary training supervision stay in `reasoning`.
+Pixel conversion, augmentation and transport compression preserve feature tensors.
 See [exact sample layouts](../examples/09_navigation/README.md#what-is-the-navigation-data).
 
 Raw RGB/depth replay caches and published panorama feature stores are data-layer
@@ -75,5 +81,5 @@ training without a separate collection step. Optional diagnostics and PointNav
 scripts remain under `scripts/navigation`, outside the example.
 
 [Example 09](../examples/09_navigation/README.md) ·
-[Temporal data contract verification](evidence/navigation/data-contract/README.md) ·
+[Current image/reasoning verification](evidence/navigation/reasoning-interface/README.md) ·
 [Standard-interface training and full benchmark evidence](evidence/navigation/standard-interface/README.md)

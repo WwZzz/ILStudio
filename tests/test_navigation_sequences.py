@@ -38,8 +38,9 @@ def test_dataset_owns_whole_episode_sampling_and_raw_cache(tmp_path):
     assert sample['action'].tolist() == [[1], [2], [0]]
     assert sample['image'].dtype == torch.uint8
     assert not sample['is_pad'].any()
-    assert sample['frame_ids'].tolist() == sample['action_frame_ids'].tolist() == [0, 1, 2]
-    assert sample['navigation'][2]['viewpoint_id'] == 'a-2'
+    assert sample['reasoning']['frame_ids'].tolist() == sample['reasoning']['action_frame_ids'].tolist() == [0, 1, 2]
+    assert sample['reasoning']['navigation'][2]['viewpoint_id'] == 'a-2'
+    assert set(sample) <= {'image', 'depth', 'state', 'action', 'is_pad', 'raw_lang', 'reasoning', 'timestamp', 'episode_id', '__index__'}
     assert {'instruction', 'rgb_features', 'candidate_features', 'labels'}.isdisjoint(sample)
     assert not hasattr(dataset, 'model')
     dataset[0]
@@ -51,10 +52,10 @@ def test_window_sampling_clamps_without_crossing_episodes(tmp_path):
     dataset = ReplayFixture(tmp_path, 'window', 4)
     sample = dataset[2]
     assert len(dataset) == 5
-    assert sample['frame_ids'].tolist() == [2, 2, 2, 2]
+    assert sample['reasoning']['frame_ids'].tolist() == [2, 2, 2, 2]
     assert sample['is_pad'].tolist() == [False, True, True, True]
-    assert torch.equal(sample['is_pad'], sample['image_is_pad'])
-    assert [row['viewpoint_id'] for row in sample['navigation']] == ['a-2']*4
+    assert torch.equal(sample['is_pad'], sample['reasoning']['image_is_pad'])
+    assert [row['viewpoint_id'] for row in sample['reasoning']['navigation']] == ['a-2']*4
     assert sample['action'].tolist() == [[0]]*4
     assert dataset[3]['episode_id'] == 'b'
 
@@ -62,8 +63,8 @@ def test_window_sampling_clamps_without_crossing_episodes(tmp_path):
 def test_fastwam_style_image_offsets_and_single_frame_shape(tmp_path):
     sample = ReplayFixture(tmp_path, 'window', 3, [0, 2])[1]
     assert sample['image'].shape == (1, 2, 3, 4, 5)
-    assert sample['frame_ids'].tolist() == [1, 2]
-    assert sample['image_is_pad'].tolist() == [False, True]
+    assert sample['reasoning']['frame_ids'].tolist() == [1, 2]
+    assert sample['reasoning']['image_is_pad'].tolist() == [False, True]
     assert sample['is_pad'].tolist() == [False, False, True]
     single = ReplayFixture(tmp_path, 'window')[0]
     assert single['image'].shape == (1, 3, 4, 5)
@@ -88,7 +89,8 @@ def test_model_processor_trims_padding_without_resampling(tmp_path):
             return torch.zeros(2, 3, 2176), torch.zeros(2, 128), torch.ones(2, 3, dtype=torch.bool), [[17, 1, 0], [17, 0]]
 
     sample = ReplayFixture(tmp_path, 'window', 4)[1]
-    sample['visual_features'] = torch.zeros(4, 36, 2048)
+    sample['image'] = torch.zeros(4, 36, 2048)
+    sample['reasoning']['image_type'] = 'features'
     sample['action'][:2] = torch.tensor([[1], [0]])
     processor = NavigationProcessor(Model(), 'vlnbert')
     encoded = processor(sample)
@@ -96,6 +98,85 @@ def test_model_processor_trims_padding_without_resampling(tmp_path):
     assert encoded['action'].shape == (2, 1)
     assert not hasattr(processor, 'adapt_dataset')
     assert not hasattr(processor, 'feature_cache')
+
+
+@pytest.mark.parametrize('name,args', [
+    ('ImageToFloat', ()), ('ImageToUint8', ()), ('ImageResizeTransform', (8,)),
+    ('ImageColorJitterTransform', ()), ('ImageRandomCropTransform', (8,)),
+    ('ImagePadTransform', (2,)), ('ImageRotateTransform', (15,)),
+    ('ImageGaussianBlurTransform', (3,)), ('ImageExpander', (4,)),
+])
+def test_pixel_transforms_preserve_feature_image_values(name, args):
+    from vlastudio.data_utils import transform
+    image = torch.linspace(-2, 512, 36*2048).reshape(1, 36, 2048)
+    sample = {'image': image.clone(), 'reasoning': {'image_type': 'features'}}
+    result = getattr(transform, name)(*args)(sample)
+    torch.testing.assert_close(result['image'], image, rtol=0, atol=0)
+    assert result['image'].dtype == torch.float32
+
+
+@pytest.mark.parametrize('transport', ['shm', 'fastapi'])
+def test_feature_image_and_reasoning_survive_standard_meta_policy_and_transport(transport):
+    from dataclasses import asdict
+    import uuid
+    from vlastudio.benchmark.base import MetaObs, MetaPolicy, dict2meta
+    from vlastudio.benchmark.utils import organize_obs
+    from vlastudio.data_utils.normalize import Identity
+    from vlastudio.deploy.shm_utils import SharedMemoryChannel
+    from vlastudio.deploy.comm.shm.server import SHMPolicyServer
+    server = SHMPolicyServer
+    if transport == 'fastapi':
+        pytest.importorskip('fastapi')
+        pytest.importorskip('uvicorn')
+        from vlastudio.deploy.comm.fastapi.server import BatchedInferenceManager
+        server = BatchedInferenceManager
+    features = np.linspace(-2, 512, 36*2048, dtype=np.float32).reshape(36, 2048)
+    observations = [MetaObs(state=np.zeros(3, np.float32), image=features.copy(), raw_lang='Go left.',
+        reasoning={'image_type': 'features', 'visual_feature_source': 'fixture',
+                   'navigation': {'candidates': [{'action_id': i} for i in range(n)]}}) for n in [2, 0]]
+    for observation in observations:
+        observation.to_batch()
+    batched = server._batch_metaobs(server.__new__(server), observations)
+    assert [len(r['navigation']['candidates']) for r in batched.reasoning] == [2, 0]
+    name = 'vla_feature_reasoning_'+uuid.uuid4().hex
+    writer = SharedMemoryChannel(name, max_size_mb=2, is_writer=True)
+    reader = SharedMemoryChannel(name, is_writer=False)
+    class Policy:
+        def select_action(self, obs):
+            torch.testing.assert_close(obs['image'], torch.tensor(np.stack([features]*2)), rtol=0, atol=0)
+            assert obs['reasoning'] == batched.reasoning
+            return torch.zeros(2, 1, 1)
+    normalizer = Identity(ctrl_space='navigation', ctrl_type='candidate_viewpoint')
+    policy = MetaPolicy(Policy(), state_normalizer=normalizer, action_normalizer=normalizer,
+                        ctrl_space='navigation', ctrl_type='candidate_viewpoint')
+    try:
+        writer.write(asdict(batched))
+        decoded = dict2meta(reader.read(copy=True))
+        assert decoded.reasoning == batched.reasoning
+        assert len(policy.inference(decoded)[0]) == 2
+    finally:
+        reader.destroy()
+        writer.destroy()
+
+
+@pytest.mark.parametrize('batched', [False, True])
+def test_feature_image_http_codec_uses_lossless_array_even_when_jpeg_requested(batched):
+    pytest.importorskip('fastapi')
+    pytest.importorskip('uvicorn')
+    from vlastudio.benchmark.base import MetaObs
+    from vlastudio.deploy.comm.fastapi.client import _meta_obs_to_jsonable
+    from vlastudio.deploy.comm.fastapi.server import _payload_to_metaobs
+    from vlastudio.deploy.comm.fastapi.codec import prepare_meta_obs_for_remote
+    features = np.linspace(-2, 512, 36*2048, dtype=np.float32).reshape(36, 2048)
+    obs = MetaObs(state=np.zeros(3, np.float32), image=features,
+                  reasoning={'image_type': 'features', 'visual_feature_source': 'fixture'})
+    if batched:
+        obs.to_batch()
+    prepared = prepare_meta_obs_for_remote(obs)
+    encoded = _meta_obs_to_jsonable(prepared, image_encoding='jpeg', jpeg_quality=80)
+    decoded = _payload_to_metaobs(encoded)
+    np.testing.assert_array_equal(decoded.image, obs.image)
+    assert decoded.image.dtype == np.float32 and decoded.reasoning == obs.reasoning
 
 
 def test_tokenizer_preserves_annotation_hyphens_and_punctuation():

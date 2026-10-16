@@ -29,6 +29,7 @@ import urllib3
 from loguru import logger
 
 from vlastudio.benchmark.base import MetaObs
+from vlastudio.utils.observations import is_feature_image
 
 from ..base import BaseClient
 from .codec import (
@@ -77,7 +78,7 @@ def _meta_obs_to_jsonable(
     d = asdict(meta_obs)
     image = d.get("image")
     if image is not None and isinstance(image, np.ndarray) and image.dtype != object:
-        if image_encoding == "jpeg":
+        if image_encoding == "jpeg" and not is_feature_image(d):
             d["image"] = encode_images_jpeg(image, quality=jpeg_quality)
         else:
             d["image"] = encode_ndarray(np.ascontiguousarray(image))

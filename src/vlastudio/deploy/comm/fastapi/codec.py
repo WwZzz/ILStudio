@@ -164,7 +164,8 @@ def prepare_meta_obs_for_remote(
         state = np.asarray(state, dtype=np.float32).copy()
 
     image = meta_obs.image
-    if image is not None and image_size is not None:
+    from vlastudio.utils.observations import is_feature_image
+    if image is not None and image_size is not None and not is_feature_image({'reasoning': meta_obs.reasoning}):
         image = letterbox_images(image, image_size=image_size, pad_value=pad_value)
 
     return MetaObs(
@@ -178,6 +179,7 @@ def prepare_meta_obs_for_remote(
         raw_lang=meta_obs.raw_lang,
         timestep=meta_obs.timestep,
         navigation=meta_obs.navigation,
+        reasoning=meta_obs.reasoning,
     )
 
 

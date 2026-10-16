@@ -52,21 +52,26 @@ Illustrative sample, with arrays shown symbolically:
 ```python
 {
     "raw_lang": "Walk through the door and stop beside the stairs.",
-    "visual_features": panoramas,    # float32 (T,36,2048), unmodified source data
-    "visual_feature_source": "places365-resnet152-36x2048-v1",
-    "navigation": [                 # one metadata record per observation
-        {"scan_id": "scan", "viewpoint_id": "viewpoint",
-         "candidate_view_alignment": "panoramic",
-         "candidates": [            # observable neighbors, not teacher choices
-             {"action_id": 17, "viewpoint_id": "neighbor",
-              "source_view_index": 12, "relative_heading": 0.2,
-              "elevation": 0.0},
-         ]},  # ... remaining timesteps
-    ],
+    "image": panoramas,             # float32 (T,36,2048), published image features
     "action": [[17], [23], [0]],      # example simulator IDs; 0 is STOP
     "state": states,                 # (T,3): heading, elevation, native visible degree
     "is_pad": [False] * T,
-    "image_is_pad": [False] * T,
+    "reasoning": {                  # reserved extension metadata
+        "image_type": "features",   # pixels use "rgb"
+        "visual_feature_source": "places365-resnet152-36x2048-v1",
+        "image_is_pad": [False] * T,
+        "frame_ids": [0, 1, 2],
+        "action_frame_ids": [0, 1, 2],
+        "navigation": [             # one metadata record per observation
+            {"scan_id": "scan", "viewpoint_id": "viewpoint",
+             "candidate_view_alignment": "panoramic",
+             "candidates": [        # observable neighbors, not teacher choices
+                 {"action_id": 17, "viewpoint_id": "neighbor",
+                  "source_view_index": 12, "relative_heading": 0.2,
+                  "elevation": 0.0},
+             ]},  # ... remaining timesteps
+        ],
+    },
     "episode_id": "example_path_instruction",
 }
 ```
@@ -77,11 +82,14 @@ adds the model's 128-D angle encoding, appends STOP and creates padding masks.
 It maps expert simulator action IDs to indices in that per-step candidate list.
 Movement action IDs are stable within a scan and are not candidate list positions.
 Original 2048-D source features remain data; their download, indexing and mmap
-storage belong to the data layer.
+storage belong to the data layer. Both pixels and precomputed image features use
+the standard `image` field. The processor reads `reasoning.image_type` to
+distinguish them; pixel transforms and transport JPEG/resize leave feature values
+unchanged, including negative values and values above 255.
 
 For rendered observations choose `visual_mode: rgb` and provide authorized MP3D
 skybox assets in `dataset_path`; the dataset then returns uint8 `image`
-`(1,T,3,H,W)` instead of `visual_features`. VLN-BERT's published baseline uses
+`(1,T,3,H,W)` and `reasoning.image_type: rgb`. VLN-BERT's published baseline uses
 the feature mode; a pixel-based policy can use the RGB mode.
 
 Fixed windows use `sample_mode: window`, `chunk_size: 32`, with optional
@@ -94,7 +102,9 @@ Its default is full episodes to retain history from reset. For one RGB frame,
 At evaluation, the environment supplies original text, current viewpoint identity
 and candidate metadata (action ID, neighbor identity, relative angle/distance and
 source panorama view). A shared data reader supplies published panorama features;
-the policy adapts them and tokenizes text.
+the policy adapts them and tokenizes text. Live candidate metadata is in
+`reasoning.navigation`; temporal dataset samples contain a list there, while
+each live observation contains one dictionary.
 `candidate_source: simulator`, `candidate_scope: all_neighbors` and
 `candidate_view_alignment: panoramic` make this contract explicit in the config.
 Candidates are reachable neighbors, not teacher choices. Reference paths, goal

@@ -11,6 +11,7 @@ import torch.distributed as dist
 from PIL import Image
 from torch.utils.data import IterableDataset
 from .normalize import NORMTYPE2CLASS, save_norm_meta_to_json
+from vlastudio.utils.observations import is_feature_image
 
 class RatioSplittingIterableDataset(IterableDataset):
     """
@@ -111,7 +112,12 @@ def save_example_data(train_data, output_dir):
         
         # Save images - save each camera view separately, preserving original resolution
         # Match testing phase format: save as camera_{i}.png without resizing
-        if 'image' in sample and sample['image'] is not None:
+        if sample.get('image') is not None and is_feature_image(sample):
+            image_data = sample['image']
+            if isinstance(image_data, torch.Tensor):
+                image_data = image_data.cpu().numpy()
+            np.save(os.path.join(examples_dir, 'image_features.npy'), image_data)
+        if sample.get('image') is not None and not is_feature_image(sample):
             image_data = sample['image']
             if image_data.ndim == 5:
                 image_data = image_data[:, 0]  # Preview the current frame of each camera.
@@ -209,7 +215,8 @@ def save_example_data(train_data, output_dir):
                 reasoning_file = os.path.join(examples_dir, 'reasoning.json')
                 with open(reasoning_file, 'w', encoding='utf-8') as f:
                     if isinstance(reasoning, dict):
-                        json.dump(reasoning, f, indent=2, ensure_ascii=False)
+                        json.dump(reasoning, f, indent=2, ensure_ascii=False,
+                                  default=lambda value: value.tolist() if isinstance(value, (torch.Tensor, np.ndarray, np.generic)) else str(value))
                     else:
                         json.dump({'reasoning': str(reasoning)}, f, indent=2, ensure_ascii=False)
                 logger.info(f"Saved reasoning to: {reasoning_file}")
